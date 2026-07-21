@@ -17,8 +17,19 @@ import { processEventQueue } from "../core/simulation/eventQueue";
 import type { SaveSlotId } from "../core/saves/types";
 import { createStableEntityId } from "../core/ids/entityId";
 import { APP_VERSION } from "../core/version/versionService";
-import type { PlayerState } from "../gameplay/player/demoPlayer";
 import { defaultUiSettings, type UiSettings } from "../ui/theme/settings";
+import { FOOD_CATALOG, getFoodProduct } from "../data/products/foodCatalog";
+import { canPrepare, getFoodFreshness, getFreshFoodUnits } from "../gameplay/food/foodSystem";
+import { getTravelOptions, isLocationOpen } from "../gameplay/travel/travelSystem";
+import {
+  buyFoodAtCurrentLocation,
+  discardSpoiled,
+  eatFoodFromStorage,
+  orderFoodToHome,
+  progressLife,
+  sleepAtHome,
+  travelToLocation
+} from "../gameplay/life/lifeSimulation";
 import { Icon, type IconName } from "../ui/components/Icons";
 import { Meter } from "../ui/components/Meter";
 import { Portrait } from "../ui/components/Portrait";
@@ -36,8 +47,8 @@ import {
 const UI_SETTINGS_KEY = "neon-life/ui-settings/v1";
 
 type NavId = "life" | "city" | "people" | "work" | "network" | "inventory" | "health" | "home" | "messages" | "archive";
-type WindowId = "profile" | "contact" | "messages" | "vacancy" | "local" | "journal" | "settings" | "diagnostics";
-type MobileLifeTab = "now" | "plan" | "feed" | "log";
+type WindowId = "profile" | "contact" | "messages" | "vacancy" | "local" | "journal" | "food" | "places" | "home" | "settings" | "diagnostics";
+type MobileLifeTab = "now" | "plan" | "food" | "log";
 
 interface ActionDefinition {
   id: string;
@@ -53,6 +64,8 @@ interface ActionDefinition {
   fatigueDelta?: number;
   stressDelta?: number;
   hungerDelta?: number;
+  healthDelta?: number;
+  targetLocationId?: string;
 }
 
 const navItems: Array<{ id: NavId; label: string; icon: IconName; badge?: string }> = [
@@ -70,66 +83,82 @@ const navItems: Array<{ id: NavId; label: string; icon: IconName; badge?: string
 
 function createQuickActions(session: GameSession): ActionDefinition[] {
   const contact = session.primaryContact;
-  const workshop = session.world.locations.find((location) => location.type === "workshop")?.name ?? "VECTRA SERVICE NODE";
+  const currentLocation = session.world.locations.find((location) => location.id === session.life.currentLocationId);
+  const workshop = session.world.locations.find((location) => location.type === "workshop");
+  const market = session.world.locations.find((location) => location.type === "market");
+  const housing = session.world.locations.find((location) => location.id === session.life.housing.locationId);
   const district = session.world.districts.find((item) => item.id === session.world.activeDistrictId) ?? session.world.districts[0];
-  return [
-    {
-      id: "travel-vectra",
-      title: `Ехать в ${workshop}`,
+  const options: ActionDefinition[] = [];
+
+  if (workshop && currentLocation?.id !== workshop.id) {
+    options.push({
+      id: "travel-workshop",
+      title: `Ехать в ${workshop.name}`,
       code: "MOVE/TRANSIT",
-      duration: 35,
+      duration: 35 + session.district.transitDelayMinutes,
       cost: 12,
-      location: `${session.world.districts[1]?.name ?? "FOUNDRY ARC"} / ${workshop}`,
+      location: `${session.world.districts.find((item) => item.id === workshop.districtId)?.name ?? "INDUSTRIAL"} / ${workshop.name}`,
       risk: "MED",
       category: "personal",
-      result: `Ты добрался до ${workshop}. ${contact.name} оставил временный пропуск на сервисной стойке.`,
-      activityAfter: `У входа в ${workshop}`,
+      result: `Ты добрался до ${workshop.name}. ${contact.name} оставил временный пропуск на сервисной стойке.`,
+      activityAfter: `На месте: ${workshop.name}`,
       fatigueDelta: 3,
       stressDelta: 1,
-      hungerDelta: 2
-    },
-    {
-      id: "reply-contact",
-      title: `Ответить: ${contact.name}`,
-      code: "COMMS/CONTACT",
-      duration: 5,
-      cost: 0,
-      location: `${district.name} / REMOTE`,
+      hungerDelta: 2,
+      targetLocationId: workshop.id
+    });
+  }
+
+  if (market && currentLocation?.id !== market.id) {
+    options.push({
+      id: "travel-market",
+      title: `Ехать на ${market.name}`,
+      code: "MOVE/SUPPLY",
+      duration: 14 + Math.ceil(session.district.transitDelayMinutes / 2),
+      cost: 4,
+      location: `${district.name} / ${market.name}`,
       risk: "LOW",
-      category: "contact",
-      result: `${contact.name} подтвердил встречу в 23:20 и попросил использовать сервисный вход.`,
-      activityAfter: "Ожидание у транспортного узла",
-      stressDelta: -2
-    },
-    {
-      id: "buy-meal",
-      title: "Купить горячую еду",
-      code: "LIFE/SUPPLY",
-      duration: 20,
-      cost: 28,
-      location: `${district.code} / NIGHT KITCHEN`,
-      risk: "LOW",
-      category: "health",
-      result: "Голод снижен. Качество еды низкое, состояние стабилизировалось.",
-      activityAfter: "Возвращение к транспортному узлу",
-      fatigueDelta: -2,
-      hungerDelta: -24
-    },
-    {
-      id: "scan-vacancies",
-      title: "Проверить ночные вакансии",
-      code: "WORK/SEARCH",
-      duration: 30,
-      cost: 0,
-      location: `${session.world.city.code} / EMPLOYMENT NODE`,
-      risk: "LOW",
-      category: "work",
-      result: "Найдены две вакансии: помощник техника и ночной сортировщик грузов.",
-      activityAfter: "Просмотр городской сети",
+      category: "personal",
+      result: `Ты прибыл на ${market.name}. Доступен локальный ассортимент продуктов.`,
+      activityAfter: `Покупки: ${market.name}`,
       fatigueDelta: 1,
-      stressDelta: 1
-    }
-  ];
+      hungerDelta: 1,
+      targetLocationId: market.id
+    });
+  }
+
+  options.push({
+    id: "reply-contact",
+    title: `Ответить: ${contact.name}`,
+    code: "COMMS/CONTACT",
+    duration: 5,
+    cost: 0,
+    location: `${district.name} / REMOTE`,
+    risk: "LOW",
+    category: "contact",
+    result: `${contact.name} подтвердил встречу и попросил использовать сервисный вход.`,
+    activityAfter: currentLocation ? `На месте: ${currentLocation.name}` : "Городская сеть",
+    stressDelta: -2
+  });
+
+  if (housing && currentLocation?.id !== housing.id) {
+    options.push({
+      id: "return-home",
+      title: `Вернуться в ${housing.name}`,
+      code: "MOVE/HOME",
+      duration: 16 + Math.ceil(session.district.transitDelayMinutes / 2),
+      cost: 4,
+      location: `${session.world.districts[0]?.name} / ${housing.name}`,
+      risk: "LOW",
+      category: "personal",
+      result: `Ты вернулся в жилой блок ${housing.name}.`,
+      activityAfter: `В жилом блоке ${housing.name}`,
+      fatigueDelta: 1,
+      targetLocationId: housing.id
+    });
+  }
+
+  return options.slice(0, 4);
 }
 
 function createPlans(session: GameSession) {
@@ -151,18 +180,12 @@ const windowLabels: Record<WindowId, string> = {
   vacancy: "VACANCY",
   local: "LOCAL CHANNEL",
   journal: "EVENT LOG",
+  food: "FOOD STORAGE / SUPPLY",
+  places: "CITY ROUTES",
+  home: "HOUSING UNIT",
   settings: "SYSTEM SETTINGS",
   diagnostics: "DIAGNOSTICS"
 };
-
-function clamp(value: number): number {
-  return Math.max(0, Math.min(100, value));
-}
-
-function createEventId(seed: string, timestamp: number, category: EventCategory, source: string, sequence: number): string {
-  return createStableEntityId("event", `${seed}:${timestamp}:${category}:${source}:${sequence}`);
-}
-
 
 export default function App() {
   const [settings, setSettings] = useState<UiSettings>(() => readLocal(UI_SETTINGS_KEY, defaultUiSettings));
@@ -192,85 +215,54 @@ export default function App() {
     settings.highContrast ? "high-contrast" : ""
   ].filter(Boolean).join(" ");
 
-  function addEvent(event: Omit<WorldEvent, "id">): void {
-    setSession((current) => ({
-      ...current,
-      events: [{
-        ...event,
-        id: createEventId(current.world.meta.seed, event.timestamp, event.category, event.title, current.events.length)
-      }, ...current.events].slice(0, 80)
+  function advance(minutes: number, source = "Ручное продвижение времени"): void {
+    setSession((current) => progressLife(current, minutes, {
+      category: minutes >= 60 ? "system" : undefined,
+      title: minutes >= 60 ? `${source}: +${minutes} мин.` : undefined,
+      activity: source
     }));
   }
 
-  function advance(minutes: number, source = "Ручное продвижение времени"): void {
-    setSession((current) => {
-      const nextTimestamp = advanceGameTime(current.timestamp, minutes);
-      const pulse = advanceDistrictPulse(current.district, nextTimestamp);
-      const queued = processEventQueue(current, nextTimestamp);
-      const timeEvent: WorldEvent[] = minutes >= 60 ? [{
-        id: createEventId(current.world.meta.seed, nextTimestamp, "system", source, current.events.length),
-        timestamp: nextTimestamp,
-        category: "system",
-        title: `${source}: +${minutes} мин.`,
-        importance: 1
-      }] : [];
-
-      return {
-        ...current,
-        timestamp: nextTimestamp,
-        world: { ...current.world, meta: { ...current.world.meta, currentTimestamp: nextTimestamp } },
-        district: pulse.state,
-        eventQueue: queued.queue,
-        player: {
-          ...current.player,
-          condition: {
-            ...current.player.condition,
-            fatigue: clamp(current.player.condition.fatigue + Math.max(1, Math.round(minutes / 90))),
-            hunger: clamp(current.player.condition.hunger + Math.max(1, Math.round(minutes / 120)))
-          }
-        },
-        events: [...timeEvent, ...queued.events.reverse(), ...pulse.events.reverse(), ...current.events].slice(0, 80)
-      };
-    });
+  function executeAction(action: ActionDefinition): void {
+    setSession((current) => progressLife(current, action.duration, {
+      category: action.category,
+      title: action.result,
+      detail: `${action.location} · ${action.duration} мин.${action.cost ? ` · −₵ ${action.cost}` : ""}`,
+      importance: action.risk === "HIGH" ? 3 : action.risk === "MED" ? 2 : 1,
+      balanceDelta: -action.cost,
+      fatigueDelta: action.fatigueDelta,
+      stressDelta: action.stressDelta,
+      hungerDelta: action.hungerDelta,
+      healthDelta: action.healthDelta,
+      activity: action.activityAfter,
+      targetLocationId: action.targetLocationId
+    }));
+    setActionSheetOpen(false);
   }
 
-  function executeAction(action: ActionDefinition): void {
-    setSession((current) => {
-      const nextTimestamp = advanceGameTime(current.timestamp, action.duration);
-      const pulse = advanceDistrictPulse(current.district, nextTimestamp);
-      const queued = processEventQueue(current, nextTimestamp);
-      const nextPlayer: PlayerState = {
-        ...current.player,
-        balance: current.player.balance - action.cost,
-        condition: {
-          ...current.player.condition,
-          fatigue: clamp(current.player.condition.fatigue + (action.fatigueDelta ?? 0)),
-          stress: clamp(current.player.condition.stress + (action.stressDelta ?? 0)),
-          hunger: clamp(current.player.condition.hunger + (action.hungerDelta ?? 0))
-        }
-      };
-
-      const actionEvent: WorldEvent = {
-        id: createEventId(current.world.meta.seed, nextTimestamp, action.category, action.id, current.events.length),
-        timestamp: nextTimestamp,
-        category: action.category,
-        title: action.result,
-        detail: `${action.location} · ${action.duration} мин.${action.cost ? ` · −₵ ${action.cost}` : ""}`,
-        importance: action.risk === "HIGH" ? 3 : action.risk === "MED" ? 2 : 1
-      };
-
-      return {
-        ...current,
-        timestamp: nextTimestamp,
-        world: { ...current.world, meta: { ...current.world.meta, currentTimestamp: nextTimestamp } },
-        district: pulse.state,
-        eventQueue: queued.queue,
-        player: nextPlayer,
-        currentActivity: action.activityAfter,
-        events: [actionEvent, ...queued.events.reverse(), ...pulse.events.reverse(), ...current.events].slice(0, 80)
-      };
-    });
+  function travel(locationId: string): void {
+    setSession((current) => travelToLocation(current, locationId));
     setActionSheetOpen(false);
+  }
+
+  function buyFood(productId: string): void {
+    setSession((current) => buyFoodAtCurrentLocation(current, productId));
+  }
+
+  function eatFood(productId: string): void {
+    setSession((current) => eatFoodFromStorage(current, productId));
+  }
+
+  function discardFood(): void {
+    setSession((current) => discardSpoiled(current));
+  }
+
+  function orderFood(productId: string): void {
+    setSession((current) => orderFoodToHome(current, productId));
+  }
+
+  function sleep(hours: number): void {
+    setSession((current) => sleepAtHome(current, hours));
   }
 
   function openWindow(id: WindowId): void {
@@ -299,6 +291,8 @@ export default function App() {
     );
   }
 
+  const currentLocation = session.world.locations.find((location) => location.id === session.life.currentLocationId);
+
   const topbar = (
     <header className="topbar">
       <button type="button" className="brand" onClick={() => setActiveNav("life")}>
@@ -320,7 +314,7 @@ export default function App() {
         <span className="status-dot status-dot--cyan" />
         <span>
           <strong>{session.player.district}</strong>
-          <small>{session.player.sector} · {session.world.city.weather} {session.world.city.temperatureC}°C</small>
+          <small>{currentLocation?.name ?? session.player.sector} · {session.world.city.weather} {session.world.city.temperatureC}°C</small>
         </span>
       </div>
       <div className="topbar__status topbar__status--money">
@@ -447,9 +441,16 @@ export default function App() {
       onOpenWindow={openWindow}
       onOpenContext={() => setContextOpen(true)}
       onOpenActions={() => setActionSheetOpen(true)}
+      onEatFood={eatFood}
       actions={quickActions}
       plans={plans}
     />
+  ) : activeNav === "city" ? (
+    <PlacesWorkspace session={session} onTravel={travel} onOpenWindow={openWindow} />
+  ) : activeNav === "inventory" ? (
+    <FoodWorkspace session={session} onEat={eatFood} onOpenWindow={openWindow} />
+  ) : activeNav === "home" ? (
+    <HomeWorkspace session={session} onSleep={sleep} onOpenWindow={openWindow} onTravel={travel} />
   ) : (
     <ModulePreview activeNav={activeNav} onReturn={() => setActiveNav("life")} onOpenWindow={openWindow} />
   );
@@ -495,6 +496,13 @@ export default function App() {
             versionGuard={versionGuard}
             saveController={saveController}
             actions={quickActions}
+            onTravel={travel}
+            onBuyFood={buyFood}
+            onEatFood={eatFood}
+            onDiscardFood={discardFood}
+            onOrderFood={orderFood}
+            onSleep={sleep}
+            onOpenWindow={openWindow}
           />
         </WindowFrame>
       ) : null}
@@ -510,6 +518,11 @@ export default function App() {
               </div>
               <button type="button" className="icon-button" onClick={() => setActionSheetOpen(false)}><Icon name="close" /></button>
             </header>
+            <div className="action-sheet__shortcuts">
+              <button type="button" onClick={() => { setActionSheetOpen(false); openWindow("food"); }}><Icon name="inventory" /><span><strong>ЕДА</strong><small>{getFreshFoodUnits(session.life.food, session.timestamp)} порций</small></span></button>
+              <button type="button" onClick={() => { setActionSheetOpen(false); openWindow("places"); }}><Icon name="city" /><span><strong>МЕСТА</strong><small>{currentLocation?.name ?? "CITY"}</small></span></button>
+              <button type="button" onClick={() => { setActionSheetOpen(false); openWindow("home"); }}><Icon name="home" /><span><strong>ДОМ</strong><small>{session.player.housingDaysLeft} дней</small></span></button>
+            </div>
             <div className="action-sheet__list">
               {quickActions.map((action) => (
                 <ActionCard action={action} onAction={executeAction} key={action.id} compact />
@@ -534,6 +547,7 @@ interface LifeWorkspaceProps {
   onOpenWindow: (id: WindowId) => void;
   onOpenContext: () => void;
   onOpenActions: () => void;
+  onEatFood: (productId: string) => void;
   actions: ActionDefinition[];
   plans: ReturnType<typeof createPlans>;
 }
@@ -548,10 +562,12 @@ function LifeWorkspace({
   onOpenWindow,
   onOpenContext,
   onOpenActions,
+  onEatFood,
   actions,
   plans
 }: LifeWorkspaceProps) {
   const { player } = session;
+  const primaryAction = actions[0];
   const localEvents = session.events.filter((event) => event.category === "local").slice(0, 3);
 
   return (
@@ -579,6 +595,7 @@ function LifeWorkspace({
         onOpenWindow={onOpenWindow}
         onOpenContext={onOpenContext}
         onOpenActions={onOpenActions}
+        onEatFood={onEatFood}
         actions={actions}
         plans={plans}
       />
@@ -622,7 +639,7 @@ function LifeWorkspace({
             <div><span>NEXT STOP</span><strong>{session.primaryContact.location}</strong></div>
           </div>
           <div className="activity-controls">
-            <button type="button" className="button button--primary" onClick={() => onAction(actions[0])}>Начать поездку · 35 мин</button>
+            {primaryAction ? <button type="button" className="button button--primary" onClick={() => onAction(primaryAction)}>{primaryAction.title} · {primaryAction.duration} мин</button> : <button type="button" className="button button--primary" onClick={() => onOpenWindow("places")}>Открыть маршруты</button>}
             <button type="button" className="button button--ghost" onClick={() => onAdvance(15, "Ожидание")}>Ждать 15 минут</button>
           </div>
         </SystemPanel>
@@ -739,14 +756,14 @@ function MobileLifeWorkspace({
   onOpenWindow,
   onOpenContext,
   onOpenActions,
+  onEatFood,
   actions,
   plans
 }: MobileLifeWorkspaceProps) {
   const [activeTab, setActiveTab] = useState<MobileLifeTab>("now");
   const { player } = session;
+  const primaryAction = actions[0];
   const visibleEvents = filteredEvents.slice(0, 4);
-  const localEvents = session.events.filter((event) => event.category === "local").slice(0, 3);
-
   return (
     <section className="mobile-life" aria-label="Мобильный экран жизни">
       <div className="mobile-life__identity-row">
@@ -760,7 +777,7 @@ function MobileLifeWorkspace({
         </button>
         <div className="mobile-wallet">
           <strong>₵ {player.balance.toLocaleString("ru-RU")}</strong>
-          <small>HOME {player.housingDaysLeft}D</small>
+          <small>HOME {player.housingDaysLeft}D · FOOD {getFreshFoodUnits(session.life.food, session.timestamp)}</small>
         </div>
       </div>
 
@@ -783,7 +800,7 @@ function MobileLifeWorkspace({
           <span>39 MIN LEFT</span>
         </div>
         <div className="mobile-current-action__buttons">
-          <button type="button" className="button button--primary" onClick={() => onAction(actions[0])}>Ехать · 35 мин</button>
+          {primaryAction ? <button type="button" className="button button--primary" onClick={() => onAction(primaryAction)}>{primaryAction.title} · {primaryAction.duration}</button> : <button type="button" className="button button--primary" onClick={() => onOpenWindow("places")}>МАРШРУТЫ</button>}
           <button type="button" className="button button--ghost" onClick={() => onAdvance(15, "Ожидание")}>Ждать 15</button>
         </div>
       </section>
@@ -792,7 +809,7 @@ function MobileLifeWorkspace({
         {([
           ["now", "СЕЙЧАС"],
           ["plan", "ПЛАН"],
-          ["feed", "РАЙОН"],
+          ["food", "ЕДА"],
           ["log", "ЖУРНАЛ"]
         ] as Array<[MobileLifeTab, string]>).map(([id, label]) => (
           <button type="button" key={id} className={activeTab === id ? "is-active" : ""} onClick={() => setActiveTab(id)}>
@@ -840,21 +857,31 @@ function MobileLifeWorkspace({
           </div>
         ) : null}
 
-        {activeTab === "feed" ? (
-          <div className="mobile-feed">
-            <button type="button" className="mobile-map-button" onClick={() => onOpenWindow("local")}>
-              <span><strong>{player.sector}</strong><small>Живое состояние района</small></span>
-              <span className="status-chip">OPEN MAP</span>
-            </button>
-            <DistrictPulseStrip state={session.district} compact />
-            {localEvents.map((event) => (
-              <MobileFeedRow
-                key={event.id}
-                time={formatGameTime(event.timestamp)}
-                text={event.title}
-                warning={event.importance >= 3}
-              />
-            ))}
+        {activeTab === "food" ? (
+          <div className="mobile-food">
+            <div className="mobile-section-heading">
+              <span>HOME STORAGE / {getFreshFoodUnits(session.life.food, session.timestamp)} FRESH</span>
+              <button type="button" onClick={() => onOpenWindow("food")}>FULL</button>
+            </div>
+            <div className="mobile-food-list">
+              {session.life.food.storage.slice(0, 3).map((stack) => {
+                const product = getFoodProduct(stack.productId);
+                const freshness = getFoodFreshness(stack, session.timestamp);
+                const atHome = session.life.currentLocationId === session.life.housing.locationId;
+                const ready = freshness !== "spoiled" && canPrepare(product.requirement, session.life.food.appliances, atHome);
+                return (
+                  <div className={`mobile-food-row mobile-food-row--${freshness}`} key={stack.id}>
+                    <span className="food-code">{product.code}</span>
+                    <span><strong>{product.name}</strong><small>×{stack.quantity} · {freshness.toUpperCase()}</small></span>
+                    <button type="button" disabled={!ready} onClick={() => onEatFood(product.id)}>EAT</button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="mobile-food-actions">
+              <button type="button" onClick={() => onOpenWindow("places")}>НАЙТИ МАГАЗИН</button>
+              <button type="button" onClick={() => onOpenWindow("food")}>ОТКРЫТЬ ЗАПАС</button>
+            </div>
           </div>
         ) : null}
 
@@ -935,6 +962,135 @@ function ActionCard({ action, onAction, compact = false }: { action: ActionDefin
   );
 }
 
+
+function PlacesWorkspace({ session, onTravel, onOpenWindow }: { session: GameSession; onTravel: (locationId: string) => void; onOpenWindow: (id: WindowId) => void }) {
+  const current = session.world.locations.find((location) => location.id === session.life.currentLocationId);
+  const options = getTravelOptions(session);
+  return (
+    <div className="life-module life-module--places">
+      <header className="module-heading">
+        <div><span>CITY / ROUTE CONTROL</span><h1>МЕСТА</h1><p>{current?.name ?? "UNKNOWN"} · {session.player.district}</p></div>
+        <button type="button" className="button button--ghost" onClick={() => onOpenWindow("local")}>Состояние района</button>
+      </header>
+      <section className="current-location-card">
+        <div className="location-sigil">YOU</div>
+        <div><span>CURRENT LOCATION</span><strong>{current?.name ?? "UNKNOWN LOCATION"}</strong><small>{current?.code} · SECURITY {current?.security ?? 0}%</small></div>
+        <span className="status-chip status-chip--online">ON SITE</span>
+      </section>
+      <div className="route-list">
+        {options.map((option) => {
+          const open = isLocationOpen(option.location, session.timestamp + option.durationMinutes * 60_000);
+          return (
+            <article className="route-card" key={option.location.id}>
+              <div className="route-card__code">{option.location.code}</div>
+              <div className="route-card__body">
+                <span>{option.districtName}</span>
+                <strong>{option.location.name}</strong>
+                <small>{option.location.type.toUpperCase()} · SECURITY {option.location.security}%</small>
+              </div>
+              <div className="route-card__meta">
+                <span>{option.durationMinutes} MIN</span><span>₵ {option.cost}</span><span className={open ? "ok-text" : "warning-text"}>{open ? "OPEN" : "CLOSED"}</span>
+              </div>
+              <button type="button" disabled={session.player.balance < option.cost} onClick={() => onTravel(option.location.id)}>GO</button>
+            </article>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function FoodWorkspace({ session, onEat, onOpenWindow }: { session: GameSession; onEat: (productId: string) => void; onOpenWindow: (id: WindowId) => void }) {
+  const fresh = getFreshFoodUnits(session.life.food, session.timestamp);
+  const spoiled = session.life.food.storage.reduce((total, stack) => total + (getFoodFreshness(stack, session.timestamp) === "spoiled" ? stack.quantity : 0), 0);
+  return (
+    <div className="life-module life-module--food">
+      <header className="module-heading">
+        <div><span>LIFE / PHYSICAL SUPPLY</span><h1>ПРОДУКТЫ</h1><p>Отдельные предметы, сроки хранения и условия приготовления.</p></div>
+        <button type="button" className="button button--primary" onClick={() => onOpenWindow("food")}>Открыть терминал</button>
+      </header>
+      <div className="food-summary-grid">
+        <div><span>FRESH PORTIONS</span><strong>{fresh}</strong><small>доступно сейчас</small></div>
+        <div><span>SPOILED</span><strong className={spoiled ? "warning-text" : ""}>{spoiled}</strong><small>требуют утилизации</small></div>
+        <div><span>LAST MEAL</span><strong>{session.life.food.lastMealProductId ? getFoodProduct(session.life.food.lastMealProductId).code : "NONE"}</strong><small>{session.life.food.lastMealAt ? formatGameTime(session.life.food.lastMealAt) : "нет записи"}</small></div>
+        <div><span>STORAGE</span><strong>{session.life.food.storage.reduce((sum, stack) => sum + stack.quantity, 0)}/{session.life.housing.storageCapacity}</strong><small>домашний модуль</small></div>
+      </div>
+      <div className="food-shelf-grid">
+        {session.life.food.storage.map((stack) => {
+          const product = getFoodProduct(stack.productId);
+          const freshness = getFoodFreshness(stack, session.timestamp);
+          const atHome = session.life.currentLocationId === session.life.housing.locationId;
+          const ready = freshness !== "spoiled" && canPrepare(product.requirement, session.life.food.appliances, atHome);
+          return (
+            <article className={`food-shelf-card food-shelf-card--${freshness}`} key={stack.id}>
+              <span className="food-code">{product.code}</span>
+              <strong>{product.name}</strong>
+              <p>{product.description}</p>
+              <div><span>×{stack.quantity}</span><span>{freshness.toUpperCase()}</span><span>−{product.hungerRelief} FOOD</span></div>
+              <button type="button" disabled={!ready} onClick={() => onEat(product.id)}>{ready ? "Съесть" : product.requirement === "none" ? "Испорчено" : `Нужно: ${product.requirement}`}</button>
+            </article>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function HomeWorkspace({ session, onSleep, onOpenWindow, onTravel }: { session: GameSession; onSleep: (hours: number) => void; onOpenWindow: (id: WindowId) => void; onTravel: (locationId: string) => void }) {
+  const housingLocation = session.world.locations.find((location) => location.id === session.life.housing.locationId);
+  const atHome = session.life.currentLocationId === session.life.housing.locationId;
+  return (
+    <div className="life-module life-module--home">
+      <header className="module-heading"><div><span>HOME / HABITATION NODE</span><h1>{housingLocation?.name ?? "HOUSING"}</h1><p>{session.player.housingDaysLeft} дней оплачено · ₵ {session.life.housing.rentPerWeek} в неделю</p></div><span className={`status-chip ${atHome ? "status-chip--online" : ""}`}>{atHome ? "YOU ARE HOME" : "REMOTE"}</span></header>
+      <div className="housing-grid">
+        <section className="housing-card housing-card--main"><span>CAPSULE UNIT</span><strong>{housingLocation?.code}</strong><div><b>SLEEP {session.life.housing.sleepQuality}%</b><b>NOISE {session.life.housing.noise}%</b><b>SEC {session.life.housing.security}%</b></div><p>Узкая капсула, персональный шкаф, нагреватель и доступ к горячей воде. Кухонного модуля и пищевого принтера нет.</p></section>
+        <section className="housing-card"><span>APPLIANCES</span><ul><li className="is-active">HEATER</li><li className="is-active">HOT WATER</li><li>KITCHEN MODULE</li><li>FOOD PRINTER</li></ul></section>
+        <section className="housing-card"><span>FOOD STORAGE</span><strong>{getFreshFoodUnits(session.life.food, session.timestamp)} порций</strong><button type="button" onClick={() => onOpenWindow("food")}>Открыть запас</button></section>
+      </div>
+      <div className="sleep-control">
+        <div><span>REST CYCLE</span><strong>Усталость {session.player.condition.fatigue}%</strong><small>Шум жилья снизит качество восстановления.</small></div>
+        {atHome ? <><button type="button" onClick={() => onSleep(6)}>Спать 6 ч</button><button type="button" className="button--primary" onClick={() => onSleep(8)}>Спать 8 ч</button></> : <button type="button" className="button--primary" onClick={() => onTravel(session.life.housing.locationId)}>Вернуться домой</button>}
+      </div>
+    </div>
+  );
+}
+
+function FoodTerminal({ session, onBuy, onEat, onDiscard, onOrder, onOpenPlaces }: { session: GameSession; onBuy: (productId: string) => void; onEat: (productId: string) => void; onDiscard: () => void; onOrder: (productId: string) => void; onOpenPlaces: () => void }) {
+  const [tab, setTab] = useState<"storage" | "store" | "delivery">("storage");
+  const current = session.world.locations.find((location) => location.id === session.life.currentLocationId);
+  const localStock = current ? session.life.food.shopStocks[current.id] : undefined;
+  const market = session.world.locations.find((location) => location.type === "market");
+  const deliveryStock = market ? session.life.food.shopStocks[market.id] : undefined;
+  const atHome = session.life.currentLocationId === session.life.housing.locationId;
+  const spoiled = session.life.food.storage.some((stack) => getFoodFreshness(stack, session.timestamp) === "spoiled");
+  const renderProduct = (productId: string, stock: number, mode: "buy" | "order") => {
+    const product = getFoodProduct(productId);
+    const total = mode === "order" ? product.price + 14 : product.price;
+    return (
+      <article className="supply-product" key={`${mode}-${product.id}`}>
+        <div className="supply-product__mark"><span>{product.code}</span><i>{product.category.toUpperCase()}</i></div>
+        <div className="supply-product__body"><span>{product.maker}</span><strong>{product.name}</strong><p>{product.description}</p><div>{product.tags.map((tag) => <i key={tag}>{tag}</i>)}</div></div>
+        <div className="supply-product__stats"><span>FOOD −{product.hungerRelief}</span><span>PREP {product.preparationMinutes}M</span><span>LIFE {product.shelfLifeHours}H</span><span>STOCK {stock}</span></div>
+        <button type="button" disabled={stock <= 0 || session.player.balance < total || (mode === "buy" && (!current || !isLocationOpen(current, session.timestamp)))} onClick={() => mode === "buy" ? onBuy(product.id) : onOrder(product.id)}>{mode === "buy" ? `КУПИТЬ ₵ ${product.price}` : `ДОСТАВИТЬ ₵ ${total}`}</button>
+      </article>
+    );
+  };
+  return (
+    <div className="food-terminal">
+      <nav className="terminal-tabs"><button type="button" className={tab === "storage" ? "is-active" : ""} onClick={() => setTab("storage")}>ЗАПАС</button><button type="button" className={tab === "store" ? "is-active" : ""} onClick={() => setTab("store")}>МАГАЗИН</button><button type="button" className={tab === "delivery" ? "is-active" : ""} onClick={() => setTab("delivery")}>ДОСТАВКА</button></nav>
+      {tab === "storage" ? <div className="storage-list">
+        <header><div><span>HOME STORAGE</span><strong>{getFreshFoodUnits(session.life.food, session.timestamp)} свежих порций</strong></div><button type="button" disabled={!spoiled} onClick={onDiscard}>Утилизировать испорченное</button></header>
+        {session.life.food.storage.map((stack) => {
+          const product = getFoodProduct(stack.productId); const freshness = getFoodFreshness(stack, session.timestamp); const ready = freshness !== "spoiled" && canPrepare(product.requirement, session.life.food.appliances, atHome);
+          return <article className={`storage-row storage-row--${freshness}`} key={stack.id}><span className="food-code">{product.code}</span><div><strong>{product.name}</strong><small>{product.maker} · ×{stack.quantity}</small></div><div><span>{freshness.toUpperCase()}</span><small>{product.requirement.toUpperCase()}</small></div><button type="button" disabled={!ready} onClick={() => onEat(product.id)}>{ready ? "EAT" : freshness === "spoiled" ? "SPOILED" : "HOME PREP"}</button></article>;
+        })}
+      </div> : null}
+      {tab === "store" ? <div className="supply-list"><header className="supply-location"><div><span>LOCAL RETAIL</span><strong>{current?.name ?? "UNKNOWN"}</strong><small>{current && isLocationOpen(current, session.timestamp) ? "OPEN NOW" : "NO ACTIVE RETAIL"}</small></div>{!localStock ? <button type="button" onClick={onOpenPlaces}>Найти магазин</button> : null}</header>{localStock ? Object.entries(localStock).map(([productId, stock]) => renderProduct(productId, stock, "buy")) : <div className="empty-terminal">На текущей локации нет продуктового терминала.</div>}</div> : null}
+      {tab === "delivery" ? <div className="supply-list"><header className="supply-location"><div><span>CITY DELIVERY</span><strong>{market?.name ?? "MARKET OFFLINE"}</strong><small>Доставка в домашний пищевой шкаф · 25 минут · ₵ 14</small></div></header>{deliveryStock ? Object.entries(deliveryStock).map(([productId, stock]) => renderProduct(productId, stock, "order")) : null}</div> : null}
+    </div>
+  );
+}
+
 function ModulePreview({ activeNav, onReturn, onOpenWindow }: { activeNav: NavId; onReturn: () => void; onOpenWindow: (id: WindowId) => void }) {
   const item = navItems.find((nav) => nav.id === activeNav) ?? navItems[0];
   return (
@@ -962,7 +1118,14 @@ function WindowContent({
   setJournalFilter,
   versionGuard,
   saveController,
-  actions
+  actions,
+  onTravel,
+  onBuyFood,
+  onEatFood,
+  onDiscardFood,
+  onOrderFood,
+  onSleep,
+  onOpenWindow
 }: {
   id: WindowId;
   settings: UiSettings;
@@ -975,6 +1138,13 @@ function WindowContent({
   versionGuard: VersionGuardController;
   saveController: WorldSaveController;
   actions: ActionDefinition[];
+  onTravel: (locationId: string) => void;
+  onBuyFood: (productId: string) => void;
+  onEatFood: (productId: string) => void;
+  onDiscardFood: () => void;
+  onOrderFood: (productId: string) => void;
+  onSleep: (hours: number) => void;
+  onOpenWindow: (id: WindowId) => void;
 }) {
 
   if (id === "profile") {
@@ -1051,7 +1221,7 @@ function WindowContent({
           <div className="message-bubble message-bubble--incoming">Пропуск будет на сервисной стойке. Главный вход не используй.</div>
           <div className="message-bubble message-bubble--outgoing">Во сколько быть?</div>
           <div className="message-bubble message-bubble--incoming">После 23:20. У узла сейчас проверяют документы.</div>
-          <button type="button" className="button button--primary" onClick={() => onAction(actions[1])}>Подтвердить встречу · 5 мин</button>
+          {actions.find((action) => action.id === "reply-contact") ? <button type="button" className="button button--primary" onClick={() => onAction(actions.find((action) => action.id === "reply-contact")!)}>Подтвердить встречу · 5 мин</button> : null}
         </section>
       </div>
     );
@@ -1076,11 +1246,23 @@ function WindowContent({
         </ul>
         <h4>ВОЗМОЖНЫЕ СОБЫТИЯ СМЕНЫ</h4>
         <p>Диагностика дронов, сортировка деталей, конфликт с мастером смены, аварийный ремонт, проверка службы безопасности.</p>
-        <button type="button" className="button button--primary" onClick={() => onAction(actions[0])}>Ехать на собеседование · 35 мин</button>
+        {actions.find((action) => action.id === "travel-workshop") ? <button type="button" className="button button--primary" onClick={() => onAction(actions.find((action) => action.id === "travel-workshop")!)}>Ехать на собеседование</button> : <button type="button" className="button button--ghost" disabled>Вы уже на месте</button>}
       </div>
     );
   }
 
+
+  if (id === "food") {
+    return <FoodTerminal session={session} onBuy={onBuyFood} onEat={onEatFood} onDiscard={onDiscardFood} onOrder={onOrderFood} onOpenPlaces={() => onOpenWindow("places")} />;
+  }
+
+  if (id === "places") {
+    return <PlacesWorkspace session={session} onTravel={onTravel} onOpenWindow={onOpenWindow} />;
+  }
+
+  if (id === "home") {
+    return <HomeWorkspace session={session} onSleep={onSleep} onOpenWindow={onOpenWindow} onTravel={onTravel} />;
+  }
 
   if (id === "local") {
     return (

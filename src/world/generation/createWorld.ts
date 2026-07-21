@@ -4,6 +4,8 @@ import { SeededRandom } from "../../core/random/seededRandom";
 import { SAVE_SCHEMA_VERSION } from "../../core/saves/types";
 import { INITIAL_GAME_TIMESTAMP } from "../../core/time/gameTime";
 import { createInitialPlayer } from "../../gameplay/player/demoPlayer";
+import { createInitialFoodState } from "../../gameplay/food/foodSystem";
+import { createInitialHousing } from "../../gameplay/housing/housingSystem";
 import { createPrimaryContact } from "../../people/demoNpc";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
@@ -70,7 +72,9 @@ function createLocation(
   code: string,
   type: LocationState["type"],
   security: number,
-  organizationId?: string
+  organizationId?: string,
+  openHour = 0,
+  closeHour = 24
 ): LocationState {
   return {
     id: createStableEntityId("location", `${seed}:${scope}`),
@@ -80,7 +84,9 @@ function createLocation(
     code,
     type,
     open: true,
-    security
+    security,
+    openHour,
+    closeHour
   };
 }
 
@@ -185,13 +191,13 @@ export function createWorldSession(seed: string): GameSession {
   const gang = createOrganization(seed, "cutwire", "CUTWIRE", "CW", "gang", 410_000, 19, 86);
   const organizations = [aurelian, vectra, transit, medical, police, gang];
 
-  const housing = createLocation(seed, "capsule", lower.id, "HAB-STACK 07", "HAB/U07", "housing", 31);
-  const canteen = createLocation(seed, "canteen", lower.id, "NIGHT KITCHEN 14", "FOOD/U14", "food", 24);
-  const transitNode = createLocation(seed, "transit-node", lower.id, "TRANSIT NODE U-07", "MOVE/U07", "transport", 46, transit.id);
-  const workshop = createLocation(seed, "workshop", industrial.id, "VECTRA SERVICE NODE", "VEC/SN-12", "workshop", 58, vectra.id);
-  const clinic = createLocation(seed, "clinic", lower.id, "CMU WALK-IN CLINIC", "CMU/U03", "clinic", 52, medical.id);
-  const tower = createLocation(seed, "tower", corporate.id, "AURELIAN CROWN TOWER", "AUR/CT-01", "office", 94, aurelian.id);
-  const market = createLocation(seed, "market", lower.id, "UNDERLINE NIGHT MARKET", "MKT/U09", "market", 26);
+  const housing = createLocation(seed, "capsule", lower.id, "HAB-STACK 07", "HAB/U07", "housing", 31, undefined, 0, 24);
+  const canteen = createLocation(seed, "canteen", lower.id, "NIGHT KITCHEN 14", "FOOD/U14", "food", 24, undefined, 18, 5);
+  const transitNode = createLocation(seed, "transit-node", lower.id, "TRANSIT NODE U-07", "MOVE/U07", "transport", 46, transit.id, 0, 24);
+  const workshop = createLocation(seed, "workshop", industrial.id, "VECTRA SERVICE NODE", "VEC/SN-12", "workshop", 58, vectra.id, 6, 2);
+  const clinic = createLocation(seed, "clinic", lower.id, "CMU WALK-IN CLINIC", "CMU/U03", "clinic", 52, medical.id, 0, 24);
+  const tower = createLocation(seed, "tower", corporate.id, "AURELIAN CROWN TOWER", "AUR/CT-01", "office", 94, aurelian.id, 7, 22);
+  const market = createLocation(seed, "market", lower.id, "UNDERLINE NIGHT MARKET", "MKT/U09", "market", 26, undefined, 16, 6);
   const locations = [housing, canteen, transitNode, workshop, clinic, tower, market];
   attachLocations(districts, organizations, locations);
 
@@ -235,7 +241,13 @@ export function createWorldSession(seed: string): GameSession {
       companyName: workshop.name
     }),
     eventQueue: createQueue(seed, INITIAL_GAME_TIMESTAMP, world),
-    currentActivity: `Ожидание у ${transitNode.name}`,
-    district: createInitialDistrictPulse(INITIAL_GAME_TIMESTAMP, seed)
+    currentActivity: `В жилом блоке ${housing.name}`,
+    district: createInitialDistrictPulse(INITIAL_GAME_TIMESTAMP, seed),
+    life: {
+      currentLocationId: housing.id,
+      housing: createInitialHousing(housing.id, INITIAL_GAME_TIMESTAMP),
+      food: createInitialFoodState(seed, INITIAL_GAME_TIMESTAMP, market.id, canteen.id, clinic.id),
+      lastSleepAt: null
+    }
   };
 }

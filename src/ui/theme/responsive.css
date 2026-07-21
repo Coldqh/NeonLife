@@ -806,3 +806,216 @@
     gap: 3px;
   }
 }
+
+/* v0.5.0 responsive life loop */
+@media (max-width: 860px) {
+  .life-module {
+    height: 100%;
+    padding: 8px;
+    overflow-y: auto;
+    padding-bottom: calc(82px + env(safe-area-inset-bottom));
+  }
+
+  .module-heading {
+    align-items: flex-start;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+  }
+
+  .module-heading h1 {
+    font-size: 16px;
+  }
+
+  .module-heading p {
+    max-width: 240px;
+    font-size: 7px;
+  }
+
+  .module-heading .button {
+    min-height: 32px;
+    padding: 6px 8px;
+    font-size: 7px;
+  }
+
+  .current-location-card {
+    min-height: 58px;
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 7px;
+  }
+
+  .location-sigil {
+    width: 36px;
+    height: 36px;
+  }
+
+  .route-card {
+    grid-template-columns: 58px minmax(0, 1fr) 48px;
+    gap: 6px;
+    min-height: 61px;
+    padding: 6px;
+  }
+
+  .route-card__meta {
+    display: none;
+  }
+
+  .route-card > button {
+    min-height: 30px;
+    padding-inline: 7px;
+  }
+
+  .food-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .food-summary-grid > div {
+    min-height: 56px;
+    padding: 7px;
+  }
+
+  .food-summary-grid strong {
+    font-size: 14px;
+  }
+
+  .food-shelf-grid {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+
+  .food-shelf-card {
+    padding: 8px;
+  }
+
+  .food-shelf-card p {
+    display: none;
+  }
+
+  .housing-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 5px;
+  }
+
+  .housing-card {
+    min-height: 118px;
+    padding: 8px;
+  }
+
+  .housing-card--main {
+    grid-column: 1 / -1;
+    min-height: 105px;
+  }
+
+  .sleep-control {
+    align-items: stretch;
+    flex-wrap: wrap;
+    padding: 8px;
+  }
+
+  .sleep-control > div {
+    flex-basis: 100%;
+  }
+
+  .sleep-control button {
+    flex: 1;
+  }
+
+  .action-sheet__shortcuts {
+    margin-bottom: 7px;
+  }
+
+  .action-sheet__shortcuts button {
+    min-height: 50px;
+    padding: 6px;
+  }
+
+  .window-frame__content .life-module {
+    padding: 0;
+    padding-bottom: 0;
+  }
+
+  .food-terminal {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .terminal-tabs {
+    flex: 0 0 auto;
+  }
+
+  .storage-list,
+  .supply-list {
+    min-height: 0;
+    overflow-y: auto;
+    padding-bottom: 8px;
+  }
+
+  .storage-row {
+    grid-template-columns: 62px minmax(0, 1fr) 54px;
+    gap: 6px;
+    min-height: 54px;
+    padding: 6px;
+  }
+
+  .storage-row > div:nth-child(3) {
+    display: none;
+  }
+
+  .storage-row > button {
+    min-height: 28px;
+    padding-inline: 5px;
+  }
+
+  .supply-product {
+    grid-template-columns: 58px minmax(0, 1fr) 82px;
+    gap: 7px;
+    padding: 7px;
+  }
+
+  .supply-product__mark {
+    min-height: 52px;
+    padding: 5px;
+  }
+
+  .supply-product__body p,
+  .supply-product__body > div,
+  .supply-product__stats {
+    display: none;
+  }
+
+  .supply-product > button {
+    min-height: 32px;
+    padding-inline: 5px;
+  }
+
+  .supply-location {
+    padding: 7px;
+  }
+}
+
+@media (max-width: 430px) {
+  .mobile-food-row {
+    grid-template-columns: 54px minmax(0, 1fr) 40px;
+  }
+
+  .mobile-food-row .food-code {
+    font-size: 7px;
+  }
+
+  .action-sheet__shortcuts small {
+    display: none;
+  }
+
+  .action-sheet__shortcuts button {
+    justify-content: center;
+  }
+
+  .housing-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .housing-card--main {
+    grid-column: auto;
+  }
+}

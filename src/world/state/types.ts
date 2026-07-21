@@ -4,6 +4,8 @@ import type { WorldEvent } from "../../core/events/types";
 import type { PlayerState } from "../../gameplay/player/demoPlayer";
 import type { KnownNpc } from "../../people/demoNpc";
 import type { DistrictPulseState } from "../city/districtPulse";
+import type { FoodState } from "../../gameplay/food/foodSystem";
+import type { HousingState } from "../../gameplay/housing/housingSystem";
 
 export interface CityState {
   id: EntityId;
@@ -40,6 +42,8 @@ export interface LocationState {
   type: "housing" | "food" | "workshop" | "transport" | "clinic" | "office" | "market" | "government";
   open: boolean;
   security: number;
+  openHour?: number;
+  closeHour?: number;
 }
 
 export interface OrganizationState {
@@ -75,6 +79,13 @@ export interface WorldState {
   primaryContactId: EntityId;
 }
 
+export interface LifeState {
+  currentLocationId: EntityId;
+  housing: HousingState;
+  food: FoodState;
+  lastSleepAt: number | null;
+}
+
 export interface GameSession {
   schemaVersion: number;
   timestamp: number;
@@ -85,4 +96,5 @@ export interface GameSession {
   eventQueue: ScheduledWorldEvent[];
   currentActivity: string;
   district: DistrictPulseState;
+  life: LifeState;
 }
