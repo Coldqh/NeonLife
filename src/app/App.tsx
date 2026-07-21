@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useVersionGuard, type VersionGuardController } from "./providers/useVersionGuard";
 import { NeonShell } from "./layout/NeonShell";
 import { initialEvents } from "../core/events/demoEvents";
 import type { EventCategory, WorldEvent } from "../core/events/types";
@@ -11,6 +12,8 @@ import {
   INITIAL_GAME_TIMESTAMP
 } from "../core/time/gameTime";
 import { readLocal, writeLocal } from "../core/storage/localStore";
+import { createStableEntityId } from "../core/ids/entityId";
+import { APP_VERSION } from "../core/version/versionService";
 import { initialPlayer, type PlayerState } from "../gameplay/player/demoPlayer";
 import { miraKoval } from "../people/demoNpc";
 import { defaultUiSettings, type UiSettings } from "../ui/theme/settings";
@@ -19,6 +22,15 @@ import { Meter } from "../ui/components/Meter";
 import { Portrait } from "../ui/components/Portrait";
 import { SystemPanel } from "../ui/components/SystemPanel";
 import { WindowFrame } from "../ui/components/WindowFrame";
+import { VersionGate } from "../ui/components/VersionGate";
+import { DEMO_WORLD_SEED } from "../world/city/demoWorld";
+import {
+  advanceDistrictPulse,
+  createInitialDistrictPulse,
+  districtSecurityLabel,
+  powerGridLabel,
+  type DistrictPulseState
+} from "../world/city/districtPulse";
 
 const UI_SETTINGS_KEY = "neon-life/ui-settings/v1";
 const SESSION_KEY = "neon-life/demo-session/v1";
@@ -32,6 +44,7 @@ interface DemoSession {
   player: PlayerState;
   events: WorldEvent[];
   currentActivity: string;
+  district: DistrictPulseState;
 }
 
 interface ActionDefinition {
@@ -144,25 +157,43 @@ function clamp(value: number): number {
   return Math.max(0, Math.min(100, value));
 }
 
-let eventSequence = 0;
+function createEventId(timestamp: number, category: EventCategory, source: string, sequence: number): string {
+  return createStableEntityId("event", `${DEMO_WORLD_SEED}:${timestamp}:${category}:${source}:${sequence}`);
+}
 
-function createEventId(): string {
-  eventSequence += 1;
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `evt-${Date.now()}-${eventSequence}`;
+function createDefaultSession(): DemoSession {
+  return {
+    timestamp: INITIAL_GAME_TIMESTAMP,
+    player: initialPlayer,
+    events: initialEvents,
+    currentActivity: "Ожидание у станции Sector 04",
+    district: createInitialDistrictPulse(INITIAL_GAME_TIMESTAMP)
+  };
+}
+
+function loadSession(): DemoSession {
+  const fallback = createDefaultSession();
+  const stored = readLocal<Partial<DemoSession>>(SESSION_KEY, {});
+  return {
+    ...fallback,
+    ...stored,
+    player: {
+      ...fallback.player,
+      ...(stored.player ?? {}),
+      condition: {
+        ...fallback.player.condition,
+        ...(stored.player?.condition ?? {})
+      }
+    },
+    events: Array.isArray(stored.events) ? stored.events : fallback.events,
+    district: stored.district ?? createInitialDistrictPulse(stored.timestamp ?? fallback.timestamp)
+  };
 }
 
 export default function App() {
   const [settings, setSettings] = useState<UiSettings>(() => readLocal(UI_SETTINGS_KEY, defaultUiSettings));
-  const [session, setSession] = useState<DemoSession>(() =>
-    readLocal<DemoSession>(SESSION_KEY, {
-      timestamp: INITIAL_GAME_TIMESTAMP,
-      player: initialPlayer,
-      events: initialEvents,
-      currentActivity: "Ожидание у станции Sector 04"
-    })
-  );
+  const [session, setSession] = useState<DemoSession>(loadSession);
+  const versionGuard = useVersionGuard();
   const [activeNav, setActiveNav] = useState<NavId>("life");
   const [journalFilter, setJournalFilter] = useState<EventCategory | "all">("all");
   const [openWindows, setOpenWindows] = useState<WindowId[]>([]);
@@ -188,16 +219,29 @@ export default function App() {
   function addEvent(event: Omit<WorldEvent, "id">): void {
     setSession((current) => ({
       ...current,
-      events: [{ ...event, id: createEventId() }, ...current.events].slice(0, 80)
+      events: [{
+        ...event,
+        id: createEventId(event.timestamp, event.category, event.title, current.events.length)
+      }, ...current.events].slice(0, 80)
     }));
   }
 
   function advance(minutes: number, source = "Ручное продвижение времени"): void {
     setSession((current) => {
       const nextTimestamp = advanceGameTime(current.timestamp, minutes);
+      const pulse = advanceDistrictPulse(current.district, nextTimestamp);
+      const timeEvent: WorldEvent[] = minutes >= 60 ? [{
+        id: createEventId(nextTimestamp, "system", source, current.events.length),
+        timestamp: nextTimestamp,
+        category: "system",
+        title: `${source}: +${minutes} мин.`,
+        importance: 1
+      }] : [];
+
       return {
         ...current,
         timestamp: nextTimestamp,
+        district: pulse.state,
         player: {
           ...current.player,
           condition: {
@@ -206,15 +250,7 @@ export default function App() {
             hunger: clamp(current.player.condition.hunger + Math.max(1, Math.round(minutes / 120)))
           }
         },
-        events: minutes >= 60
-          ? ([{
-              id: createEventId(),
-              timestamp: nextTimestamp,
-              category: "system",
-              title: `${source}: +${minutes} мин.`,
-              importance: 1
-            } satisfies WorldEvent, ...current.events].slice(0, 80))
-          : current.events
+        events: [...timeEvent, ...pulse.events.reverse(), ...current.events].slice(0, 80)
       };
     });
   }
@@ -222,6 +258,7 @@ export default function App() {
   function executeAction(action: ActionDefinition): void {
     setSession((current) => {
       const nextTimestamp = advanceGameTime(current.timestamp, action.duration);
+      const pulse = advanceDistrictPulse(current.district, nextTimestamp);
       const nextPlayer: PlayerState = {
         ...current.player,
         balance: current.player.balance - action.cost,
@@ -234,7 +271,7 @@ export default function App() {
       };
 
       const actionEvent: WorldEvent = {
-        id: createEventId(),
+        id: createEventId(nextTimestamp, action.category, action.id, current.events.length),
         timestamp: nextTimestamp,
         category: action.category,
         title: action.result,
@@ -245,9 +282,10 @@ export default function App() {
       return {
         ...current,
         timestamp: nextTimestamp,
+        district: pulse.state,
         player: nextPlayer,
         currentActivity: action.activityAfter,
-        events: [actionEvent, ...current.events].slice(0, 80)
+        events: [actionEvent, ...pulse.events.reverse(), ...current.events].slice(0, 80)
       };
     });
     setActionSheetOpen(false);
@@ -264,12 +302,7 @@ export default function App() {
   }
 
   function resetDemo(): void {
-    const fresh: DemoSession = {
-      timestamp: INITIAL_GAME_TIMESTAMP,
-      player: initialPlayer,
-      events: initialEvents,
-      currentActivity: "Ожидание у станции Sector 04"
-    };
+    const fresh = createDefaultSession();
     setSession(fresh);
     writeLocal(SESSION_KEY, fresh);
     addEvent({
@@ -286,7 +319,7 @@ export default function App() {
         <span className="brand__mark">N/L</span>
         <span className="brand__text">
           <strong>NEON/LINK</strong>
-          <small>OS 3.7 // SEVEN DAYS BELOW</small>
+          <small>OS {APP_VERSION} // SEVEN DAYS BELOW</small>
         </span>
       </button>
 
@@ -347,7 +380,7 @@ export default function App() {
       <div className="sidebar__footer">
         <span>WORLD</span>
         <strong>NL-7DB-0441</strong>
-        <small>SIM v0.2.0</small>
+        <small>SIM v{APP_VERSION}</small>
       </div>
     </aside>
   );
@@ -470,6 +503,7 @@ export default function App() {
             session={session}
             journalFilter={journalFilter}
             setJournalFilter={setJournalFilter}
+            versionGuard={versionGuard}
           />
         </WindowFrame>
       ) : null}
@@ -493,6 +527,8 @@ export default function App() {
           </section>
         </div>
       ) : null}
+
+      <VersionGate guard={versionGuard} />
     </div>
   );
 }
@@ -521,6 +557,7 @@ function LifeWorkspace({
   onOpenActions
 }: LifeWorkspaceProps) {
   const { player } = session;
+  const localEvents = session.events.filter((event) => event.category === "local").slice(0, 3);
 
   return (
     <div className="life-screen">
@@ -623,9 +660,13 @@ function LifeWorkspace({
             <div className="route-line" />
           </div>
           <div className="feed-list">
-            <div><span>22:41</span><p>Аварийное отключение линии LC-04. Освещение восстановят не раньше 01:30.</p></div>
-            <div><span>22:34</span><p>У станции замечена усиленная полицейская группа. Проверяют документы.</p></div>
-            <div><span>22:09</span><p>Night Canteen снизила цену на остатки смены до ₵ 28.</p></div>
+            <DistrictPulseStrip state={session.district} />
+            {localEvents.map((event) => (
+              <div key={event.id}>
+                <span>{formatGameTime(event.timestamp)}</span>
+                <p>{event.title}</p>
+              </div>
+            ))}
           </div>
         </SystemPanel>
 
@@ -705,6 +746,7 @@ function MobileLifeWorkspace({
   const [activeTab, setActiveTab] = useState<MobileLifeTab>("now");
   const { player } = session;
   const visibleEvents = filteredEvents.slice(0, 4);
+  const localEvents = session.events.filter((event) => event.category === "local").slice(0, 3);
 
   return (
     <section className="mobile-life" aria-label="Мобильный экран жизни">
@@ -802,12 +844,18 @@ function MobileLifeWorkspace({
         {activeTab === "feed" ? (
           <div className="mobile-feed">
             <button type="button" className="mobile-map-button" onClick={() => onOpenWindow("local")}>
-              <span><strong>SECTOR 04</strong><small>Схема, маршруты и узлы</small></span>
+              <span><strong>SECTOR 04</strong><small>Живое состояние района</small></span>
               <span className="status-chip">OPEN MAP</span>
             </button>
-            <MobileFeedRow time="22:41" text="Отключена линия LC-04. Свет вернут после 01:30." />
-            <MobileFeedRow time="22:34" text="У станции полиция проверяет документы." warning />
-            <MobileFeedRow time="22:09" text="Night Canteen: горячая еда за ₵ 28." />
+            <DistrictPulseStrip state={session.district} compact />
+            {localEvents.map((event) => (
+              <MobileFeedRow
+                key={event.id}
+                time={formatGameTime(event.timestamp)}
+                text={event.title}
+                warning={event.importance >= 3}
+              />
+            ))}
           </div>
         ) : null}
 
@@ -847,6 +895,18 @@ function MobileVital({ label, value, danger = false }: { label: string; value: n
       <span>{label}</span>
       <strong>{value}</strong>
       <i><b style={{ width: `${value}%` }} /></i>
+    </div>
+  );
+}
+
+function DistrictPulseStrip({ state, compact = false }: { state: DistrictPulseState; compact?: boolean }) {
+  return (
+    <div className={`district-pulse ${compact ? "district-pulse--compact" : ""}`}>
+      <div><span>SEC</span><strong>{state.security}</strong><small>{districtSecurityLabel(state.security)}</small></div>
+      <div><span>GRID</span><strong>{powerGridLabel(state.powerGrid)}</strong><small>POWER</small></div>
+      <div><span>POLICE</span><strong>{state.policePresence}</strong><small>PRESENCE</small></div>
+      <div><span>GANG</span><strong>{state.gangPressure}</strong><small>PRESSURE</small></div>
+      <div><span>TRANSIT</span><strong>+{state.transitDelayMinutes}</strong><small>MIN</small></div>
     </div>
   );
 }
@@ -900,7 +960,8 @@ function WindowContent({
   onReset,
   session,
   journalFilter,
-  setJournalFilter
+  setJournalFilter,
+  versionGuard
 }: {
   id: WindowId;
   settings: UiSettings;
@@ -910,6 +971,7 @@ function WindowContent({
   session: DemoSession;
   journalFilter: EventCategory | "all";
   setJournalFilter: (filter: EventCategory | "all") => void;
+  versionGuard: VersionGuardController;
 }) {
 
   if (id === "profile") {
@@ -1025,15 +1087,21 @@ function WindowContent({
           <span className="map-node map-node--alert" style={{ left: "52%", top: "72%" }}>POLICE</span>
           <div className="route-line" />
         </div>
+        <DistrictPulseStrip state={session.district} />
         <div className="local-window__stats">
-          <div><span>SECURITY</span><strong className="warning-text">LOW</strong></div>
-          <div><span>LIGHTING</span><strong>OFFLINE</strong></div>
-          <div><span>TRANSIT</span><strong>DELAYED</strong></div>
+          <div><span>SECURITY</span><strong className="warning-text">{districtSecurityLabel(session.district.security)}</strong></div>
+          <div><span>POWER GRID</span><strong>{powerGridLabel(session.district.powerGrid)}</strong></div>
+          <div><span>TRANSIT</span><strong>+{session.district.transitDelayMinutes} MIN</strong></div>
         </div>
         <div className="local-window__feed">
-          <MobileFeedRow time="22:41" text="Отключена линия LC-04. Свет вернут после 01:30." />
-          <MobileFeedRow time="22:34" text="У станции полиция проверяет документы." warning />
-          <MobileFeedRow time="22:09" text="Night Canteen продаёт остатки смены за ₵ 28." />
+          {session.events.filter((event) => event.category === "local").slice(0, 6).map((event) => (
+            <MobileFeedRow
+              key={event.id}
+              time={formatGameTime(event.timestamp)}
+              text={event.detail ? `${event.title} ${event.detail}` : event.title}
+              warning={event.importance >= 3}
+            />
+          ))}
         </div>
       </div>
     );
@@ -1073,6 +1141,16 @@ function WindowContent({
         <SettingToggle label="REDUCED MOTION" detail="Отключает сканирование, мигание и переходы." checked={settings.reducedMotion} onChange={(value) => setSettings({ ...settings, reducedMotion: value })} />
         <SettingToggle label="COMPACT MODE" detail="Уменьшает отступы и плотнее размещает данные." checked={settings.compactMode} onChange={(value) => setSettings({ ...settings, compactMode: value })} />
         <SettingToggle label="HIGH CONTRAST" detail="Усиливает границы, текст и сигнальные состояния." checked={settings.highContrast} onChange={(value) => setSettings({ ...settings, highContrast: value })} />
+        <div className="settings-version-card">
+          <div>
+            <span>APPLICATION VERSION</span>
+            <strong>LOCAL v{versionGuard.localVersion}</strong>
+            <small>REMOTE {versionGuard.remoteVersion ? `v${versionGuard.remoteVersion}` : "NOT CHECKED"} · {versionGuard.status.toUpperCase()}</small>
+          </div>
+          <button type="button" className="button button--ghost" onClick={() => void versionGuard.checkNow()} disabled={versionGuard.status === "checking"}>
+            {versionGuard.status === "checking" ? "CHECKING..." : "CHECK UPDATE"}
+          </button>
+        </div>
         <div className="settings-danger-zone">
           <div><strong>DEMO SESSION</strong><span>Сбросить время, состояние героя и журнал к старту.</span></div>
           <button type="button" className="button button--danger" onClick={onReset}>Сбросить демо</button>
@@ -1084,11 +1162,11 @@ function WindowContent({
   return (
     <div className="diagnostics-window">
       <div className="diagnostic-row"><span>UI SHELL</span><strong>ONLINE</strong><i>100%</i></div>
-      <div className="diagnostic-row"><span>LOCAL STORAGE</span><strong>ONLINE</strong><i>100%</i></div>
-      <div className="diagnostic-row"><span>PWA CACHE</span><strong>ARMED</strong><i>85%</i></div>
-      <div className="diagnostic-row"><span>WORLD SIMULATION</span><strong>VERTICAL SLICE</strong><i>22%</i></div>
+      <div className="diagnostic-row"><span>VERSION GUARD</span><strong>{versionGuard.status.toUpperCase()}</strong><i>{versionGuard.remoteVersion === versionGuard.localVersion ? "100%" : "CHECK"}</i></div>
+      <div className="diagnostic-row"><span>PWA CACHE</span><strong>NETWORK FIRST</strong><i>100%</i></div>
+      <div className="diagnostic-row"><span>WORLD PULSE</span><strong>ACTIVE</strong><i>{session.district.pulseCount}</i></div>
       <div className="diagnostic-row diagnostic-row--warning"><span>INDEXED DB</span><strong>NOT CONNECTED</strong><i>0%</i></div>
-      <pre>{`NEON/LINK DIAGNOSTIC\nBUILD: 0.2.0\nWORLD: NL-7DB-0441\nACTIVE ENTITIES: 2\nQUEUED EVENTS: 5\nSTATUS: STABLE`}</pre>
+      <pre>{`NEON/LINK DIAGNOSTIC\nBUILD: ${APP_VERSION}\nREMOTE: ${versionGuard.remoteVersion ?? "UNKNOWN"}\nWORLD: NL-7DB-0441\nDISTRICT PULSES: ${session.district.pulseCount}\nLOCAL EVENTS: ${session.events.filter((event) => event.category === "local").length}\nSTATUS: ${versionGuard.status.toUpperCase()}`}</pre>
     </div>
   );
 }

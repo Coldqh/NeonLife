@@ -2464,3 +2464,206 @@
   border: 1px solid var(--line);
   font: 700 8px var(--font-mono);
 }
+
+.district-pulse {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  background: rgba(7, 17, 23, 0.76);
+}
+
+.district-pulse > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 7px;
+  border-right: 1px solid var(--line);
+}
+
+.district-pulse > div:last-child {
+  border-right: 0;
+}
+
+.district-pulse span,
+.district-pulse small {
+  overflow: hidden;
+  color: var(--muted-2);
+  font: 700 7px var(--font-mono);
+  letter-spacing: 0.07em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.district-pulse strong {
+  overflow: hidden;
+  color: var(--cyan-soft);
+  font: 800 10px var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.district-pulse--compact > div {
+  padding: 6px 5px;
+}
+
+.district-pulse--compact small {
+  display: none;
+}
+
+.settings-version-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px;
+  border: 1px solid rgba(75, 220, 255, 0.24);
+  background: rgba(75, 220, 255, 0.045);
+}
+
+.settings-version-card > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-version-card span,
+.settings-version-card small {
+  color: var(--muted);
+  font: 700 8px var(--font-mono);
+  letter-spacing: 0.07em;
+}
+
+.settings-version-card strong {
+  color: var(--cyan-soft);
+  font: 800 11px var(--font-mono);
+}
+
+.version-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background:
+    linear-gradient(rgba(3, 8, 12, 0.94), rgba(3, 8, 12, 0.98)),
+    repeating-linear-gradient(0deg, transparent 0 3px, rgba(75, 220, 255, 0.025) 3px 4px);
+  backdrop-filter: blur(16px);
+}
+
+.version-gate__panel {
+  width: min(100%, 510px);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 13px;
+  padding: 24px;
+  border: 1px solid rgba(255, 89, 111, 0.55);
+  background: #071015;
+  box-shadow: 0 0 60px rgba(255, 52, 82, 0.14);
+  clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px));
+}
+
+.version-gate__signal {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  color: var(--red);
+  border: 1px solid rgba(255, 89, 111, 0.55);
+  background: rgba(255, 89, 111, 0.08);
+}
+
+.version-gate__code {
+  color: var(--red);
+  font: 800 8px var(--font-mono);
+  letter-spacing: 0.13em;
+}
+
+.version-gate h2 {
+  margin: 0;
+  font: 800 23px var(--font-mono);
+  letter-spacing: -0.03em;
+}
+
+.version-gate p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.version-gate__versions {
+  display: grid;
+  grid-template-columns: 1fr 24px 1fr;
+  align-items: center;
+  border: 1px solid var(--line);
+}
+
+.version-gate__versions > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+}
+
+.version-gate__versions span {
+  color: var(--muted-2);
+  font: 700 8px var(--font-mono);
+}
+
+.version-gate__versions strong {
+  color: var(--white);
+  font: 800 15px var(--font-mono);
+}
+
+.version-gate__versions i {
+  width: 7px;
+  height: 7px;
+  justify-self: center;
+  border-top: 1px solid var(--cyan);
+  border-right: 1px solid var(--cyan);
+  transform: rotate(45deg);
+}
+
+.version-gate ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.version-gate li {
+  position: relative;
+  padding: 6px 0 6px 15px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.version-gate li::before {
+  content: ">";
+  position: absolute;
+  left: 0;
+  color: var(--cyan);
+  font-family: var(--font-mono);
+}
+
+.version-gate__error {
+  padding: 9px;
+  color: var(--red);
+  border: 1px solid rgba(255, 89, 111, 0.35);
+  background: rgba(255, 89, 111, 0.06);
+  font: 700 9px var(--font-mono);
+}
+
+.version-gate > .version-gate__panel > small {
+  color: var(--muted-2);
+  text-align: center;
+  font: 700 8px var(--font-mono);
+}
+
+.button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}

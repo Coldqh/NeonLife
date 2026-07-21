@@ -14,6 +14,22 @@ export const initialEvents: WorldEvent[] = [
     pinned: true
   },
   {
+    id: "evt-police-check",
+    timestamp: INITIAL_GAME_TIMESTAMP - 7 * minute,
+    category: "local",
+    title: "У станции усилена проверка документов.",
+    detail: "Два патруля перекрыли центральный выход. Очередь движется медленно.",
+    importance: 3
+  },
+  {
+    id: "evt-night-canteen",
+    timestamp: INITIAL_GAME_TIMESTAMP - 32 * minute,
+    category: "local",
+    title: "Night Canteen снизила цену на остатки смены.",
+    detail: "Горячая еда доступна за ₵ 28 до закрытия кухни.",
+    importance: 1
+  },
+  {
     id: "evt-mira-message",
     timestamp: INITIAL_GAME_TIMESTAMP - 3 * minute,
     category: "contact",
