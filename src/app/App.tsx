@@ -24,7 +24,8 @@ const UI_SETTINGS_KEY = "neon-life/ui-settings/v1";
 const SESSION_KEY = "neon-life/demo-session/v1";
 
 type NavId = "life" | "city" | "people" | "work" | "network" | "inventory" | "health" | "home" | "messages" | "archive";
-type WindowId = "mira" | "messages" | "vacancy" | "settings" | "diagnostics";
+type WindowId = "profile" | "mira" | "messages" | "vacancy" | "local" | "journal" | "settings" | "diagnostics";
+type MobileLifeTab = "now" | "plan" | "feed" | "log";
 
 interface DemoSession {
   timestamp: number;
@@ -129,9 +130,12 @@ const plans = [
 ];
 
 const windowLabels: Record<WindowId, string> = {
+  profile: "KAIN VALE",
   mira: "MIRA KOVAL",
   messages: "MESSAGES",
   vacancy: "VACANCY",
+  local: "LOCAL CHANNEL",
+  journal: "EVENT LOG",
   settings: "SYSTEM SETTINGS",
   diagnostics: "DIAGNOSTICS"
 };
@@ -343,7 +347,7 @@ export default function App() {
       <div className="sidebar__footer">
         <span>WORLD</span>
         <strong>NL-7DB-0441</strong>
-        <small>SIM v0.1.0</small>
+        <small>SIM v0.2.0</small>
       </div>
     </aside>
   );
@@ -422,6 +426,7 @@ export default function App() {
       onAction={executeAction}
       onOpenWindow={openWindow}
       onOpenContext={() => setContextOpen(true)}
+      onOpenActions={() => setActionSheetOpen(true)}
     />
   ) : (
     <ModulePreview activeNav={activeNav} onReturn={() => setActiveNav("life")} onOpenWindow={openWindow} />
@@ -462,6 +467,9 @@ export default function App() {
             setSettings={setSettings}
             onAction={executeAction}
             onReset={resetDemo}
+            session={session}
+            journalFilter={journalFilter}
+            setJournalFilter={setJournalFilter}
           />
         </WindowFrame>
       ) : null}
@@ -498,6 +506,7 @@ interface LifeWorkspaceProps {
   onAction: (action: ActionDefinition) => void;
   onOpenWindow: (id: WindowId) => void;
   onOpenContext: () => void;
+  onOpenActions: () => void;
 }
 
 function LifeWorkspace({
@@ -508,7 +517,8 @@ function LifeWorkspace({
   onAdvance,
   onAction,
   onOpenWindow,
-  onOpenContext
+  onOpenContext,
+  onOpenActions
 }: LifeWorkspaceProps) {
   const { player } = session;
 
@@ -527,7 +537,19 @@ function LifeWorkspace({
         </div>
       </header>
 
-      <div className="life-grid">
+      <MobileLifeWorkspace
+        session={session}
+        filteredEvents={filteredEvents}
+        journalFilter={journalFilter}
+        setJournalFilter={setJournalFilter}
+        onAdvance={onAdvance}
+        onAction={onAction}
+        onOpenWindow={onOpenWindow}
+        onOpenContext={onOpenContext}
+        onOpenActions={onOpenActions}
+      />
+
+      <div className="life-grid life-grid--desktop">
         <SystemPanel title="KAIN VALE" code="CITIZEN/PROFILE" className="hero-panel" action={<span className="status-chip">ONLINE</span>}>
           <div className="hero-summary">
             <Portrait kind="player" label="Стилизованный профиль Каина Вейла" />
@@ -535,7 +557,7 @@ function LifeWorkspace({
               <span>AGE {player.age} · {player.occupation}</span>
               <strong>{player.origin}</strong>
               <small>ID LC04-19-8841 · CLEARANCE 0</small>
-              <button type="button" className="text-link">Открыть полную запись <Icon name="chevron" size={14} /></button>
+              <button type="button" className="text-link" onClick={() => onOpenWindow("profile")}>Открыть полную запись <Icon name="chevron" size={14} /></button>
             </div>
           </div>
           <div className="hero-facts">
@@ -664,6 +686,180 @@ function LifeWorkspace({
   );
 }
 
+
+interface MobileLifeWorkspaceProps extends LifeWorkspaceProps {
+  filteredEvents: WorldEvent[];
+}
+
+function MobileLifeWorkspace({
+  session,
+  filteredEvents,
+  journalFilter,
+  setJournalFilter,
+  onAdvance,
+  onAction,
+  onOpenWindow,
+  onOpenContext,
+  onOpenActions
+}: MobileLifeWorkspaceProps) {
+  const [activeTab, setActiveTab] = useState<MobileLifeTab>("now");
+  const { player } = session;
+  const visibleEvents = filteredEvents.slice(0, 4);
+
+  return (
+    <section className="mobile-life" aria-label="Мобильный экран жизни">
+      <div className="mobile-life__identity-row">
+        <button type="button" className="mobile-identity" onClick={() => onOpenWindow("profile")}>
+          <Portrait kind="player" label="Каин Вейл" />
+          <span>
+            <strong>KAIN VALE</strong>
+            <small>{player.occupation} · {player.sector}</small>
+          </span>
+          <Icon name="chevron" size={16} />
+        </button>
+        <div className="mobile-wallet">
+          <strong>₵ {player.balance.toLocaleString("ru-RU")}</strong>
+          <small>HOME {player.housingDaysLeft}D</small>
+        </div>
+      </div>
+
+      <div className="mobile-vitals" aria-label="Состояние героя">
+        <MobileVital label="HP" value={player.condition.health} />
+        <MobileVital label="FAT" value={player.condition.fatigue} danger />
+        <MobileVital label="STR" value={player.condition.stress} danger />
+        <MobileVital label="FOOD" value={player.condition.hunger} danger />
+      </div>
+
+      <section className="mobile-current-action">
+        <header>
+          <span><i /> WAITING</span>
+          <time>{formatGameTime(session.timestamp)}</time>
+        </header>
+        <h2>{session.currentActivity}</h2>
+        <div className="mobile-current-action__meta">
+          <span>LC / SECTOR 04</span>
+          <span className="warning-text">EXPOSURE MED</span>
+          <span>39 MIN LEFT</span>
+        </div>
+        <div className="mobile-current-action__buttons">
+          <button type="button" className="button button--primary" onClick={() => onAction(quickActions[0])}>Ехать · 35 мин</button>
+          <button type="button" className="button button--ghost" onClick={() => onAdvance(15, "Ожидание")}>Ждать 15</button>
+        </div>
+      </section>
+
+      <nav className="mobile-subnav" aria-label="Разделы экрана жизни">
+        {([
+          ["now", "СЕЙЧАС"],
+          ["plan", "ПЛАН"],
+          ["feed", "РАЙОН"],
+          ["log", "ЖУРНАЛ"]
+        ] as Array<[MobileLifeTab, string]>).map(([id, label]) => (
+          <button type="button" key={id} className={activeTab === id ? "is-active" : ""} onClick={() => setActiveTab(id)}>
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      <div className="mobile-tab-panel">
+        {activeTab === "now" ? (
+          <div className="mobile-now">
+            <div className="mobile-section-heading">
+              <span>LOCAL / AVAILABLE</span>
+              <button type="button" onClick={onOpenActions}>ВСЕ 4</button>
+            </div>
+            <div className="mobile-action-list">
+              {quickActions.slice(0, 3).map((action) => (
+                <button type="button" className="mobile-action-row" key={action.id} onClick={() => onAction(action)}>
+                  <span className={`risk-dot risk-dot--${action.risk.toLowerCase()}`} />
+                  <span>
+                    <strong>{action.title}</strong>
+                    <small>{action.duration} MIN · {action.cost ? `₵ ${action.cost}` : "FREE"}</small>
+                  </span>
+                  <Icon name="chevron" size={15} />
+                </button>
+              ))}
+            </div>
+            <button type="button" className="mobile-contact-row" onClick={onOpenContext}>
+              <Portrait kind="mira" label="Мира Коваль" />
+              <span><strong>MIRA KOVAL</strong><small>Ответила 3 минуты назад</small></span>
+              <span className="status-chip status-chip--online">1 NEW</span>
+            </button>
+          </div>
+        ) : null}
+
+        {activeTab === "plan" ? (
+          <div className="mobile-plan-list">
+            {plans.map((item) => (
+              <button type="button" className={`mobile-plan-row mobile-plan-row--${item.status}`} key={`${item.time}-${item.title}`} onClick={() => item.title.includes("собеседование") ? onOpenWindow("vacancy") : undefined}>
+                <time>{item.time}</time>
+                <span><strong>{item.title}</strong><small>{item.detail}</small></span>
+                <i />
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {activeTab === "feed" ? (
+          <div className="mobile-feed">
+            <button type="button" className="mobile-map-button" onClick={() => onOpenWindow("local")}>
+              <span><strong>SECTOR 04</strong><small>Схема, маршруты и узлы</small></span>
+              <span className="status-chip">OPEN MAP</span>
+            </button>
+            <MobileFeedRow time="22:41" text="Отключена линия LC-04. Свет вернут после 01:30." />
+            <MobileFeedRow time="22:34" text="У станции полиция проверяет документы." warning />
+            <MobileFeedRow time="22:09" text="Night Canteen: горячая еда за ₵ 28." />
+          </div>
+        ) : null}
+
+        {activeTab === "log" ? (
+          <div className="mobile-log">
+            <div className="mobile-log__filter">
+              <select value={journalFilter} onChange={(event) => setJournalFilter(event.target.value as EventCategory | "all")}>
+                <option value="all">ALL EVENTS</option>
+                <option value="personal">PERSONAL</option>
+                <option value="contact">CONTACT</option>
+                <option value="work">WORK</option>
+                <option value="finance">FINANCE</option>
+                <option value="health">HEALTH</option>
+                <option value="local">LOCAL</option>
+                <option value="system">SYSTEM</option>
+              </select>
+              <button type="button" onClick={() => onOpenWindow("journal")}>FULL LOG</button>
+            </div>
+            {visibleEvents.map((event) => (
+              <article className={`mobile-event mobile-event--${event.category}`} key={event.id}>
+                <time>{formatGameTime(event.timestamp)}</time>
+                <span>{event.category.toUpperCase()}</span>
+                <strong>{event.title}</strong>
+              </article>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function MobileVital({ label, value, danger = false }: { label: string; value: number; danger?: boolean }) {
+  const critical = danger ? value >= 70 : value <= 35;
+  return (
+    <div className={`mobile-vital ${critical ? "is-critical" : ""}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <i><b style={{ width: `${value}%` }} /></i>
+    </div>
+  );
+}
+
+function MobileFeedRow({ time, text, warning = false }: { time: string; text: string; warning?: boolean }) {
+  return (
+    <div className={`mobile-feed-row ${warning ? "is-warning" : ""}`}>
+      <time>{time}</time>
+      <p>{text}</p>
+    </div>
+  );
+}
+
 function ActionCard({ action, onAction, compact = false }: { action: ActionDefinition; onAction: (action: ActionDefinition) => void; compact?: boolean }) {
   return (
     <button type="button" className={`action-card ${compact ? "action-card--compact" : ""}`} onClick={() => onAction(action)}>
@@ -701,14 +897,49 @@ function WindowContent({
   settings,
   setSettings,
   onAction,
-  onReset
+  onReset,
+  session,
+  journalFilter,
+  setJournalFilter
 }: {
   id: WindowId;
   settings: UiSettings;
   setSettings: (settings: UiSettings) => void;
   onAction: (action: ActionDefinition) => void;
   onReset: () => void;
+  session: DemoSession;
+  journalFilter: EventCategory | "all";
+  setJournalFilter: (filter: EventCategory | "all") => void;
 }) {
+
+  if (id === "profile") {
+    const { player } = session;
+    return (
+      <div className="profile-window">
+        <div className="profile-window__head">
+          <Portrait kind="player" label="Каин Вейл" />
+          <div>
+            <span>CITIZEN LC04-19-8841</span>
+            <h3>KAIN VALE</h3>
+            <p>AGE {player.age} · {player.occupation}</p>
+            <strong>{player.origin}</strong>
+          </div>
+        </div>
+        <div className="profile-window__resources">
+          <div><span>BALANCE</span><strong>₵ {player.balance.toLocaleString("ru-RU")}</strong></div>
+          <div><span>HOUSING</span><strong>{player.housingDaysLeft} DAYS</strong></div>
+          <div><span>MEDICAL</span><strong>LIMITED</strong></div>
+        </div>
+        <div className="profile-window__meters">
+          <Meter label="Здоровье" value={player.condition.health} />
+          <Meter label="Усталость" value={player.condition.fatigue} invert />
+          <Meter label="Стресс" value={player.condition.stress} invert />
+          <Meter label="Голод" value={player.condition.hunger} invert />
+        </div>
+      </div>
+    );
+  }
+
   if (id === "mira") {
     return (
       <div className="dossier-window">
@@ -783,6 +1014,58 @@ function WindowContent({
     );
   }
 
+
+  if (id === "local") {
+    return (
+      <div className="local-window">
+        <div className="feed-map local-window__map">
+          <div className="feed-map__grid" />
+          <span className="map-node map-node--player" style={{ left: "31%", top: "58%" }}>YOU</span>
+          <span className="map-node map-node--contact" style={{ left: "73%", top: "36%" }}>MIRA</span>
+          <span className="map-node map-node--alert" style={{ left: "52%", top: "72%" }}>POLICE</span>
+          <div className="route-line" />
+        </div>
+        <div className="local-window__stats">
+          <div><span>SECURITY</span><strong className="warning-text">LOW</strong></div>
+          <div><span>LIGHTING</span><strong>OFFLINE</strong></div>
+          <div><span>TRANSIT</span><strong>DELAYED</strong></div>
+        </div>
+        <div className="local-window__feed">
+          <MobileFeedRow time="22:41" text="Отключена линия LC-04. Свет вернут после 01:30." />
+          <MobileFeedRow time="22:34" text="У станции полиция проверяет документы." warning />
+          <MobileFeedRow time="22:09" text="Night Canteen продаёт остатки смены за ₵ 28." />
+        </div>
+      </div>
+    );
+  }
+
+  if (id === "journal") {
+    const visible = session.events.filter((event) => journalFilter === "all" || event.category === journalFilter);
+    return (
+      <div className="journal-window">
+        <select value={journalFilter} onChange={(event) => setJournalFilter(event.target.value as EventCategory | "all")}>
+          <option value="all">ALL EVENTS</option>
+          <option value="personal">PERSONAL</option>
+          <option value="contact">CONTACT</option>
+          <option value="work">WORK</option>
+          <option value="finance">FINANCE</option>
+          <option value="health">HEALTH</option>
+          <option value="local">LOCAL</option>
+          <option value="system">SYSTEM</option>
+        </select>
+        <div className="event-log">
+          {visible.map((event) => (
+            <article className={`event-row event-row--${event.category}`} key={event.id}>
+              <time>{formatGameTime(event.timestamp)}</time>
+              <span className="event-row__category">{event.category.toUpperCase()}</span>
+              <div><strong>{event.title}</strong>{event.detail ? <p>{event.detail}</p> : null}</div>
+            </article>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   if (id === "settings") {
     return (
       <div className="settings-window">
@@ -805,7 +1088,7 @@ function WindowContent({
       <div className="diagnostic-row"><span>PWA CACHE</span><strong>ARMED</strong><i>85%</i></div>
       <div className="diagnostic-row"><span>WORLD SIMULATION</span><strong>VERTICAL SLICE</strong><i>22%</i></div>
       <div className="diagnostic-row diagnostic-row--warning"><span>INDEXED DB</span><strong>NOT CONNECTED</strong><i>0%</i></div>
-      <pre>{`NEON/LINK DIAGNOSTIC\nBUILD: 0.1.0\nWORLD: NL-7DB-0441\nACTIVE ENTITIES: 2\nQUEUED EVENTS: 5\nSTATUS: STABLE`}</pre>
+      <pre>{`NEON/LINK DIAGNOSTIC\nBUILD: 0.2.0\nWORLD: NL-7DB-0441\nACTIVE ENTITIES: 2\nQUEUED EVENTS: 5\nSTATUS: STABLE`}</pre>
     </div>
   );
 }

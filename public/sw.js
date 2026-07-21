@@ -1,4 +1,4 @@
-const CACHE = "neon-life-v0.1.0";
+const CACHE = "neon-life-v0.2.0";
 const CORE = ["./", "./index.html", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 async function precacheAppShell() {
