@@ -24,14 +24,6 @@ function resolveScheduledEvent(session: GameSession, scheduled: ScheduledWorldEv
       importance: 3
     };
   }
-  if (scheduled.type === "vacancy-expiry") {
-    return {
-      ...common,
-      category: "work",
-      title: `Ночная вакансия в ${String(scheduled.payload.location)} закрывается.`,
-      detail: "После указанного времени заявка больше не будет доступна."
-    };
-  }
   if (scheduled.type === "rent-warning") {
     return {
       ...common,

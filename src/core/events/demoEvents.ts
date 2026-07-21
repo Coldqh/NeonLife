@@ -8,68 +8,53 @@ export interface InitialEventContext {
   seed: string;
   districtName: string;
   districtCode: string;
-  contactName: string;
-  companyName: string;
+  marketName: string;
+  housingName: string;
 }
 
 export function createInitialEvents(context: InitialEventContext): WorldEvent[] {
   const makeId = (scope: string) => createStableEntityId("event", `${context.seed}:initial:${scope}`);
   return [
     {
-      id: makeId("grid-failure"),
+      id: makeId("session-opened"),
       timestamp: INITIAL_GAME_TIMESTAMP,
-      category: "local",
-      title: `Освещение в ${context.districtCode} отключено после аварии.`,
-      detail: "Городская сеть подтверждает повреждение распределительной линии.",
-      importance: 2,
+      category: "system",
+      title: "Личная городская сессия открыта.",
+      detail: `${context.districtName} / ${context.districtCode}. Личная сессия подключена к симуляции города.`,
+      importance: 1,
       pinned: true
     },
     {
-      id: makeId("checkpoint"),
-      timestamp: INITIAL_GAME_TIMESTAMP - 7 * minute,
-      category: "local",
-      title: "У транспортного узла усилена проверка документов.",
-      detail: "Районная безопасность перекрыла центральный выход.",
-      importance: 3
-    },
-    {
-      id: makeId("canteen"),
-      timestamp: INITIAL_GAME_TIMESTAMP - 32 * minute,
-      category: "local",
-      title: "Ночная столовая снизила цену на остатки смены.",
-      detail: "Горячая еда доступна за ₵ 28 до закрытия кухни.",
-      importance: 1
-    },
-    {
-      id: makeId("contact"),
-      timestamp: INITIAL_GAME_TIMESTAMP - 3 * minute,
-      category: "contact",
-      title: `${context.contactName} ответил на сообщение.`,
-      detail: `Временный пропуск в ${context.companyName} будет доступен после 23:20.`,
-      importance: 3
-    },
-    {
-      id: makeId("daily-cost"),
-      timestamp: INITIAL_GAME_TIMESTAMP - 26 * minute,
+      id: makeId("housing"),
+      timestamp: INITIAL_GAME_TIMESTAMP - 5 * minute,
       category: "finance",
-      title: "Списано ₵ 42 за транспорт и питание.",
+      title: `Жилой модуль ${context.housingName} оплачен на семь дней.`,
+      detail: "Продление доступно через терминал владельца жилья.",
+      importance: 2
+    },
+    {
+      id: makeId("market"),
+      timestamp: INITIAL_GAME_TIMESTAMP - 17 * minute,
+      category: "local",
+      title: `${context.marketName} открыл ночную торговую сессию.`,
+      detail: "Ассортимент и остатки зависят от поставок района.",
       importance: 1
     },
     {
-      id: makeId("vacancy"),
-      timestamp: INITIAL_GAME_TIMESTAMP - 45 * minute,
+      id: makeId("courier-board"),
+      timestamp: INITIAL_GAME_TIMESTAMP - 24 * minute,
       category: "work",
-      title: `${context.companyName} опубликовал ночную вакансию.`,
-      detail: "Помощник техника · 23:30–05:30 · оплата ₵ 188.",
-      importance: 3
+      title: "Городская курьерская биржа опубликовала новые заказы.",
+      detail: "Доступны разовые доставки без постоянного контракта.",
+      importance: 2
     },
     {
-      id: makeId("fatigue"),
-      timestamp: INITIAL_GAME_TIMESTAMP - 70 * minute,
+      id: makeId("condition"),
+      timestamp: INITIAL_GAME_TIMESTAMP - 41 * minute,
       category: "health",
-      title: "Усталость достигла повышенного значения.",
-      detail: "После 02:00 точность сложных действий начнёт снижаться.",
-      importance: 2
+      title: "Состояние героя синхронизировано с медицинским профилем.",
+      detail: "Усталость, стресс и голод будут влиять на работу и перемещение.",
+      importance: 1
     }
   ];
 }
@@ -78,6 +63,6 @@ export const initialEvents = createInitialEvents({
   seed: "NEON-LIFE-DEFAULT",
   districtName: "UNDERLINE",
   districtCode: "BLOCK 07",
-  contactName: "SENA ROTH",
-  companyName: "VECTRA SERVICE NODE"
+  marketName: "UNDERLINE NIGHT MARKET",
+  housingName: "HAB-STACK 07"
 });

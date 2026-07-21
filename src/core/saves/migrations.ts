@@ -2,9 +2,17 @@ import { SAVE_SCHEMA_VERSION, type SaveEnvelope, type SaveSlotId } from "./types
 import type { GameSession, LocationState } from "../../world/state/types";
 import { createInitialFoodState } from "../../gameplay/food/foodSystem";
 import { createInitialHousing } from "../../gameplay/housing/housingSystem";
+import { createInitialCourierState } from "../../gameplay/jobs/courier/courierSystem";
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+
+function isLegacyStoryEvent(value: unknown): boolean {
+  if (!isObject(value)) return false;
+  const text = `${String(value.title ?? "")} ${String(value.detail ?? "")}`.toLowerCase();
+  return ["временный пропуск", "собеседован", "ночная вакансия", "сервисной стойке", "главный вход не используй"].some((marker) => text.includes(marker));
 }
 
 function hasBaseSessionShape(value: unknown): value is Record<string, unknown> {
@@ -45,11 +53,30 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
   const clinicLocation = locations.find((location) => location.type === "clinic") ?? marketLocation;
   const seed = String(meta?.seed ?? "NEON-LIFE-MIGRATED");
   const existingLife = isObject(payload.life) ? payload.life : null;
+  const migratedEvents = (Array.isArray(payload.events) ? payload.events : []).filter((event) => !isLegacyStoryEvent(event));
+  const migratedQueue = (Array.isArray(payload.eventQueue) ? payload.eventQueue : []).filter((event) => !isObject(event) || event.type !== "vacancy-expiry");
+  const existingContact = isObject(payload.primaryContact) ? payload.primaryContact : {};
+  const neutralContact = {
+    ...existingContact,
+    role: "LOCAL ACQUAINTANCE",
+    status: "Занят своими делами",
+    location: housingLocation?.name ?? "LOCAL DISTRICT",
+    knownFacts: ["живёт в том же районе", "работает по сменному графику", "не связан с активными заданиями игрока"]
+  };
+  const existingLocationId = existingLife && typeof existingLife.currentLocationId === "string"
+    ? existingLife.currentLocationId
+    : housingLocation?.id;
+  const existingLocationName = locations.find((location) => location.id === existingLocationId)?.name
+    ?? housingLocation?.name
+    ?? "LOCAL DISTRICT";
 
   const migratedPayload = {
     ...payload,
     schemaVersion: SAVE_SCHEMA_VERSION,
-    eventQueue: Array.isArray(payload.eventQueue) ? payload.eventQueue : [],
+    events: migratedEvents,
+    eventQueue: migratedQueue,
+    primaryContact: neutralContact,
+    currentActivity: `На месте: ${existingLocationName}`,
     world: {
       ...world,
       locations
@@ -69,6 +96,9 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
         clinicLocation?.id ?? "clinic-missing"
       ),
       lastSleepAt: null
+    },
+    jobs: isObject(payload.jobs) ? payload.jobs : {
+      courier: createInitialCourierState(seed, timestamp, locations)
     }
   } as unknown as GameSession;
 

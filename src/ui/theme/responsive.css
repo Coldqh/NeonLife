@@ -1019,3 +1019,143 @@
     grid-column: auto;
   }
 }
+
+@media (max-width: 760px) {
+  .courier-workspace {
+    height: 100%;
+    min-height: 0;
+    padding: 7px;
+    gap: 7px;
+    overflow: hidden;
+  }
+
+  .courier-heading {
+    min-height: auto;
+    padding: 7px;
+  }
+
+  .courier-heading h1 {
+    font-size: 15px;
+  }
+
+  .courier-heading p,
+  .courier-heading .screen-heading__path {
+    display: none;
+  }
+
+  .courier-stats {
+    grid-template-columns: repeat(3, 1fr);
+    width: 100%;
+    gap: 4px;
+  }
+
+  .courier-stats > div {
+    padding: 5px;
+  }
+
+  .courier-stats strong {
+    font-size: 10px;
+  }
+
+  .courier-active {
+    padding: 7px;
+  }
+
+  .courier-active h2 {
+    font-size: 15px;
+  }
+
+  .courier-route-line {
+    margin: 6px 0;
+    gap: 4px;
+  }
+
+  .courier-route-line > div {
+    padding: 5px;
+  }
+
+  .courier-route-line strong {
+    font-size: 8px;
+  }
+
+  .courier-active__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 3px;
+  }
+
+  .courier-active__grid > div {
+    padding: 4px;
+  }
+
+  .courier-active__grid strong {
+    font-size: 9px;
+  }
+
+  .courier-active__actions {
+    margin-top: 6px;
+  }
+
+  .courier-active__actions button {
+    min-height: 32px;
+    width: 100%;
+  }
+
+  .courier-idle {
+    padding: 7px;
+  }
+
+  .courier-board {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .courier-order-list {
+    min-height: 0;
+    overflow-y: auto;
+    grid-template-columns: 1fr;
+    gap: 5px;
+    padding-bottom: 8px;
+  }
+
+  .courier-order {
+    padding: 7px;
+    gap: 5px;
+  }
+
+  .courier-order p {
+    display: none;
+  }
+
+  .courier-order__meta span:nth-child(4) {
+    display: none;
+  }
+
+  .courier-order > button {
+    min-height: 29px;
+  }
+
+  .action-sheet__shortcuts {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 430px) {
+  .courier-heading {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+
+  .courier-active__grid > div:nth-child(2),
+  .courier-active__grid > div:nth-child(6) {
+    display: none;
+  }
+
+  .courier-active__grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .courier-board > header small {
+    display: none;
+  }
+}

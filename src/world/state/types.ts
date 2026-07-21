@@ -6,6 +6,7 @@ import type { KnownNpc } from "../../people/demoNpc";
 import type { DistrictPulseState } from "../city/districtPulse";
 import type { FoodState } from "../../gameplay/food/foodSystem";
 import type { HousingState } from "../../gameplay/housing/housingSystem";
+import type { CourierState } from "../../gameplay/jobs/courier/courierSystem";
 
 export interface CityState {
   id: EntityId;
@@ -62,7 +63,7 @@ export type ScheduledEventStatus = "queued" | "resolved" | "cancelled";
 export interface ScheduledWorldEvent {
   id: EntityId;
   dueAt: number;
-  type: "grid-restoration" | "vacancy-expiry" | "rent-warning" | "patrol-shift";
+  type: "grid-restoration" | "rent-warning" | "patrol-shift";
   status: ScheduledEventStatus;
   entityIds: EntityId[];
   payload: Record<string, string | number | boolean>;
@@ -97,4 +98,7 @@ export interface GameSession {
   currentActivity: string;
   district: DistrictPulseState;
   life: LifeState;
+  jobs: {
+    courier: CourierState;
+  };
 }

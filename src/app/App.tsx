@@ -22,15 +22,19 @@ import { FOOD_CATALOG, getFoodProduct } from "../data/products/foodCatalog";
 import { canPrepare, getFoodFreshness, getFreshFoodUnits } from "../gameplay/food/foodSystem";
 import { getTravelOptions, isLocationOpen } from "../gameplay/travel/travelSystem";
 import {
+  acceptCourierOrder,
   buyFoodAtCurrentLocation,
+  deliverCourierOrder,
   discardSpoiled,
   eatFoodFromStorage,
   orderFoodToHome,
+  pickupCourierOrder,
   progressLife,
   sleepAtHome,
   travelToLocation
 } from "../gameplay/life/lifeSimulation";
 import { Icon, type IconName } from "../ui/components/Icons";
+import { getActiveCourierOrder, type CourierOrder } from "../gameplay/jobs/courier/courierSystem";
 import { Meter } from "../ui/components/Meter";
 import { Portrait } from "../ui/components/Portrait";
 import { SystemPanel } from "../ui/components/SystemPanel";
@@ -47,7 +51,7 @@ import {
 const UI_SETTINGS_KEY = "neon-life/ui-settings/v1";
 
 type NavId = "life" | "city" | "people" | "work" | "network" | "inventory" | "health" | "home" | "messages" | "archive";
-type WindowId = "profile" | "contact" | "messages" | "vacancy" | "local" | "journal" | "food" | "places" | "home" | "settings" | "diagnostics";
+type WindowId = "profile" | "contact" | "messages" | "courier" | "local" | "journal" | "food" | "places" | "home" | "settings" | "diagnostics";
 type MobileLifeTab = "now" | "plan" | "food" | "log";
 
 interface ActionDefinition {
@@ -71,105 +75,80 @@ interface ActionDefinition {
 const navItems: Array<{ id: NavId; label: string; icon: IconName; badge?: string }> = [
   { id: "life", label: "LIFE", icon: "life" },
   { id: "city", label: "CITY", icon: "city" },
-  { id: "people", label: "PEOPLE", icon: "people", badge: "4" },
-  { id: "work", label: "WORK", icon: "work", badge: "2" },
+  { id: "people", label: "PEOPLE", icon: "people" },
+  { id: "work", label: "WORK", icon: "work" },
   { id: "network", label: "NETWORK", icon: "network" },
   { id: "inventory", label: "INVENTORY", icon: "inventory" },
-  { id: "health", label: "HEALTH", icon: "health", badge: "!" },
+  { id: "health", label: "HEALTH", icon: "health" },
   { id: "home", label: "HOME", icon: "home" },
-  { id: "messages", label: "MESSAGES", icon: "messages", badge: "3" },
+  { id: "messages", label: "MESSAGES", icon: "messages" },
   { id: "archive", label: "ARCHIVE", icon: "archive" }
 ];
 
 function createQuickActions(session: GameSession): ActionDefinition[] {
-  const contact = session.primaryContact;
   const currentLocation = session.world.locations.find((location) => location.id === session.life.currentLocationId);
-  const workshop = session.world.locations.find((location) => location.type === "workshop");
   const market = session.world.locations.find((location) => location.type === "market");
+  const courierHub = session.world.locations.find((location) => location.name.includes("MESHLINE"));
   const housing = session.world.locations.find((location) => location.id === session.life.housing.locationId);
-  const district = session.world.districts.find((item) => item.id === session.world.activeDistrictId) ?? session.world.districts[0];
   const options: ActionDefinition[] = [];
 
-  if (workshop && currentLocation?.id !== workshop.id) {
+  const routes = getTravelOptions(session);
+  for (const target of [courierHub, market, housing]) {
+    if (!target || target.id === currentLocation?.id) continue;
+    const route = routes.find((item) => item.location.id === target.id);
+    if (!route) continue;
+    const district = session.world.districts.find((item) => item.id === target.districtId);
+    const isHome = target.id === housing?.id;
     options.push({
-      id: "travel-workshop",
-      title: `Ехать в ${workshop.name}`,
-      code: "MOVE/TRANSIT",
-      duration: 35 + session.district.transitDelayMinutes,
-      cost: 12,
-      location: `${session.world.districts.find((item) => item.id === workshop.districtId)?.name ?? "INDUSTRIAL"} / ${workshop.name}`,
-      risk: "MED",
+      id: `travel-${target.id}`,
+      title: isHome ? "Вернуться домой" : `Ехать: ${target.name}`,
+      code: isHome ? "MOVE/HOME" : "MOVE/CITY",
+      duration: route.durationMinutes,
+      cost: route.cost,
+      location: `${district?.name ?? "CITY"} / ${target.name}`,
+      risk: district && district.securityLevel < 40 ? "MED" : "LOW",
       category: "personal",
-      result: `Ты добрался до ${workshop.name}. ${contact.name} оставил временный пропуск на сервисной стойке.`,
-      activityAfter: `На месте: ${workshop.name}`,
-      fatigueDelta: 3,
-      stressDelta: 1,
-      hungerDelta: 2,
-      targetLocationId: workshop.id
-    });
-  }
-
-  if (market && currentLocation?.id !== market.id) {
-    options.push({
-      id: "travel-market",
-      title: `Ехать на ${market.name}`,
-      code: "MOVE/SUPPLY",
-      duration: 14 + Math.ceil(session.district.transitDelayMinutes / 2),
-      cost: 4,
-      location: `${district.name} / ${market.name}`,
-      risk: "LOW",
-      category: "personal",
-      result: `Ты прибыл на ${market.name}. Доступен локальный ассортимент продуктов.`,
-      activityAfter: `Покупки: ${market.name}`,
+      result: `Ты прибыл в ${target.name}.`,
+      activityAfter: `На месте: ${target.name}`,
       fatigueDelta: 1,
       hungerDelta: 1,
-      targetLocationId: market.id
+      targetLocationId: target.id
     });
   }
 
   options.push({
-    id: "reply-contact",
-    title: `Ответить: ${contact.name}`,
-    code: "COMMS/CONTACT",
-    duration: 5,
+    id: "wait-local",
+    title: "Осмотреться и подождать",
+    code: "LIFE/WAIT",
+    duration: 15,
     cost: 0,
-    location: `${district.name} / REMOTE`,
+    location: currentLocation?.name ?? session.player.district,
     risk: "LOW",
-    category: "contact",
-    result: `${contact.name} подтвердил встречу и попросил использовать сервисный вход.`,
-    activityAfter: currentLocation ? `На месте: ${currentLocation.name}` : "Городская сеть",
-    stressDelta: -2
+    category: "personal",
+    result: "Прошло пятнадцать минут.",
+    activityAfter: currentLocation ? `На месте: ${currentLocation.name}` : "Ожидание",
+    stressDelta: -1
   });
-
-  if (housing && currentLocation?.id !== housing.id) {
-    options.push({
-      id: "return-home",
-      title: `Вернуться в ${housing.name}`,
-      code: "MOVE/HOME",
-      duration: 16 + Math.ceil(session.district.transitDelayMinutes / 2),
-      cost: 4,
-      location: `${session.world.districts[0]?.name} / ${housing.name}`,
-      risk: "LOW",
-      category: "personal",
-      result: `Ты вернулся в жилой блок ${housing.name}.`,
-      activityAfter: `В жилом блоке ${housing.name}`,
-      fatigueDelta: 1,
-      targetLocationId: housing.id
-    });
-  }
 
   return options.slice(0, 4);
 }
 
 function createPlans(session: GameSession) {
-  const contact = session.primaryContact.name;
-  const workshop = session.world.locations.find((location) => location.type === "workshop")?.name ?? "VECTRA SERVICE NODE";
-  return [
-    { time: "22:55", title: `Ответить: ${contact}`, status: "urgent", detail: "Окно связи скоро закроется" },
-    { time: "23:20", title: `Встреча у ${workshop}`, status: "planned", detail: "Сервисный вход · нужен транспорт" },
-    { time: "00:10", title: "Собеседование на ночную смену", status: "planned", detail: "Оплата ₵ 188 · 6 часов" },
-    { time: "06:30", title: "Вернуться в жилой блок", status: "open", detail: `Жильё оплачено ещё на ${session.player.housingDaysLeft} дней` }
-  ];
+  const active = getActiveCourierOrder(session.jobs.courier);
+  const foodUnits = getFreshFoodUnits(session.life.food, session.timestamp);
+  const items = [];
+  if (active) {
+    items.push({
+      time: formatGameTime(active.deadlineAt),
+      title: `Доставка ${active.code}`,
+      status: active.deadlineAt < session.timestamp + 30 * 60_000 ? "urgent" : "planned",
+      detail: active.status === "accepted" ? "Сначала забрать груз" : `Груз ${active.condition}% · завершить до срока`
+    });
+  }
+  items.push({ time: "—", title: "Курьерская биржа", status: "open", detail: `${session.jobs.courier.orders.filter((order) => order.status === "available").length} доступных заказов` });
+  items.push({ time: "—", title: "Домашний запас", status: foodUnits <= 2 ? "urgent" : "open", detail: `${foodUnits} свежих порций` });
+  items.push({ time: "—", title: "Жильё", status: session.player.housingDaysLeft <= 2 ? "urgent" : "open", detail: `Оплачено ещё на ${session.player.housingDaysLeft} дней` });
+  return items.slice(0, 4);
 }
 
 
@@ -177,7 +156,7 @@ const windowLabels: Record<WindowId, string> = {
   profile: "CITIZEN PROFILE",
   contact: "CONTACT RECORD",
   messages: "MESSAGES",
-  vacancy: "VACANCY",
+  courier: "COURIER EXCHANGE",
   local: "LOCAL CHANNEL",
   journal: "EVENT LOG",
   food: "FOOD STORAGE / SUPPLY",
@@ -224,6 +203,10 @@ export default function App() {
   }
 
   function executeAction(action: ActionDefinition): void {
+    if (action.targetLocationId) {
+      travel(action.targetLocationId);
+      return;
+    }
     setSession((current) => progressLife(current, action.duration, {
       category: action.category,
       title: action.result,
@@ -265,6 +248,18 @@ export default function App() {
     setSession((current) => sleepAtHome(current, hours));
   }
 
+  function acceptDelivery(orderId: string): void {
+    setSession((current) => acceptCourierOrder(current, orderId));
+  }
+
+  function pickupDelivery(): void {
+    setSession((current) => pickupCourierOrder(current));
+  }
+
+  function deliverDelivery(): void {
+    setSession((current) => deliverCourierOrder(current));
+  }
+
   function openWindow(id: WindowId): void {
     setOpenWindows((current) => current.includes(id) ? current : [...current, id]);
     setActiveWindow(id);
@@ -299,7 +294,7 @@ export default function App() {
         <span className="brand__mark">N/L</span>
         <span className="brand__text">
           <strong>NEON/LINK</strong>
-          <small>OS {APP_VERSION} // SEVEN DAYS BELOW</small>
+          <small>OS {APP_VERSION} // CITY SANDBOX</small>
         </span>
       </button>
 
@@ -307,7 +302,7 @@ export default function App() {
         <Icon name="clock" />
         <span>
           <strong>{formatGameTime(session.timestamp)}</strong>
-          <small>{formatGameDate(session.timestamp)} · DAY {getDayNumber(session.timestamp)}/7</small>
+          <small>{formatGameDate(session.timestamp)} · DAY {getDayNumber(session.timestamp)}</small>
         </span>
       </div>
       <div className="topbar__status topbar__status--location">
@@ -333,7 +328,7 @@ export default function App() {
       </div>
       <button type="button" className="alert-button" onClick={() => openWindow("messages")}>
         <Icon name="alert" />
-        <span>3</span>
+        <span>0</span>
       </button>
       <button type="button" className="icon-button topbar__settings" onClick={() => openWindow("settings")} aria-label="Настройки">
         <Icon name="settings" />
@@ -376,8 +371,8 @@ export default function App() {
       <button type="button" className="mobile-nav__action" onClick={() => setActionSheetOpen(true)}>
         <Icon name="action" size={23} /><span>ACTION</span>
       </button>
-      <button type="button" className={activeNav === "people" ? "is-active" : ""} onClick={() => setActiveNav("people")}>
-        <Icon name="people" /><span>PEOPLE</span>
+      <button type="button" className={activeNav === "work" ? "is-active" : ""} onClick={() => setActiveNav("work")}>
+        <Icon name="work" /><span>WORK</span>
       </button>
       <button type="button" onClick={() => openWindow("settings")}>
         <Icon name="settings" /><span>SYSTEM</span>
@@ -447,6 +442,8 @@ export default function App() {
     />
   ) : activeNav === "city" ? (
     <PlacesWorkspace session={session} onTravel={travel} onOpenWindow={openWindow} />
+  ) : activeNav === "work" ? (
+    <CourierWorkspace session={session} onAccept={acceptDelivery} onPickup={pickupDelivery} onDeliver={deliverDelivery} onTravel={travel} />
   ) : activeNav === "inventory" ? (
     <FoodWorkspace session={session} onEat={eatFood} onOpenWindow={openWindow} />
   ) : activeNav === "home" ? (
@@ -502,6 +499,9 @@ export default function App() {
             onDiscardFood={discardFood}
             onOrderFood={orderFood}
             onSleep={sleep}
+            onAcceptDelivery={acceptDelivery}
+            onPickupDelivery={pickupDelivery}
+            onDeliverDelivery={deliverDelivery}
             onOpenWindow={openWindow}
           />
         </WindowFrame>
@@ -519,6 +519,7 @@ export default function App() {
               <button type="button" className="icon-button" onClick={() => setActionSheetOpen(false)}><Icon name="close" /></button>
             </header>
             <div className="action-sheet__shortcuts">
+              <button type="button" onClick={() => { setActionSheetOpen(false); setActiveNav("work"); }}><Icon name="work" /><span><strong>РАБОТА</strong><small>{session.jobs.courier.orders.filter((order) => order.status === "available").length} заказов</small></span></button>
               <button type="button" onClick={() => { setActionSheetOpen(false); openWindow("food"); }}><Icon name="inventory" /><span><strong>ЕДА</strong><small>{getFreshFoodUnits(session.life.food, session.timestamp)} порций</small></span></button>
               <button type="button" onClick={() => { setActionSheetOpen(false); openWindow("places"); }}><Icon name="city" /><span><strong>МЕСТА</strong><small>{currentLocation?.name ?? "CITY"}</small></span></button>
               <button type="button" onClick={() => { setActionSheetOpen(false); openWindow("home"); }}><Icon name="home" /><span><strong>ДОМ</strong><small>{session.player.housingDaysLeft} дней</small></span></button>
@@ -576,7 +577,7 @@ function LifeWorkspace({
         <div>
           <span className="screen-heading__path">SYSTEM / LIFE / ACTIVE SESSION</span>
           <h1>ТЕКУЩАЯ ЖИЗНЬ</h1>
-          <p>{formatGameDateTime(session.timestamp)} · {player.district} · доступ к городской сети ограничен</p>
+          <p>{formatGameDateTime(session.timestamp)} · {player.district} · городская сессия активна</p>
         </div>
         <div className="screen-heading__controls">
           <button type="button" onClick={() => onAdvance(15)}>+15 MIN</button>
@@ -630,13 +631,13 @@ function LifeWorkspace({
             <div>
               <span>STATUS / WAITING</span>
               <h3>{session.currentActivity}</h3>
-              <p>Районная сеть нестабильна. Следующее окно связи открыто до 23:20.</p>
+              <p>Свободное время. Выбери локальное действие или открой рабочую биржу.</p>
             </div>
           </div>
           <div className="activity-meta">
             <div><span>LOCATION</span><strong>{player.district} / {player.sector}</strong></div>
             <div><span>EXPOSURE</span><strong className="warning-text">MEDIUM</strong></div>
-            <div><span>NEXT STOP</span><strong>{session.primaryContact.location}</strong></div>
+            <div><span>WORK</span><strong>{session.jobs.courier.activeOrderId ? "ACTIVE DELIVERY" : "NO CONTRACT"}</strong></div>
           </div>
           <div className="activity-controls">
             {primaryAction ? <button type="button" className="button button--primary" onClick={() => onAction(primaryAction)}>{primaryAction.title} · {primaryAction.duration} мин</button> : <button type="button" className="button button--primary" onClick={() => onOpenWindow("places")}>Открыть маршруты</button>}
@@ -722,16 +723,16 @@ function LifeWorkspace({
             <span>
               <strong>{session.primaryContact.name}</strong>
               <small>{session.primaryContact.role} · {session.primaryContact.location}</small>
-              <em>Ответила 3 минуты назад</em>
+              <em>Последний контакт: {session.primaryContact.lastContact}</em>
             </span>
             <Icon name="chevron" />
           </button>
           <button type="button" className="contact-card contact-card--muted" onClick={() => onOpenWindow("messages")}>
-            <div className="contact-card__initial">JN</div>
+            <div className="contact-card__initial">SYS</div>
             <span>
-              <strong>PETR HALDEN</strong>
-              <small>HAB-STACK MANAGER</small>
-              <em>Последний контакт вчера</em>
+              <strong>HOUSING NODE</strong>
+              <small>{session.life.housing.type.toUpperCase()} / RENT NODE</small>
+              <em>Системный канал жилья</em>
             </span>
             <Icon name="chevron" />
           </button>
@@ -797,7 +798,7 @@ function MobileLifeWorkspace({
         <div className="mobile-current-action__meta">
           <span>{player.district} / {player.sector}</span>
           <span className="warning-text">EXPOSURE MED</span>
-          <span>39 MIN LEFT</span>
+          <span>{session.jobs.courier.activeOrderId ? "JOB ACTIVE" : "FREE"}</span>
         </div>
         <div className="mobile-current-action__buttons">
           {primaryAction ? <button type="button" className="button button--primary" onClick={() => onAction(primaryAction)}>{primaryAction.title} · {primaryAction.duration}</button> : <button type="button" className="button button--primary" onClick={() => onOpenWindow("places")}>МАРШРУТЫ</button>}
@@ -839,8 +840,8 @@ function MobileLifeWorkspace({
             </div>
             <button type="button" className="mobile-contact-row" onClick={onOpenContext}>
               <Portrait kind="contact" label={session.primaryContact.name} />
-              <span><strong>{session.primaryContact.name}</strong><small>Ответил 3 минуты назад</small></span>
-              <span className="status-chip status-chip--online">1 NEW</span>
+              <span><strong>{session.primaryContact.name}</strong><small>Известный контакт района</small></span>
+              <span className="status-chip">KNOWN</span>
             </button>
           </div>
         ) : null}
@@ -848,7 +849,7 @@ function MobileLifeWorkspace({
         {activeTab === "plan" ? (
           <div className="mobile-plan-list">
             {plans.map((item) => (
-              <button type="button" className={`mobile-plan-row mobile-plan-row--${item.status}`} key={`${item.time}-${item.title}`} onClick={() => item.title.includes("собеседование") ? onOpenWindow("vacancy") : undefined}>
+              <button type="button" className={`mobile-plan-row mobile-plan-row--${item.status}`} key={`${item.time}-${item.title}`}>
                 <time>{item.time}</time>
                 <span><strong>{item.title}</strong><small>{item.detail}</small></span>
                 <i />
@@ -1091,6 +1092,97 @@ function FoodTerminal({ session, onBuy, onEat, onDiscard, onOrder, onOpenPlaces 
   );
 }
 
+function courierMinutesLeft(order: CourierOrder, timestamp: number): number {
+  return Math.ceil((order.deadlineAt - timestamp) / 60_000);
+}
+
+function CourierWorkspace({
+  session,
+  onAccept,
+  onPickup,
+  onDeliver,
+  onTravel
+}: {
+  session: GameSession;
+  onAccept: (orderId: string) => void;
+  onPickup: () => void;
+  onDeliver: () => void;
+  onTravel: (locationId: string) => void;
+}) {
+  const state = session.jobs.courier;
+  const active = getActiveCourierOrder(state);
+  const available = state.orders.filter((order) => order.status === "available");
+  const locationName = (id: string) => session.world.locations.find((location) => location.id === id)?.name ?? "UNKNOWN NODE";
+  const atPickup = active?.pickupLocationId === session.life.currentLocationId;
+  const atDropoff = active?.dropoffLocationId === session.life.currentLocationId;
+
+  return (
+    <div className="courier-workspace">
+      <header className="screen-heading courier-heading">
+        <div>
+          <span className="screen-heading__path">WORK / MESHLINE / OPEN EXCHANGE</span>
+          <h1>КУРЬЕРСКАЯ БИРЖА</h1>
+          <p>Разовые городские заказы без постоянного контракта.</p>
+        </div>
+        <div className="courier-stats">
+          <div><span>RATING</span><strong>{state.rating}</strong></div>
+          <div><span>DONE</span><strong>{state.completedDeliveries}</strong></div>
+          <div><span>EARNED</span><strong>₵ {state.totalEarnings}</strong></div>
+        </div>
+      </header>
+
+      {active ? (
+        <section className={`courier-active courier-active--${active.risk}`}>
+          <header>
+            <div><span>ACTIVE DELIVERY</span><h2>{active.code}</h2></div>
+            <span className={`status-chip risk-${active.risk}`}>{active.status.toUpperCase()}</span>
+          </header>
+          <div className="courier-route-line">
+            <div className={active.status !== "accepted" ? "is-complete" : ""}><span>PICKUP</span><strong>{locationName(active.pickupLocationId)}</strong></div>
+            <i><Icon name="chevron" /></i>
+            <div><span>DROP</span><strong>{locationName(active.dropoffLocationId)}</strong></div>
+          </div>
+          <div className="courier-active__grid">
+            <div><span>CARGO</span><strong>{active.cargoName}</strong></div>
+            <div><span>WEIGHT</span><strong>{active.weightKg} KG</strong></div>
+            <div><span>CONDITION</span><strong>{active.condition}%</strong></div>
+            <div><span>DEADLINE</span><strong className={courierMinutesLeft(active, session.timestamp) < 25 ? "warning-text" : ""}>{courierMinutesLeft(active, session.timestamp)} MIN</strong></div>
+            <div><span>PAYOUT</span><strong>₵ {active.payout}</strong></div>
+            <div><span>LEGALITY</span><strong>{active.legality.toUpperCase()}</strong></div>
+          </div>
+          <div className="courier-active__actions">
+            {active.status === "accepted" && atPickup ? <button type="button" className="button button--primary" onClick={onPickup}>ЗАБРАТЬ ГРУЗ · 6 MIN</button> : null}
+            {active.status === "accepted" && !atPickup ? <button type="button" className="button button--primary" onClick={() => onTravel(active.pickupLocationId)}>ЕХАТЬ К ПОЛУЧЕНИЮ</button> : null}
+            {active.status === "in-transit" && atDropoff ? <button type="button" className="button button--primary" onClick={onDeliver}>ПЕРЕДАТЬ ГРУЗ · 5 MIN</button> : null}
+            {active.status === "in-transit" && !atDropoff ? <button type="button" className="button button--primary" onClick={() => onTravel(active.dropoffLocationId)}>ЕХАТЬ К КЛИЕНТУ</button> : null}
+          </div>
+        </section>
+      ) : (
+        <section className="courier-idle">
+          <Icon name="work" size={34} />
+          <div><strong>АКТИВНОГО ЗАКАЗА НЕТ</strong><span>Выбери одну доставку с биржи. Одновременно можно вести только один груз.</span></div>
+        </section>
+      )}
+
+      <section className="courier-board">
+        <header><div><span>LIVE BOARD</span><strong>{available.length} AVAILABLE</strong></div><small>Обновление {formatGameTime(state.boardRefreshAt)}</small></header>
+        <div className="courier-order-list">
+          {available.map((order) => (
+            <article className={`courier-order courier-order--${order.risk}`} key={order.id}>
+              <header><div><span>{order.code}</span><strong>{order.client}</strong></div><em>{order.risk.toUpperCase()}</em></header>
+              <div className="courier-order__route"><span>{locationName(order.pickupLocationId)}</span><Icon name="chevron" size={14} /><span>{locationName(order.dropoffLocationId)}</span></div>
+              <div className="courier-order__meta"><span>{order.weightKg} KG</span><span>{courierMinutesLeft(order, session.timestamp)} MIN</span><span>₵ {order.payout}</span><span>{order.legality.toUpperCase()}</span></div>
+              <p>{order.cargoName}</p>
+              <button type="button" disabled={Boolean(active) || order.weightKg > state.cargoCapacityKg} onClick={() => onAccept(order.id)}>ПРИНЯТЬ ЗАКАЗ</button>
+            </article>
+          ))}
+          {!available.length ? <div className="empty-terminal">Новых заказов нет. Биржа обновится автоматически.</div> : null}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function ModulePreview({ activeNav, onReturn, onOpenWindow }: { activeNav: NavId; onReturn: () => void; onOpenWindow: (id: WindowId) => void }) {
   const item = navItems.find((nav) => nav.id === activeNav) ?? navItems[0];
   return (
@@ -1098,7 +1190,7 @@ function ModulePreview({ activeNav, onReturn, onOpenWindow }: { activeNav: NavId
       <span className="module-preview__code">MODULE/{item.label}/PREVIEW</span>
       <Icon name={item.icon} size={56} />
       <h1>{item.label}</h1>
-      <p>Модуль подключён к общей оболочке, но не входит в первый вертикальный срез. Сейчас активна жизненная система SEVEN DAYS BELOW.</p>
+      <p>Модуль подключён к общей городской оболочке и будет расширен через общие системы мира.</p>
       <div>
         <button type="button" className="button button--primary" onClick={onReturn}>Вернуться в LIFE</button>
         <button type="button" className="button button--ghost" onClick={() => onOpenWindow("diagnostics")}>Проверить систему</button>
@@ -1125,6 +1217,9 @@ function WindowContent({
   onDiscardFood,
   onOrderFood,
   onSleep,
+  onAcceptDelivery,
+  onPickupDelivery,
+  onDeliverDelivery,
   onOpenWindow
 }: {
   id: WindowId;
@@ -1144,6 +1239,9 @@ function WindowContent({
   onDiscardFood: () => void;
   onOrderFood: (productId: string) => void;
   onSleep: (hours: number) => void;
+  onAcceptDelivery: (orderId: string) => void;
+  onPickupDelivery: () => void;
+  onDeliverDelivery: () => void;
   onOpenWindow: (id: WindowId) => void;
 }) {
 
@@ -1200,8 +1298,8 @@ function WindowContent({
         </div>
         <section className="memory-record">
           <span>LAST CONTACT / {contact.lastContact}</span>
-          <p>«Временный пропуск будет на сервисной стойке. Используй боковой вход после 23:20.»</p>
-          <small>Достоверность записи: 100% · Источник: прямое сообщение</small>
+          <p>Последняя запись содержит короткий бытовой обмен сообщениями.</p>
+          <small>Достоверность записи: 100% · Источник: прямой контакт</small>
         </section>
       </div>
     );
@@ -1210,47 +1308,23 @@ function WindowContent({
   if (id === "messages") {
     const contact = session.primaryContact;
     return (
-      <div className="messages-window">
+      <div className="messages-window messages-window--empty">
         <aside>
-          <button type="button" className="is-active"><strong>{contact.name}</strong><span>3 мин</span><small>Пропуск будет на стойке...</small></button>
-          <button type="button"><strong>PETR HALDEN</strong><span>1 день</span><small>Оплата за капсулу...</small></button>
-          <button type="button"><strong>CITY EMPLOYMENT</strong><span>2 дня</span><small>Профиль подтверждён</small></button>
+          <button type="button" className="is-active"><strong>{contact.name}</strong><span>сегодня</span><small>Бытовой контакт</small></button>
+          <button type="button"><strong>HOUSING NODE</strong><span>система</span><small>Жильё оплачено</small></button>
+          <button type="button"><strong>MESHLINE</strong><span>система</span><small>Новые заказы на бирже</small></button>
         </aside>
         <section>
-          <header><strong>{contact.name}</strong><span>ENCRYPTION: BASIC</span></header>
-          <div className="message-bubble message-bubble--incoming">Пропуск будет на сервисной стойке. Главный вход не используй.</div>
-          <div className="message-bubble message-bubble--outgoing">Во сколько быть?</div>
-          <div className="message-bubble message-bubble--incoming">После 23:20. У узла сейчас проверяют документы.</div>
-          {actions.find((action) => action.id === "reply-contact") ? <button type="button" className="button button--primary" onClick={() => onAction(actions.find((action) => action.id === "reply-contact")!)}>Подтвердить встречу · 5 мин</button> : null}
+          <header><strong>INBOX</strong><span>NO ACTIVE STORY THREAD</span></header>
+          <div className="empty-terminal">Новых личных сообщений нет. Каналы организаций будут обновляться по событиям мира.</div>
         </section>
       </div>
     );
   }
 
-  if (id === "vacancy") {
-    return (
-      <div className="vacancy-window">
-        <span className="vacancy-window__company">{session.primaryContact.location} / STAFF NODE</span>
-        <h3>Помощник техника · ночная смена</h3>
-        <div className="vacancy-grid">
-          <div><span>Смена</span><strong>23:30–05:30</strong></div>
-          <div><span>Оплата</span><strong>₵ 188</strong></div>
-          <div><span>Район</span><strong>{session.world.districts[1]?.name}</strong></div>
-          <div><span>Риск</span><strong className="warning-text">MEDIUM</strong></div>
-        </div>
-        <h4>ТРЕБОВАНИЯ</h4>
-        <ul>
-          <li>Базовое обращение с инструментами</li>
-          <li>Физическая форма не ниже 40%</li>
-          <li>Временный пропуск или поручитель сотрудника</li>
-        </ul>
-        <h4>ВОЗМОЖНЫЕ СОБЫТИЯ СМЕНЫ</h4>
-        <p>Диагностика дронов, сортировка деталей, конфликт с мастером смены, аварийный ремонт, проверка службы безопасности.</p>
-        {actions.find((action) => action.id === "travel-workshop") ? <button type="button" className="button button--primary" onClick={() => onAction(actions.find((action) => action.id === "travel-workshop")!)}>Ехать на собеседование</button> : <button type="button" className="button button--ghost" disabled>Вы уже на месте</button>}
-      </div>
-    );
+  if (id === "courier") {
+    return <CourierWorkspace session={session} onAccept={onAcceptDelivery} onPickup={onPickupDelivery} onDeliver={onDeliverDelivery} onTravel={onTravel} />;
   }
-
 
   if (id === "food") {
     return <FoodTerminal session={session} onBuy={onBuyFood} onEat={onEatFood} onDiscard={onDiscardFood} onOrder={onOrderFood} onOpenPlaces={() => onOpenWindow("places")} />;

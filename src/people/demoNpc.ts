@@ -21,29 +21,28 @@ const LAST_NAMES = ["ROTH", "CALDER", "MIREN", "SAYE", "HALDEN", "KELL"] as cons
 export function createPrimaryContact(seed: string, location: string): KnownNpc {
   const rng = new SeededRandom(`${seed}:contact`);
   const name = `${rng.pick(FIRST_NAMES)} ${rng.pick(LAST_NAMES)}`;
-  const profileCode = `UL07-VX-${rng.integer(1000, 9999)}`;
+  const profileCode = `CT-${rng.integer(1000, 9999)}-${rng.integer(10, 99)}`;
   return {
     id: createStableEntityId("person", `${seed}:primary-contact`),
     name,
-    role: "GRID MAINTENANCE TECHNICIAN",
-    age: rng.integer(25, 32),
-    status: "На ночной смене",
+    role: "LOCAL ACQUAINTANCE",
+    age: rng.integer(22, 34),
+    status: "Занят своими делами",
     location,
-    condition: ["Усталость: повышена", "Стресс: умеренный", "Травмы: нет"],
+    condition: ["Усталость: неизвестно", "Стресс: неизвестно", "Травмы: не замечены"],
     relations: [
-      { label: "Доверие", value: rng.integer(48, 62) },
-      { label: "Симпатия", value: rng.integer(58, 74) },
-      { label: "Подозрение", value: rng.integer(12, 24) }
+      { label: "Доверие", value: rng.integer(28, 46) },
+      { label: "Симпатия", value: rng.integer(34, 54) },
+      { label: "Подозрение", value: rng.integer(14, 31) }
     ],
     knownFacts: [
-      "оплачивает лечение матери",
-      "работает без постоянного контракта",
-      "знает сервисные маршруты Vectra Works",
-      "избегает службы районной безопасности"
+      "живёт в том же районе",
+      "работает по сменному графику",
+      "не связан с активными заданиями игрока"
     ],
-    lastContact: "17 OCT · 22:38",
+    lastContact: "17 OCT · 18:10",
     profileCode
   };
 }
 
-export const primaryContact = createPrimaryContact("NEON-LIFE-DEFAULT", "VECTRA SERVICE NODE");
+export const primaryContact = createPrimaryContact("NEON-LIFE-DEFAULT", "HAB-STACK 07");

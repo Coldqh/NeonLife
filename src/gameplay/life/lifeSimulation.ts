@@ -6,6 +6,15 @@ import { getFoodProduct } from "../../data/products/foodCatalog";
 import { canPrepare, consumeFood, discardSpoiledFood, purchaseFood } from "../food/foodSystem";
 import { calculateSleepRecovery, getHousingDaysLeft } from "../housing/housingSystem";
 import { getTravelOptions, isLocationOpen } from "../travel/travelSystem";
+import {
+  acceptCourierOrder as acceptCourierOrderState,
+  applyCourierTravelRisk,
+  collectCourierCargo,
+  completeCourierOrder,
+  expireCourierOrders,
+  getActiveCourierOrder,
+  refreshCourierBoard
+} from "../jobs/courier/courierSystem";
 import { advanceDistrictPulse } from "../../world/city/districtPulse";
 import type { GameSession } from "../../world/state/types";
 
@@ -68,6 +77,12 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   const baselineFatigue = Math.max(0, Math.round(minutes / 120));
   const baselineHunger = Math.max(0, Math.round(minutes / 150));
   const housingDaysLeft = getHousingDaysLeft(session.life.housing, nextTimestamp);
+  const courierState = refreshCourierBoard(
+    expireCourierOrders(session.jobs.courier, nextTimestamp),
+    session.world.meta.seed,
+    nextTimestamp,
+    session.world.locations
+  );
 
   return {
     ...session,
@@ -83,6 +98,10 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     life: {
       ...session.life,
       currentLocationId: targetLocation?.id ?? session.life.currentLocationId
+    },
+    jobs: {
+      ...session.jobs,
+      courier: courierState
     },
     player: {
       ...session.player,
@@ -105,7 +124,7 @@ export function travelToLocation(session: GameSession, locationId: string): Game
   const option = getTravelOptions(session).find((item) => item.location.id === locationId);
   if (!option || session.player.balance < option.cost) return session;
   const open = isLocationOpen(option.location, session.timestamp + option.durationMinutes * 60_000);
-  return progressLife(session, option.durationMinutes, {
+  const progressed = progressLife(session, option.durationMinutes, {
     category: "personal",
     title: `Прибытие: ${option.location.name}.`,
     detail: `${option.districtName} · транспорт ₵ ${option.cost}${open ? "" : " · объект закрыт"}`,
@@ -116,6 +135,72 @@ export function travelToLocation(session: GameSession, locationId: string): Game
     activity: `На месте: ${option.location.name}`,
     targetLocationId: option.location.id
   });
+  const risk = applyCourierTravelRisk(
+    progressed.jobs.courier,
+    progressed.world.meta.seed,
+    progressed.timestamp,
+    progressed.district.gangPressure + progressed.district.policePresence
+  );
+  if (risk.incident === "none") return progressed;
+  const active = getActiveCourierOrder(risk.state);
+  const incident = risk.incident === "inspection"
+    ? createEvent(progressed, progressed.timestamp, "work", "Курьерский груз попал под проверку.", `${active?.code ?? "DELIVERY"} · пломба сверена, данные рейса записаны.`, 3)
+    : createEvent(progressed, progressed.timestamp, "work", "Груз получил повреждение в пути.", `${active?.code ?? "DELIVERY"} · состояние −${risk.conditionLoss}%.`, 2);
+  return {
+    ...progressed,
+    jobs: { ...progressed.jobs, courier: risk.state },
+    events: [incident, ...progressed.events].slice(0, 100)
+  };
+}
+
+export function acceptCourierOrder(session: GameSession, orderId: string): GameSession {
+  const nextState = acceptCourierOrderState(session.jobs.courier, orderId, session.timestamp);
+  if (nextState === session.jobs.courier) return session;
+  const order = nextState.orders.find((item) => item.id === orderId);
+  const pickup = session.world.locations.find((location) => location.id === order?.pickupLocationId);
+  const dropoff = session.world.locations.find((location) => location.id === order?.dropoffLocationId);
+  return {
+    ...session,
+    jobs: { ...session.jobs, courier: nextState },
+    player: { ...session.player, occupation: "FREELANCE COURIER" },
+    currentActivity: `Заказ принят: ${order?.code ?? "DELIVERY"}`,
+    events: [
+      createEvent(session, session.timestamp, "work", `Принят заказ ${order?.code}.`, `${pickup?.name} → ${dropoff?.name} · оплата ₵ ${order?.payout}`, 2),
+      ...session.events
+    ].slice(0, 100)
+  };
+}
+
+export function pickupCourierOrder(session: GameSession): GameSession {
+  const active = getActiveCourierOrder(session.jobs.courier);
+  const nextState = collectCourierCargo(session.jobs.courier, session.life.currentLocationId, session.timestamp + 6 * 60_000);
+  if (!active || nextState === session.jobs.courier) return session;
+  const progressed = progressLife(session, 6, {
+    category: "work",
+    title: `Груз получен: ${active.code}.`,
+    detail: `${active.cargoName} · ${active.weightKg} кг · пломба ${active.condition}%`,
+    fatigueDelta: 1,
+    activity: `Доставка ${active.code}: груз на руках`
+  });
+  return { ...progressed, jobs: { ...progressed.jobs, courier: nextState } };
+}
+
+export function deliverCourierOrder(session: GameSession): GameSession {
+  const active = getActiveCourierOrder(session.jobs.courier);
+  if (!active) return session;
+  const completionTimestamp = session.timestamp + 5 * 60_000;
+  const completion = completeCourierOrder(session.jobs.courier, session.life.currentLocationId, completionTimestamp);
+  if (!completion) return session;
+  const progressed = progressLife(session, 5, {
+    category: "work",
+    title: `Заказ ${active.code} закрыт.`,
+    detail: `${completion.lateMinutes ? `Опоздание ${completion.lateMinutes} мин. · ` : "В срок · "}состояние ${completion.condition}% · начислено ₵ ${completion.payout}`,
+    importance: completion.lateMinutes > 15 || completion.condition < 70 ? 3 : 1,
+    balanceDelta: completion.payout,
+    stressDelta: -2,
+    activity: "Свободен для нового заказа"
+  });
+  return { ...progressed, jobs: { ...progressed.jobs, courier: completion.state } };
 }
 
 export function buyFoodAtCurrentLocation(session: GameSession, productId: string): GameSession {

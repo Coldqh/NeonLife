@@ -6,6 +6,7 @@ import { INITIAL_GAME_TIMESTAMP } from "../../core/time/gameTime";
 import { createInitialPlayer } from "../../gameplay/player/demoPlayer";
 import { createInitialFoodState } from "../../gameplay/food/foodSystem";
 import { createInitialHousing } from "../../gameplay/housing/housingSystem";
+import { createInitialCourierState } from "../../gameplay/jobs/courier/courierSystem";
 import { createPrimaryContact } from "../../people/demoNpc";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
@@ -107,7 +108,6 @@ function attachLocations(
 
 function createQueue(seed: string, start: number, world: WorldState): ScheduledWorldEvent[] {
   const lower = world.districts[0];
-  const workshop = world.locations.find((location) => location.type === "workshop");
   return [
     {
       id: createStableEntityId("scheduled", `${seed}:grid-restoration`),
@@ -116,14 +116,6 @@ function createQueue(seed: string, start: number, world: WorldState): ScheduledW
       status: "queued",
       entityIds: [lower.id],
       payload: { district: lower.name }
-    },
-    {
-      id: createStableEntityId("scheduled", `${seed}:vacancy-expiry`),
-      dueAt: start + 159 * 60_000,
-      type: "vacancy-expiry",
-      status: "queued",
-      entityIds: workshop ? [workshop.id] : [],
-      payload: { location: workshop?.name ?? "SERVICE NODE" }
     },
     {
       id: createStableEntityId("scheduled", `${seed}:rent-warning`),
@@ -185,11 +177,12 @@ export function createWorldSession(seed: string): GameSession {
 
   const aurelian = createOrganization(seed, "aurelian", "AURELIAN SYSTEMS", "AUR/SYS", "corporation", 84_000_000, 71, 18_400);
   const vectra = createOrganization(seed, "vectra", "VECTRA WORKS", "VEC/WRK", "company", 2_840_000, 48, 318);
+  const meshline = createOrganization(seed, "meshline", "MESHLINE COURIER CO-OP", "MSH/DLV", "company", 1_140_000, 46, 214);
   const transit = createOrganization(seed, "transit", "NORTHLINE TRANSIT", "NL/T", "transport", 18_200_000, 43, 4_900);
   const medical = createOrganization(seed, "medical", "CIVIC MEDICAL UNION", "CMU", "medical", 31_600_000, 57, 7_120);
   const police = createOrganization(seed, "police", "DISTRICT SECURITY BUREAU", "DSB", "police", 27_900_000, 32, 6_300);
   const gang = createOrganization(seed, "cutwire", "CUTWIRE", "CW", "gang", 410_000, 19, 86);
-  const organizations = [aurelian, vectra, transit, medical, police, gang];
+  const organizations = [aurelian, vectra, meshline, transit, medical, police, gang];
 
   const housing = createLocation(seed, "capsule", lower.id, "HAB-STACK 07", "HAB/U07", "housing", 31, undefined, 0, 24);
   const canteen = createLocation(seed, "canteen", lower.id, "NIGHT KITCHEN 14", "FOOD/U14", "food", 24, undefined, 18, 5);
@@ -198,11 +191,12 @@ export function createWorldSession(seed: string): GameSession {
   const clinic = createLocation(seed, "clinic", lower.id, "CMU WALK-IN CLINIC", "CMU/U03", "clinic", 52, medical.id, 0, 24);
   const tower = createLocation(seed, "tower", corporate.id, "AURELIAN CROWN TOWER", "AUR/CT-01", "office", 94, aurelian.id, 7, 22);
   const market = createLocation(seed, "market", lower.id, "UNDERLINE NIGHT MARKET", "MKT/U09", "market", 26, undefined, 16, 6);
-  const locations = [housing, canteen, transitNode, workshop, clinic, tower, market];
+  const courierHub = createLocation(seed, "courier-hub", lower.id, "MESHLINE DISPATCH HALL", "MSH/U11", "transport", 41, meshline.id, 0, 24);
+  const locations = [housing, canteen, transitNode, workshop, clinic, tower, market, courierHub];
   attachLocations(districts, organizations, locations);
 
   const player = createInitialPlayer(seed, lower.name, lower.code);
-  const primaryContact = createPrimaryContact(seed, workshop.name);
+  const primaryContact = createPrimaryContact(seed, housing.name);
   const meta = createWorldMeta(seed);
   meta.currentTimestamp = INITIAL_GAME_TIMESTAMP;
 
@@ -237,8 +231,8 @@ export function createWorldSession(seed: string): GameSession {
       seed,
       districtName: lower.name,
       districtCode: lower.code,
-      contactName: primaryContact.name,
-      companyName: workshop.name
+      marketName: market.name,
+      housingName: housing.name
     }),
     eventQueue: createQueue(seed, INITIAL_GAME_TIMESTAMP, world),
     currentActivity: `В жилом блоке ${housing.name}`,
@@ -248,6 +242,9 @@ export function createWorldSession(seed: string): GameSession {
       housing: createInitialHousing(housing.id, INITIAL_GAME_TIMESTAMP),
       food: createInitialFoodState(seed, INITIAL_GAME_TIMESTAMP, market.id, canteen.id, clinic.id),
       lastSleepAt: null
+    },
+    jobs: {
+      courier: createInitialCourierState(seed, INITIAL_GAME_TIMESTAMP, locations)
     }
   };
 }
