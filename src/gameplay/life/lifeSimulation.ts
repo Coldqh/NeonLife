@@ -17,6 +17,16 @@ import {
   refreshCourierBoard
 } from "../jobs/courier/courierSystem";
 import { advanceDistrictPulse } from "../../world/city/districtPulse";
+import {
+  acceptNpcRequest as acceptNpcRequestState,
+  advancePressureState,
+  closePressureDay,
+  completeNpcRequest as completeNpcRequestState,
+  declineNpcRequest as declineNpcRequestState,
+  extendRentObligation,
+  payObligation as payObligationState,
+  trackPressureMetrics
+} from "../pressure/pressureSystem";
 import type { GameSession } from "../../world/state/types";
 
 function clamp(value: number): number {
@@ -47,6 +57,11 @@ interface ProgressOptions {
   activity?: string;
   targetLocationId?: string;
   suppressTimeEvent?: boolean;
+  deliveryCompleted?: boolean;
+  requestsCompleted?: number;
+  relationChanges?: number;
+  worldEvents?: number;
+  trackBalance?: boolean;
 }
 
 export function progressLife(session: GameSession, minutes: number, options: ProgressOptions = {}): GameSession {
@@ -54,9 +69,33 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   const pulse = advanceDistrictPulse(session.district, nextTimestamp);
   const queued = processEventQueue(session, nextTimestamp);
   const network = advanceHumanNetwork(session.people, nextTimestamp, session.world.meta.seed, session.world.locations);
-  const targetLocation = options.targetLocationId
+  const pressureAdvance = advancePressureState(session.pressure, nextTimestamp, session.world.meta.seed, network.state.people);
+  let peopleState = network.state;
+  for (const notice of pressureAdvance.notices) {
+    if (!notice.personId || !notice.memorySummary) continue;
+    peopleState = recordPlayerAction(
+      peopleState,
+      session.world.meta.seed,
+      notice.personId,
+      nextTimestamp,
+      notice.memorySummary,
+      {
+        trust: notice.trustDelta,
+        respect: notice.respectDelta,
+        irritation: notice.irritationDelta,
+        importance: notice.importance * 28,
+        emotionalValue: notice.importance === 3 ? -42 : -18
+      }
+    );
+  }
+
+  const requestedTarget = options.targetLocationId
     ? session.world.locations.find((location) => location.id === options.targetLocationId)
     : undefined;
+  const evictionTarget = pressureAdvance.evicted
+    ? session.world.locations.find((location) => location.type === "transport")
+    : undefined;
+  const targetLocation = evictionTarget ?? requestedTarget;
   const targetDistrict = targetLocation
     ? session.world.districts.find((district) => district.id === targetLocation.districtId)
     : undefined;
@@ -78,6 +117,9 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   for (const notice of network.notices) {
     generated.push(createEvent(session, nextTimestamp, "contact", notice.title, notice.detail, notice.importance));
   }
+  for (const notice of pressureAdvance.notices) {
+    generated.push(createEvent(session, nextTimestamp, notice.category, notice.title, notice.detail, notice.importance));
+  }
 
   const baselineFatigue = Math.max(0, Math.round(minutes / 120));
   const baselineHunger = Math.max(0, Math.round(minutes / 150));
@@ -87,10 +129,18 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     session.world.meta.seed,
     nextTimestamp,
     session.world.locations,
-    network.state.people
+    peopleState.people
   );
-  const selectedPerson = getPerson(network.state, session.world.primaryContactId)
-    ?? getPerson(network.state, network.state.selectedPersonId);
+  const selectedPerson = getPerson(peopleState, session.world.primaryContactId)
+    ?? getPerson(peopleState, peopleState.selectedPersonId);
+  const worldEventCount = options.worldEvents ?? (queued.events.length + pulse.events.length + network.notices.length + pressureAdvance.notices.length);
+  const pressure = trackPressureMetrics(pressureAdvance.state, {
+    balanceDelta: options.trackBalance === false ? 0 : options.balanceDelta,
+    deliveries: options.deliveryCompleted ? 1 : 0,
+    requestsCompleted: options.requestsCompleted,
+    relationChanges: options.relationChanges,
+    worldEvents: worldEventCount
+  });
 
   return {
     ...session,
@@ -104,10 +154,13 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     primaryContact: selectedPerson
       ? toKnownNpc(selectedPerson, session.world.locations, nextTimestamp)
       : session.primaryContact,
-    people: network.state,
+    people: peopleState,
+    pressure,
     district: pulse.state,
     eventQueue: queued.queue,
-    currentActivity: options.activity ?? session.currentActivity,
+    currentActivity: pressureAdvance.evicted
+      ? `Без постоянного жилья · ${targetLocation?.name ?? "TRANSIT NODE"}`
+      : options.activity ?? session.currentActivity,
     life: {
       ...session.life,
       currentLocationId: targetLocation?.id ?? session.life.currentLocationId
@@ -267,7 +320,9 @@ export function deliverCourierOrder(session: GameSession): GameSession {
     importance: completion.lateMinutes > 15 || completion.condition < 70 ? 3 : 1,
     balanceDelta: completion.payout,
     stressDelta: -2,
-    activity: "Свободен для нового заказа"
+    activity: "Свободен для нового заказа",
+    deliveryCompleted: true,
+    relationChanges: 1
   });
   const cleanDelivery = completion.lateMinutes === 0 && completion.condition >= 90;
   const badDelivery = completion.lateMinutes > 15 || completion.condition < 70;
@@ -307,6 +362,273 @@ export function deliverCourierOrder(session: GameSession): GameSession {
   };
 }
 
+
+export function acceptPersonalRequest(session: GameSession, requestId: string): GameSession {
+  const request = session.pressure.requests.find((item) => item.id === requestId);
+  if (!request || request.status !== "open" || request.dueAt <= session.timestamp) return session;
+  const person = getPerson(session.people, request.personId);
+  const targetLocationId = person?.currentLocationId ?? request.targetLocationId;
+  const acceptedPressure = acceptNpcRequestState({
+    ...session.pressure,
+    requests: session.pressure.requests.map((item) => item.id === requestId ? { ...item, targetLocationId } : item)
+  }, requestId, session.timestamp);
+  const people = recordPlayerAction(
+    session.people,
+    session.world.meta.seed,
+    request.personId,
+    session.timestamp,
+    `Игрок согласился выполнить просьбу ${request.code}: ${request.title}.`,
+    { trust: 1, respect: 1, importance: 42, emotionalValue: 6 }
+  );
+  const contact = getPerson(people, request.personId);
+  return {
+    ...session,
+    pressure: acceptedPressure,
+    people,
+    world: { ...session.world, primaryContactId: request.personId },
+    primaryContact: contact ? toKnownNpc(contact, session.world.locations, session.timestamp) : session.primaryContact,
+    currentActivity: `Принята просьба ${request.code}`,
+    events: [
+      createEvent(session, session.timestamp, "contact", `${contact?.name ?? "Контакт"}: договорились.`, `${request.title} · срок ${new Date(request.dueAt).toISOString().slice(11, 16)}.`, 2),
+      ...session.events
+    ].slice(0, 100)
+  };
+}
+
+export function declinePersonalRequest(session: GameSession, requestId: string): GameSession {
+  const request = session.pressure.requests.find((item) => item.id === requestId);
+  if (!request || (request.status !== "open" && request.status !== "accepted")) return session;
+  const pressure = declineNpcRequestState(session.pressure, requestId);
+  const people = recordPlayerAction(
+    session.people,
+    session.world.meta.seed,
+    request.personId,
+    session.timestamp,
+    `Игрок отказался от просьбы ${request.code}: ${request.title}.`,
+    { trust: -2, respect: -1, irritation: 3, importance: 48, emotionalValue: -14 }
+  );
+  const contact = getPerson(people, request.personId);
+  return {
+    ...session,
+    pressure: trackPressureMetrics(pressure, { relationChanges: 1 }),
+    people,
+    primaryContact: contact ? toKnownNpc(contact, session.world.locations, session.timestamp) : session.primaryContact,
+    events: [
+      createEvent(session, session.timestamp, "contact", `${contact?.name ?? "Контакт"}: просьба отклонена.`, request.title, 1),
+      ...session.events
+    ].slice(0, 100)
+  };
+}
+
+export function completePersonalRequest(session: GameSession, requestId: string): GameSession {
+  const request = session.pressure.requests.find((item) => item.id === requestId);
+  if (!request || request.status !== "accepted") return session;
+  const person = getPerson(session.people, request.personId);
+  if (person && person.currentLocationId !== request.targetLocationId) {
+    const location = session.world.locations.find((item) => item.id === person.currentLocationId);
+    return {
+      ...session,
+      pressure: {
+        ...session.pressure,
+        requests: session.pressure.requests.map((item) => item.id === request.id ? { ...item, targetLocationId: person.currentLocationId } : item)
+      },
+      events: [
+        createEvent(session, session.timestamp, "contact", `${person.name} сменил место.`, `${request.code} · новая точка: ${location?.name ?? "UNKNOWN NODE"}.`, 2),
+        ...session.events
+      ].slice(0, 100)
+    };
+  }
+  const completionAt = session.timestamp + request.durationMinutes * 60_000;
+  const completion = completeNpcRequestState(
+    session.pressure,
+    requestId,
+    completionAt,
+    session.life.currentLocationId,
+    session.player.balance
+  );
+  if (!completion) return session;
+  const base = { ...session, pressure: completion.state };
+  const progressed = progressLife(base, request.durationMinutes, {
+    category: "contact",
+    title: `Просьба ${request.code} выполнена.`,
+    detail: `${request.title} · ${completion.balanceDelta >= 0 ? `получено ₵ ${completion.balanceDelta}` : `потрачено ₵ ${Math.abs(completion.balanceDelta)}`}`,
+    importance: 2,
+    balanceDelta: completion.balanceDelta,
+    fatigueDelta: request.durationMinutes >= 40 ? 4 : 2,
+    stressDelta: -1,
+    requestsCompleted: 1,
+    relationChanges: 1,
+    activity: `Помощь: ${person?.name ?? request.code}`
+  });
+  const isLoan = request.type === "loan";
+  const peopleBeforeMemory = isLoan
+    ? {
+      ...progressed.people,
+      people: progressed.people.people.map((item) => item.id === request.personId ? { ...item, money: item.money + request.upfrontCost } : item)
+    }
+    : progressed.people;
+  const people = recordPlayerAction(
+    peopleBeforeMemory,
+    progressed.world.meta.seed,
+    request.personId,
+    progressed.timestamp,
+    `Игрок выполнил просьбу ${request.code}: ${request.title}.`,
+    isLoan
+      ? { trust: 8, respect: 3, debtToPlayer: request.upfrontCost, importance: 78, emotionalValue: 35 }
+      : { trust: 5, respect: 5, irritation: -2, debtToPlayer: 1, importance: 70, emotionalValue: 28 }
+  );
+  const contact = getPerson(people, request.personId);
+  return {
+    ...progressed,
+    people,
+    world: { ...progressed.world, primaryContactId: request.personId },
+    primaryContact: contact ? toKnownNpc(contact, progressed.world.locations, progressed.timestamp) : progressed.primaryContact
+  };
+}
+
+export function payPlayerObligation(session: GameSession, obligationId: string): GameSession {
+  const originalObligation = session.pressure.obligations.find((item) => item.id === obligationId);
+  const payment = payObligationState(session.pressure, obligationId, session.timestamp + 2 * 60_000, session.player.balance);
+  if (!payment) return session;
+  const obligation = payment.obligation;
+  const base = { ...session, pressure: payment.state };
+  const progressed = progressLife(base, 2, {
+    category: "finance",
+    title: `${obligation.code}: платёж проведён.`,
+    detail: `${obligation.creditorName} · −₵ ${obligation.amount}`,
+    importance: originalObligation?.status === "overdue" || originalObligation?.status === "defaulted" ? 2 : 1,
+    balanceDelta: -obligation.amount,
+    relationChanges: obligation.creditorPersonId ? 1 : 0,
+    activity: "Финансовый терминал"
+  });
+  let next = progressed;
+  if (obligation.type === "rent") {
+    const paidUntil = Math.max(session.life.housing.paidUntil, progressed.timestamp) + 7 * 24 * 60 * 60_000;
+    next = {
+      ...progressed,
+      life: { ...progressed.life, housing: { ...progressed.life.housing, paidUntil } },
+      player: { ...progressed.player, housingDaysLeft: getHousingDaysLeft({ ...progressed.life.housing, paidUntil }, progressed.timestamp) }
+    };
+  }
+  if (!obligation.creditorPersonId) return next;
+  const people = recordPlayerAction(
+    next.people,
+    next.world.meta.seed,
+    obligation.creditorPersonId,
+    next.timestamp,
+    `Игрок оплатил обязательство ${obligation.code}.`,
+    { trust: 2, respect: 3, irritation: -3, importance: 62, emotionalValue: 18 }
+  );
+  const contact = getPerson(people, obligation.creditorPersonId);
+  return {
+    ...next,
+    people,
+    primaryContact: contact ? toKnownNpc(contact, next.world.locations, next.timestamp) : next.primaryContact
+  };
+}
+
+export function requestRentExtension(session: GameSession): GameSession {
+  const rent = session.pressure.obligations.find((item) => item.type === "rent" && item.status !== "paid");
+  const manager = rent?.creditorPersonId ? getPerson(session.people, rent.creditorPersonId) : null;
+  if (!rent || !manager) return session;
+  const accepted = manager.trustToPlayer >= 12 && manager.irritationToPlayer < 65;
+  if (!accepted) {
+    return {
+      ...session,
+      events: [
+        createEvent(session, session.timestamp, "contact", `${manager.name} отказал в отсрочке.`, "Управляющий требует оплатить аренду по текущему сроку.", 2),
+        ...session.events
+      ].slice(0, 100)
+    };
+  }
+  const pressure = extendRentObligation(session.pressure, session.timestamp);
+  if (!pressure) return session;
+  const paidUntil = session.life.housing.paidUntil + 24 * 60 * 60_000;
+  const people = recordPlayerAction(
+    session.people,
+    session.world.meta.seed,
+    manager.id,
+    session.timestamp,
+    "Игрок попросил и получил однодневную отсрочку аренды.",
+    { trust: -1, irritation: 4, playerDebt: 1, importance: 68, emotionalValue: -3 }
+  );
+  return {
+    ...session,
+    pressure,
+    people,
+    life: { ...session.life, housing: { ...session.life.housing, paidUntil } },
+    player: { ...session.player, housingDaysLeft: getHousingDaysLeft({ ...session.life.housing, paidUntil }, session.timestamp) },
+    world: { ...session.world, primaryContactId: manager.id },
+    primaryContact: toKnownNpc(getPerson(people, manager.id) ?? manager, session.world.locations, session.timestamp),
+    events: [
+      createEvent(session, session.timestamp, "contact", `${manager.name} дал отсрочку на 24 часа.`, `Новый срок аренды: ${new Date(rent.dueAt + 24 * 60 * 60_000).toISOString().slice(5, 16).replace("T", " · ")}.`, 2),
+      ...session.events
+    ].slice(0, 100)
+  };
+}
+
+export function requestEmergencyLoan(session: GameSession, personId: string): GameSession {
+  const person = getPerson(session.people, personId);
+  if (!person) return session;
+  const existing = session.pressure.obligations.some((item) => item.type === "personal" && item.creditorPersonId === personId && item.status !== "paid");
+  if (existing) return session;
+  if (person.trustToPlayer < 25 || person.money < 180) {
+    return {
+      ...session,
+      events: [
+        createEvent(session, session.timestamp, "contact", `${person.name} не дал денег.`, "Свободных средств или доверия недостаточно.", 1),
+        ...session.events
+      ].slice(0, 100)
+    };
+  }
+  const amount = Math.min(160, Math.max(100, Math.floor(person.money * 0.22)));
+  const obligation = {
+    id: createStableEntityId("obligation", `${session.world.meta.seed}:personal:${person.id}:${session.timestamp}`),
+    code: `OBL-P${session.pressure.obligations.length + 1}`,
+    type: "personal" as const,
+    creditorName: person.name,
+    creditorPersonId: person.id,
+    amount,
+    dueAt: session.timestamp + 3 * 24 * 60 * 60_000,
+    status: "active" as const,
+    consequence: "Личный долг изменит отношения и доступ к будущей помощи.",
+    extensionCount: 0,
+    lastNoticeStage: 0,
+    paidAt: null
+  };
+  const base = {
+    ...session,
+    pressure: { ...session.pressure, obligations: [...session.pressure.obligations, obligation] },
+    people: {
+      ...session.people,
+      people: session.people.people.map((item) => item.id === person.id ? { ...item, money: item.money - amount } : item)
+    }
+  };
+  const progressed = progressLife(base, 6, {
+    category: "finance",
+    title: `${person.name} передал ₵ ${amount}.`,
+    detail: `Личный долг ${obligation.code} · вернуть в течение трёх дней.`,
+    balanceDelta: amount,
+    trackBalance: false,
+    relationChanges: 1,
+    activity: "Личный финансовый перевод"
+  });
+  const people = recordPlayerAction(
+    progressed.people,
+    progressed.world.meta.seed,
+    person.id,
+    progressed.timestamp,
+    `Игрок занял ₵ ${amount} до срока ${obligation.code}.`,
+    { trust: 1, playerDebt: amount, importance: 76, emotionalValue: 8 }
+  );
+  return {
+    ...progressed,
+    people,
+    world: { ...progressed.world, primaryContactId: person.id },
+    primaryContact: toKnownNpc(getPerson(people, person.id) ?? person, progressed.world.locations, progressed.timestamp)
+  };
+}
+
 export function buyFoodAtCurrentLocation(session: GameSession, productId: string): GameSession {
   const location = session.world.locations.find((item) => item.id === session.life.currentLocationId);
   if (!location || !isLocationOpen(location, session.timestamp)) return session;
@@ -331,6 +653,7 @@ export function buyFoodAtCurrentLocation(session: GameSession, productId: string
 }
 
 export function orderFoodToHome(session: GameSession, productId: string): GameSession {
+  if (session.pressure.housingStatus !== "active") return session;
   const market = session.world.locations.find((location) => location.type === "market");
   if (!market) return session;
   const product = getFoodProduct(productId);
@@ -399,7 +722,7 @@ export function discardSpoiled(session: GameSession): GameSession {
 }
 
 export function sleepAtHome(session: GameSession, hours: number): GameSession {
-  if (session.life.currentLocationId !== session.life.housing.locationId) return session;
+  if (session.life.currentLocationId !== session.life.housing.locationId || session.pressure.housingStatus === "evicted") return session;
   const recovery = calculateSleepRecovery(session.life.housing, hours);
   const progressed = progressLife(session, hours * 60, {
     category: "personal",
@@ -413,8 +736,28 @@ export function sleepAtHome(session: GameSession, hours: number): GameSession {
     activity: "В жилом блоке",
     suppressTimeEvent: true
   });
+  const pressure = closePressureDay(
+    progressed.pressure,
+    progressed.timestamp,
+    hours * 60,
+    progressed.player.balance,
+    progressed.world.meta.seed
+  );
+  const summary = pressure.summaries[0];
   return {
     ...progressed,
-    life: { ...progressed.life, lastSleepAt: progressed.timestamp }
+    pressure,
+    life: { ...progressed.life, lastSleepAt: progressed.timestamp },
+    events: summary ? [
+      createEvent(
+        progressed,
+        progressed.timestamp,
+        "system",
+        `DAY ${summary.dayIndex} CLOSED.`,
+        `Заработано ₵ ${summary.earned} · потрачено ₵ ${summary.spent} · доставки ${summary.deliveries} · просьбы ${summary.requestsCompleted}/${summary.requestsMissed}.`,
+        summary.requestsMissed > 0 ? 2 : 1
+      ),
+      ...progressed.events
+    ].slice(0, 100) : progressed.events
   };
 }

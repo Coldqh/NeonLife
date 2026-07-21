@@ -7,6 +7,7 @@ import { createInitialPlayer } from "../../gameplay/player/demoPlayer";
 import { createInitialFoodState } from "../../gameplay/food/foodSystem";
 import { createInitialHousing } from "../../gameplay/housing/housingSystem";
 import { createInitialCourierState } from "../../gameplay/jobs/courier/courierSystem";
+import { createPressureState } from "../../gameplay/pressure/pressureSystem";
 import { createPrimaryContact } from "../../people/demoNpc";
 import { createHumanNetwork, getPerson, toKnownNpc } from "../../people/network/humanNetwork";
 import { createInitialDistrictPulse } from "../city/districtPulse";
@@ -215,6 +216,10 @@ export function createWorldSession(seed: string): GameSession {
     networkStatus: "stable"
   };
 
+  const housingState = createInitialHousing(housing.id, INITIAL_GAME_TIMESTAMP);
+  const foodState = createInitialFoodState(seed, INITIAL_GAME_TIMESTAMP, market.id, canteen.id, clinic.id);
+  const pressure = createPressureState(seed, INITIAL_GAME_TIMESTAMP, housingState, people.people, locations);
+
   const world: WorldState = {
     meta,
     city,
@@ -233,6 +238,7 @@ export function createWorldSession(seed: string): GameSession {
     player,
     primaryContact,
     people,
+    pressure,
     events: createInitialEvents({
       seed,
       districtName: lower.name,
@@ -245,8 +251,8 @@ export function createWorldSession(seed: string): GameSession {
     district: createInitialDistrictPulse(INITIAL_GAME_TIMESTAMP, seed),
     life: {
       currentLocationId: housing.id,
-      housing: createInitialHousing(housing.id, INITIAL_GAME_TIMESTAMP),
-      food: createInitialFoodState(seed, INITIAL_GAME_TIMESTAMP, market.id, canteen.id, clinic.id),
+      housing: housingState,
+      food: foodState,
       lastSleepAt: null
     },
     jobs: {

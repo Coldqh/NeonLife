@@ -8,6 +8,7 @@ import type { DistrictPulseState } from "../city/districtPulse";
 import type { FoodState } from "../../gameplay/food/foodSystem";
 import type { HousingState } from "../../gameplay/housing/housingSystem";
 import type { CourierState } from "../../gameplay/jobs/courier/courierSystem";
+import type { PressureState } from "../../gameplay/pressure/types";
 
 export interface CityState {
   id: EntityId;
@@ -95,6 +96,7 @@ export interface GameSession {
   player: PlayerState;
   primaryContact: KnownNpc;
   people: HumanNetworkState;
+  pressure: PressureState;
   events: WorldEvent[];
   eventQueue: ScheduledWorldEvent[];
   currentActivity: string;

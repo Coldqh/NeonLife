@@ -35,7 +35,7 @@ export function createInitialPlayer(seed: string, district: string, sector: stri
     occupation: "UNEMPLOYED",
     district,
     sector,
-    balance: rng.integer(1450, 2050),
+    balance: rng.integer(780, 1180),
     housingDaysLeft: 7,
     condition: {
       health: rng.integer(82, 92),

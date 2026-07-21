@@ -18,10 +18,12 @@ export function getTravelOptions(session: GameSession): TravelOption[] {
       const district = session.world.districts.find((item) => item.id === location.districtId);
       const baseDuration = sameDistrict ? 14 : 34;
       const delay = sameDistrict ? Math.ceil(session.district.transitDelayMinutes / 2) : session.district.transitDelayMinutes;
+      const transitDebt = session.pressure.obligations.find((obligation) => obligation.type === "transit" && obligation.status === "overdue");
+      const surcharge = transitDebt ? (sameDistrict ? 3 : 7) : 0;
       return {
         location,
         durationMinutes: baseDuration + delay,
-        cost: sameDistrict ? 4 : 12,
+        cost: (sameDistrict ? 4 : 12) + surcharge,
         districtName: district?.name ?? "UNKNOWN DISTRICT",
         sameDistrict
       };

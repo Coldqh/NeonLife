@@ -5,6 +5,8 @@ import { createInitialHousing } from "../../gameplay/housing/housingSystem";
 import { createInitialCourierState, type CourierOrder, type CourierState } from "../../gameplay/jobs/courier/courierSystem";
 import { createHumanNetwork, getPerson, toKnownNpc } from "../../people/network/humanNetwork";
 import type { HumanNetworkState, PersonState } from "../../people/network/types";
+import { createPressureState } from "../../gameplay/pressure/pressureSystem";
+import type { PressureState } from "../../gameplay/pressure/types";
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -42,6 +44,15 @@ function hasHumanNetwork(value: unknown): value is HumanNetworkState {
     && Array.isArray(value.people)
     && typeof value.lastUpdatedAt === "number"
     && typeof value.cycle === "number";
+}
+
+
+function hasPressureState(value: unknown): value is PressureState {
+  return isObject(value)
+    && Array.isArray(value.obligations)
+    && Array.isArray(value.requests)
+    && isObject(value.currentDay)
+    && Array.isArray(value.summaries);
 }
 
 function migrateCourierOrder(order: unknown, people: PersonState[], index: number): CourierOrder | null {
@@ -150,6 +161,12 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     ?? "LOCAL DISTRICT";
   const existingJobs = isObject(payload.jobs) ? payload.jobs : {};
   const courier = migrateCourierState(existingJobs.courier, seed, timestamp, locations, people.people);
+  const housingState = existingLife && isObject(existingLife.housing)
+    ? existingLife.housing as unknown as GameSession["life"]["housing"]
+    : createInitialHousing(housingLocation?.id ?? "location-missing", timestamp);
+  const pressure = hasPressureState(payload.pressure)
+    ? payload.pressure
+    : createPressureState(seed, timestamp, housingState, people.people, locations);
 
   const migratedPayload = {
     ...payload,
@@ -158,6 +175,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     eventQueue: migratedQueue,
     primaryContact,
     people,
+    pressure,
     currentActivity: `На месте: ${existingLocationName}`,
     world: {
       ...world,

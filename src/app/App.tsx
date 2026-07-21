@@ -23,17 +23,25 @@ import { canPrepare, getFoodFreshness, getFreshFoodUnits } from "../gameplay/foo
 import { getTravelOptions, isLocationOpen } from "../gameplay/travel/travelSystem";
 import {
   acceptCourierOrder,
+  acceptPersonalRequest,
   buyFoodAtCurrentLocation,
   deliverCourierOrder,
+  declinePersonalRequest,
   discardSpoiled,
   eatFoodFromStorage,
   orderFoodToHome,
+  payPlayerObligation,
   pickupCourierOrder,
   progressLife,
+  requestEmergencyLoan,
+  requestRentExtension,
+  completePersonalRequest,
   sleepAtHome,
   travelToLocation
 } from "../gameplay/life/lifeSimulation";
 import { Icon, type IconName } from "../ui/components/Icons";
+import { PressureWorkspace } from "./workspaces/PressureWorkspace";
+import { activeObligations, activeRequests, committedAmount } from "../gameplay/pressure/pressureSystem";
 import { getActiveCourierOrder, type CourierOrder } from "../gameplay/jobs/courier/courierSystem";
 import { getPerson, peopleAtLocation, toKnownNpc } from "../people/network/humanNetwork";
 import type { PersonState } from "../people/network/types";
@@ -53,7 +61,7 @@ import {
 const UI_SETTINGS_KEY = "neon-life/ui-settings/v1";
 
 type NavId = "life" | "city" | "people" | "work" | "network" | "inventory" | "health" | "home" | "messages" | "archive";
-type WindowId = "profile" | "contact" | "messages" | "courier" | "local" | "journal" | "food" | "places" | "home" | "settings" | "diagnostics";
+type WindowId = "profile" | "contact" | "messages" | "courier" | "pressure" | "local" | "journal" | "food" | "places" | "home" | "settings" | "diagnostics";
 type MobileLifeTab = "now" | "plan" | "food" | "log";
 
 interface ActionDefinition {
@@ -79,7 +87,7 @@ const navItems: Array<{ id: NavId; label: string; icon: IconName; badge?: string
   { id: "city", label: "CITY", icon: "city" },
   { id: "people", label: "PEOPLE", icon: "people" },
   { id: "work", label: "WORK", icon: "work" },
-  { id: "network", label: "NETWORK", icon: "network" },
+  { id: "network", label: "PRESSURE", icon: "network" },
   { id: "inventory", label: "INVENTORY", icon: "inventory" },
   { id: "health", label: "HEALTH", icon: "health" },
   { id: "home", label: "HOME", icon: "home" },
@@ -138,7 +146,9 @@ function createQuickActions(session: GameSession): ActionDefinition[] {
 function createPlans(session: GameSession) {
   const active = getActiveCourierOrder(session.jobs.courier);
   const foodUnits = getFreshFoodUnits(session.life.food, session.timestamp);
-  const items = [];
+  const obligations = activeObligations(session.pressure);
+  const requests = activeRequests(session.pressure);
+  const items: Array<{ time: string; title: string; status: string; detail: string }> = [];
   if (active) {
     items.push({
       time: formatGameTime(active.deadlineAt),
@@ -147,9 +157,29 @@ function createPlans(session: GameSession) {
       detail: active.status === "accepted" ? "Сначала забрать груз" : `Груз ${active.condition}% · завершить до срока`
     });
   }
-  items.push({ time: "—", title: "Курьерская биржа", status: "open", detail: `${session.jobs.courier.orders.filter((order) => order.status === "available").length} доступных заказов` });
-  items.push({ time: "—", title: "Домашний запас", status: foodUnits <= 2 ? "urgent" : "open", detail: `${foodUnits} свежих порций` });
-  items.push({ time: "—", title: "Жильё", status: session.player.housingDaysLeft <= 2 ? "urgent" : "open", detail: `Оплачено ещё на ${session.player.housingDaysLeft} дней` });
+  if (obligations[0]) {
+    items.push({
+      time: formatGameTime(obligations[0].dueAt),
+      title: `${obligations[0].code} · ₵ ${obligations[0].amount}`,
+      status: obligations[0].dueAt < session.timestamp + 24 * 60 * 60_000 ? "urgent" : "planned",
+      detail: obligations[0].creditorName
+    });
+  }
+  if (requests[0]) {
+    const person = getPerson(session.people, requests[0].personId);
+    items.push({
+      time: formatGameTime(requests[0].dueAt),
+      title: requests[0].title,
+      status: requests[0].dueAt < session.timestamp + 3 * 60 * 60_000 ? "urgent" : "open",
+      detail: `${person?.name ?? "Контакт"} · ${requests[0].status === "accepted" ? "принято" : "ожидает ответа"}`
+    });
+  }
+  items.push({
+    time: "—",
+    title: "Домашний запас",
+    status: foodUnits <= 2 ? "urgent" : "open",
+    detail: `${foodUnits} свежих порций`
+  });
   return items.slice(0, 4);
 }
 
@@ -159,6 +189,7 @@ const windowLabels: Record<WindowId, string> = {
   contact: "CONTACT RECORD",
   messages: "MESSAGES",
   courier: "COURIER EXCHANGE",
+  pressure: "PRESSURE WEEK",
   local: "LOCAL CHANNEL",
   journal: "EVENT LOG",
   food: "FOOD STORAGE / SUPPLY",
@@ -260,6 +291,30 @@ export default function App() {
 
   function deliverDelivery(): void {
     setSession((current) => deliverCourierOrder(current));
+  }
+
+  function acceptRequest(requestId: string): void {
+    setSession((current) => acceptPersonalRequest(current, requestId));
+  }
+
+  function declineRequest(requestId: string): void {
+    setSession((current) => declinePersonalRequest(current, requestId));
+  }
+
+  function completeRequest(requestId: string): void {
+    setSession((current) => completePersonalRequest(current, requestId));
+  }
+
+  function payObligation(obligationId: string): void {
+    setSession((current) => payPlayerObligation(current, obligationId));
+  }
+
+  function extendRent(): void {
+    setSession((current) => requestRentExtension(current));
+  }
+
+  function borrowFrom(personId: string): void {
+    setSession((current) => requestEmergencyLoan(current, personId));
   }
 
   function selectPerson(personId: string): void {
@@ -462,6 +517,17 @@ export default function App() {
     <PeopleWorkspace session={session} onSelect={selectPerson} />
   ) : activeNav === "work" ? (
     <CourierWorkspace session={session} onAccept={acceptDelivery} onPickup={pickupDelivery} onDeliver={deliverDelivery} onTravel={travel} />
+  ) : activeNav === "network" ? (
+    <PressureWorkspace
+      session={session}
+      onAcceptRequest={acceptRequest}
+      onDeclineRequest={declineRequest}
+      onCompleteRequest={completeRequest}
+      onTravel={travel}
+      onPayObligation={payObligation}
+      onRequestExtension={extendRent}
+      onBorrow={borrowFrom}
+    />
   ) : activeNav === "inventory" ? (
     <FoodWorkspace session={session} onEat={eatFood} onOpenWindow={openWindow} />
   ) : activeNav === "home" ? (
@@ -520,6 +586,12 @@ export default function App() {
             onAcceptDelivery={acceptDelivery}
             onPickupDelivery={pickupDelivery}
             onDeliverDelivery={deliverDelivery}
+            onAcceptRequest={acceptRequest}
+            onDeclineRequest={declineRequest}
+            onCompleteRequest={completeRequest}
+            onPayObligation={payObligation}
+            onRequestExtension={extendRent}
+            onBorrow={borrowFrom}
             onOpenWindow={openWindow}
           />
         </WindowFrame>
@@ -536,6 +608,10 @@ export default function App() {
               </div>
               <button type="button" className="icon-button" onClick={() => setActionSheetOpen(false)}><Icon name="close" /></button>
             </header>
+            <button type="button" className="action-sheet__pressure" onClick={() => { setActionSheetOpen(false); openWindow("pressure"); }}>
+              <span><strong>PRESSURE WEEK</strong><small>₵ {committedAmount(session.pressure)} committed · {activeRequests(session.pressure).length} requests</small></span>
+              <Icon name="chevron" size={16} />
+            </button>
             <div className="action-sheet__shortcuts">
               <button type="button" onClick={() => { setActionSheetOpen(false); setActiveNav("work"); }}><Icon name="work" /><span><strong>РАБОТА</strong><small>{session.jobs.courier.orders.filter((order) => order.status === "available").length} заказов</small></span></button>
               <button type="button" onClick={() => { setActionSheetOpen(false); openWindow("food"); }}><Icon name="inventory" /><span><strong>ЕДА</strong><small>{getFreshFoodUnits(session.life.food, session.timestamp)} порций</small></span></button>
@@ -866,6 +942,10 @@ function MobileLifeWorkspace({
 
         {activeTab === "plan" ? (
           <div className="mobile-plan-list">
+            <button type="button" className="mobile-pressure-summary" onClick={() => onOpenWindow("pressure")}>
+              <span><strong>PRESSURE WEEK</strong><small>₵ {committedAmount(session.pressure)} committed · {activeRequests(session.pressure).length} requests</small></span>
+              <Icon name="chevron" size={15} />
+            </button>
             {plans.map((item) => (
               <button type="button" className={`mobile-plan-row mobile-plan-row--${item.status}`} key={`${item.time}-${item.title}`}>
                 <time>{item.time}</time>
@@ -1151,15 +1231,15 @@ function HomeWorkspace({ session, onSleep, onOpenWindow, onTravel }: { session: 
   const atHome = session.life.currentLocationId === session.life.housing.locationId;
   return (
     <div className="life-module life-module--home">
-      <header className="module-heading"><div><span>HOME / HABITATION NODE</span><h1>{housingLocation?.name ?? "HOUSING"}</h1><p>{session.player.housingDaysLeft} дней оплачено · ₵ {session.life.housing.rentPerWeek} в неделю</p></div><span className={`status-chip ${atHome ? "status-chip--online" : ""}`}>{atHome ? "YOU ARE HOME" : "REMOTE"}</span></header>
+      <header className="module-heading"><div><span>HOME / HABITATION NODE</span><h1>{housingLocation?.name ?? "HOUSING"}</h1><p>{session.player.housingDaysLeft} дней оплачено · ₵ {session.life.housing.rentPerWeek} в неделю</p></div><span className={`status-chip ${session.pressure.housingStatus === "active" ? "status-chip--online" : ""}`}>{session.pressure.housingStatus.toUpperCase()}</span></header>
       <div className="housing-grid">
         <section className="housing-card housing-card--main"><span>CAPSULE UNIT</span><strong>{housingLocation?.code}</strong><div><b>SLEEP {session.life.housing.sleepQuality}%</b><b>NOISE {session.life.housing.noise}%</b><b>SEC {session.life.housing.security}%</b></div><p>Узкая капсула, персональный шкаф, нагреватель и доступ к горячей воде. Кухонного модуля и пищевого принтера нет.</p></section>
         <section className="housing-card"><span>APPLIANCES</span><ul><li className="is-active">HEATER</li><li className="is-active">HOT WATER</li><li>KITCHEN MODULE</li><li>FOOD PRINTER</li></ul></section>
-        <section className="housing-card"><span>FOOD STORAGE</span><strong>{getFreshFoodUnits(session.life.food, session.timestamp)} порций</strong><button type="button" onClick={() => onOpenWindow("food")}>Открыть запас</button></section>
+        <section className="housing-card"><span>FOOD STORAGE</span><strong>{getFreshFoodUnits(session.life.food, session.timestamp)} порций</strong><button type="button" onClick={() => onOpenWindow("food")}>Открыть запас</button><button type="button" onClick={() => onOpenWindow("pressure")}>Платежи и аренда</button></section>
       </div>
       <div className="sleep-control">
         <div><span>REST CYCLE</span><strong>Усталость {session.player.condition.fatigue}%</strong><small>Шум жилья снизит качество восстановления.</small></div>
-        {atHome ? <><button type="button" onClick={() => onSleep(6)}>Спать 6 ч</button><button type="button" className="button--primary" onClick={() => onSleep(8)}>Спать 8 ч</button></> : <button type="button" className="button--primary" onClick={() => onTravel(session.life.housing.locationId)}>Вернуться домой</button>}
+        {atHome && session.pressure.housingStatus !== "evicted" ? <><button type="button" onClick={() => onSleep(6)}>Спать 6 ч</button><button type="button" className="button--primary" onClick={() => onSleep(8)}>Спать 8 ч</button></> : session.pressure.housingStatus === "evicted" ? <button type="button" className="button--danger" onClick={() => onOpenWindow("pressure")}>Восстановить доступ</button> : <button type="button" className="button--primary" onClick={() => onTravel(session.life.housing.locationId)}>Вернуться домой</button>}
       </div>
     </div>
   );
@@ -1336,6 +1416,12 @@ function WindowContent({
   onAcceptDelivery,
   onPickupDelivery,
   onDeliverDelivery,
+  onAcceptRequest,
+  onDeclineRequest,
+  onCompleteRequest,
+  onPayObligation,
+  onRequestExtension,
+  onBorrow,
   onOpenWindow
 }: {
   id: WindowId;
@@ -1358,6 +1444,12 @@ function WindowContent({
   onAcceptDelivery: (orderId: string) => void;
   onPickupDelivery: () => void;
   onDeliverDelivery: () => void;
+  onAcceptRequest: (requestId: string) => void;
+  onDeclineRequest: (requestId: string) => void;
+  onCompleteRequest: (requestId: string) => void;
+  onPayObligation: (obligationId: string) => void;
+  onRequestExtension: () => void;
+  onBorrow: (personId: string) => void;
   onOpenWindow: (id: WindowId) => void;
 }) {
 
@@ -1454,6 +1546,21 @@ function WindowContent({
           <div className="empty-terminal">Новых личных сообщений нет. Каналы организаций будут обновляться по событиям мира.</div>
         </section>
       </div>
+    );
+  }
+
+  if (id === "pressure") {
+    return (
+      <PressureWorkspace
+        session={session}
+        onAcceptRequest={onAcceptRequest}
+        onDeclineRequest={onDeclineRequest}
+        onCompleteRequest={onCompleteRequest}
+        onTravel={onTravel}
+        onPayObligation={onPayObligation}
+        onRequestExtension={onRequestExtension}
+        onBorrow={onBorrow}
+      />
     );
   }
 
