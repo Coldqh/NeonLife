@@ -35,6 +35,8 @@ import {
 } from "../gameplay/life/lifeSimulation";
 import { Icon, type IconName } from "../ui/components/Icons";
 import { getActiveCourierOrder, type CourierOrder } from "../gameplay/jobs/courier/courierSystem";
+import { getPerson, peopleAtLocation, toKnownNpc } from "../people/network/humanNetwork";
+import type { PersonState } from "../people/network/types";
 import { Meter } from "../ui/components/Meter";
 import { Portrait } from "../ui/components/Portrait";
 import { SystemPanel } from "../ui/components/SystemPanel";
@@ -260,6 +262,20 @@ export default function App() {
     setSession((current) => deliverCourierOrder(current));
   }
 
+  function selectPerson(personId: string): void {
+    setSession((current) => {
+      const person = getPerson(current.people, personId);
+      if (!person) return current;
+      return {
+        ...current,
+        people: { ...current.people, selectedPersonId: personId },
+        world: { ...current.world, primaryContactId: personId },
+        primaryContact: toKnownNpc(person, current.world.locations, current.timestamp)
+      };
+    });
+    setContextOpen(true);
+  }
+
   function openWindow(id: WindowId): void {
     setOpenWindows((current) => current.includes(id) ? current : [...current, id]);
     setActiveWindow(id);
@@ -442,6 +458,8 @@ export default function App() {
     />
   ) : activeNav === "city" ? (
     <PlacesWorkspace session={session} onTravel={travel} onOpenWindow={openWindow} />
+  ) : activeNav === "people" ? (
+    <PeopleWorkspace session={session} onSelect={selectPerson} />
   ) : activeNav === "work" ? (
     <CourierWorkspace session={session} onAccept={acceptDelivery} onPickup={pickupDelivery} onDeliver={deliverDelivery} onTravel={travel} />
   ) : activeNav === "inventory" ? (
@@ -521,7 +539,7 @@ export default function App() {
             <div className="action-sheet__shortcuts">
               <button type="button" onClick={() => { setActionSheetOpen(false); setActiveNav("work"); }}><Icon name="work" /><span><strong>РАБОТА</strong><small>{session.jobs.courier.orders.filter((order) => order.status === "available").length} заказов</small></span></button>
               <button type="button" onClick={() => { setActionSheetOpen(false); openWindow("food"); }}><Icon name="inventory" /><span><strong>ЕДА</strong><small>{getFreshFoodUnits(session.life.food, session.timestamp)} порций</small></span></button>
-              <button type="button" onClick={() => { setActionSheetOpen(false); openWindow("places"); }}><Icon name="city" /><span><strong>МЕСТА</strong><small>{currentLocation?.name ?? "CITY"}</small></span></button>
+              <button type="button" onClick={() => { setActionSheetOpen(false); setActiveNav("people"); }}><Icon name="people" /><span><strong>ЛЮДИ</strong><small>{peopleAtLocation(session.people, session.life.currentLocationId).length} рядом</small></span></button>
               <button type="button" onClick={() => { setActionSheetOpen(false); openWindow("home"); }}><Icon name="home" /><span><strong>ДОМ</strong><small>{session.player.housingDaysLeft} дней</small></span></button>
             </div>
             <div className="action-sheet__list">
@@ -1001,6 +1019,97 @@ function PlacesWorkspace({ session, onTravel, onOpenWindow }: { session: GameSes
   );
 }
 
+function PeopleWorkspace({ session, onSelect }: { session: GameSession; onSelect: (personId: string) => void }) {
+  const [tab, setTab] = useState<"nearby" | "all" | "memory">("nearby");
+  const currentLocation = session.world.locations.find((location) => location.id === session.life.currentLocationId);
+  const nearby = peopleAtLocation(session.people, session.life.currentLocationId);
+  const selected = getPerson(session.people, session.world.primaryContactId)
+    ?? getPerson(session.people, session.people.selectedPersonId);
+  const memories = session.people.people
+    .flatMap((person) => person.memories.map((memory) => ({ person, memory })))
+    .sort((left, right) => right.memory.timestamp - left.memory.timestamp)
+    .slice(0, 18);
+  const visiblePeople = tab === "nearby" ? nearby : session.people.people;
+  const locationName = (id: string) => session.world.locations.find((location) => location.id === id)?.name ?? "UNKNOWN NODE";
+
+  return (
+    <div className="people-workspace">
+      <header className="module-heading people-heading">
+        <div>
+          <span>PEOPLE / HUMAN NETWORK</span>
+          <h1>ЛЮДИ ГОРОДА</h1>
+          <p>{currentLocation?.name ?? "UNKNOWN"} · постоянные жители, расписания и память</p>
+        </div>
+        <div className="people-stats">
+          <div><span>KNOWN</span><strong>{session.people.people.length}</strong></div>
+          <div><span>HERE</span><strong>{nearby.length}</strong></div>
+          <div><span>MEMORY</span><strong>{session.people.people.reduce((sum, person) => sum + person.memories.length, 0)}</strong></div>
+        </div>
+      </header>
+
+      <nav className="terminal-tabs people-tabs" aria-label="Разделы человеческой сети">
+        <button type="button" className={tab === "nearby" ? "is-active" : ""} onClick={() => setTab("nearby")}>РЯДОМ · {nearby.length}</button>
+        <button type="button" className={tab === "all" ? "is-active" : ""} onClick={() => setTab("all")}>ВСЕ · {session.people.people.length}</button>
+        <button type="button" className={tab === "memory" ? "is-active" : ""} onClick={() => setTab("memory")}>ПАМЯТЬ · {memories.length}</button>
+      </nav>
+
+      {tab !== "memory" ? (
+        <div className="people-list">
+          {visiblePeople.map((person) => (
+            <PersonNetworkCard
+              key={person.id}
+              person={person}
+              location={locationName(person.currentLocationId)}
+              selected={selected?.id === person.id}
+              onSelect={onSelect}
+            />
+          ))}
+          {!visiblePeople.length ? <div className="empty-terminal">На этой точке сейчас нет известных людей. Их расписания продолжают двигаться.</div> : null}
+        </div>
+      ) : (
+        <div className="people-memory-list">
+          {memories.map(({ person, memory }) => (
+            <button type="button" key={memory.id} onClick={() => onSelect(person.id)}>
+              <time>{formatGameDateTime(memory.timestamp)}</time>
+              <span><strong>{person.name}</strong><small>{memory.summary}</small></span>
+              <em className={memory.emotionalValue < 0 ? "is-negative" : memory.emotionalValue > 0 ? "is-positive" : ""}>{memory.emotionalValue > 0 ? "+" : ""}{memory.emotionalValue}</em>
+            </button>
+          ))}
+          {!memories.length ? <div className="empty-terminal">Общих воспоминаний пока нет. Люди запомнят конкретные поступки игрока.</div> : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PersonNetworkCard({ person, location, selected, onSelect }: { person: PersonState; location: string; selected: boolean; onSelect: (personId: string) => void }) {
+  return (
+    <button type="button" className={`people-card ${selected ? "is-selected" : ""}`} onClick={() => onSelect(person.id)}>
+      <div className="people-card__identity">
+        <span className="people-card__code">{person.profileCode}</span>
+        <strong>{person.name}</strong>
+        <small>{person.roleLabel} · AGE {person.age}</small>
+      </div>
+      <div className="people-card__status">
+        <span>{person.status}</span>
+        <small>{location}</small>
+      </div>
+      <div className="people-card__problem">
+        <span>PRESSURE {person.problem.severity}%</span>
+        <strong>{person.problem.title}</strong>
+        <i><b style={{ width: `${person.problem.severity}%` }} /></i>
+      </div>
+      <div className="people-card__relation">
+        <span>T {person.trustToPlayer}</span>
+        <span>R {person.respectToPlayer}</span>
+        <span className={person.irritationToPlayer >= 35 ? "warning-text" : ""}>I {person.irritationToPlayer}</span>
+        <span>M {person.memories.length}</span>
+      </div>
+      <Icon name="chevron" size={16} />
+    </button>
+  );
+}
+
 function FoodWorkspace({ session, onEat, onOpenWindow }: { session: GameSession; onEat: (productId: string) => void; onOpenWindow: (id: WindowId) => void }) {
   const fresh = getFreshFoodUnits(session.life.food, session.timestamp);
   const spoiled = session.life.food.storage.reduce((total, stack) => total + (getFoodFreshness(stack, session.timestamp) === "spoiled" ? stack.quantity : 0), 0);
@@ -1115,6 +1224,8 @@ function CourierWorkspace({
   const locationName = (id: string) => session.world.locations.find((location) => location.id === id)?.name ?? "UNKNOWN NODE";
   const atPickup = active?.pickupLocationId === session.life.currentLocationId;
   const atDropoff = active?.dropoffLocationId === session.life.currentLocationId;
+  const activeClient = active ? getPerson(session.people, active.clientId) : null;
+  const clientMoved = Boolean(active && activeClient && activeClient.currentLocationId !== active.dropoffLocationId);
 
   return (
     <div className="courier-workspace">
@@ -1137,6 +1248,10 @@ function CourierWorkspace({
             <div><span>ACTIVE DELIVERY</span><h2>{active.code}</h2></div>
             <span className={`status-chip risk-${active.risk}`}>{active.status.toUpperCase()}</span>
           </header>
+          <button type="button" className="courier-client-line" onClick={() => onTravel(active.dropoffLocationId)}>
+            <span><strong>{active.client}</strong><small>{active.requestNote}</small></span>
+            <em>{getPerson(session.people, active.clientId)?.status ?? "CLIENT STATUS UNKNOWN"}</em>
+          </button>
           <div className="courier-route-line">
             <div className={active.status !== "accepted" ? "is-complete" : ""}><span>PICKUP</span><strong>{locationName(active.pickupLocationId)}</strong></div>
             <i><Icon name="chevron" /></i>
@@ -1153,7 +1268,7 @@ function CourierWorkspace({
           <div className="courier-active__actions">
             {active.status === "accepted" && atPickup ? <button type="button" className="button button--primary" onClick={onPickup}>ЗАБРАТЬ ГРУЗ · 6 MIN</button> : null}
             {active.status === "accepted" && !atPickup ? <button type="button" className="button button--primary" onClick={() => onTravel(active.pickupLocationId)}>ЕХАТЬ К ПОЛУЧЕНИЮ</button> : null}
-            {active.status === "in-transit" && atDropoff ? <button type="button" className="button button--primary" onClick={onDeliver}>ПЕРЕДАТЬ ГРУЗ · 5 MIN</button> : null}
+            {active.status === "in-transit" && atDropoff ? <button type="button" className="button button--primary" onClick={onDeliver}>{clientMoved ? "КЛИЕНТ УШЁЛ · УТОЧНИТЬ" : "ПЕРЕДАТЬ ГРУЗ · 5 MIN"}</button> : null}
             {active.status === "in-transit" && !atDropoff ? <button type="button" className="button button--primary" onClick={() => onTravel(active.dropoffLocationId)}>ЕХАТЬ К КЛИЕНТУ</button> : null}
           </div>
         </section>
@@ -1172,7 +1287,8 @@ function CourierWorkspace({
               <header><div><span>{order.code}</span><strong>{order.client}</strong></div><em>{order.risk.toUpperCase()}</em></header>
               <div className="courier-order__route"><span>{locationName(order.pickupLocationId)}</span><Icon name="chevron" size={14} /><span>{locationName(order.dropoffLocationId)}</span></div>
               <div className="courier-order__meta"><span>{order.weightKg} KG</span><span>{courierMinutesLeft(order, session.timestamp)} MIN</span><span>₵ {order.payout}</span><span>{order.legality.toUpperCase()}</span></div>
-              <p>{order.cargoName}</p>
+              <p>{order.requestNote}</p>
+              <small className="courier-order__cargo">{order.cargoName}</small>
               <button type="button" disabled={Boolean(active) || order.weightKg > state.cargoCapacityKg} onClick={() => onAccept(order.id)}>ПРИНЯТЬ ЗАКАЗ</button>
             </article>
           ))}
@@ -1275,6 +1391,7 @@ function WindowContent({
 
   if (id === "contact") {
     const contact = session.primaryContact;
+    const person = getPerson(session.people, contact.id);
     return (
       <div className="dossier-window">
         <div className="dossier-window__identity">
@@ -1296,11 +1413,29 @@ function WindowContent({
             <ul>{contact.knownFacts.map((item) => <li key={item}>{item}</li>)}</ul>
           </section>
         </div>
-        <section className="memory-record">
-          <span>LAST CONTACT / {contact.lastContact}</span>
-          <p>Последняя запись содержит короткий бытовой обмен сообщениями.</p>
-          <small>Достоверность записи: 100% · Источник: прямой контакт</small>
-        </section>
+        {person ? (
+          <>
+            <section className="person-pressure-record">
+              <div><span>CURRENT PRESSURE</span><strong>{person.problem.title}</strong><small>{person.problem.detail}</small></div>
+              <em>{person.problem.severity}%</em>
+            </section>
+            <section className="person-schedule-record">
+              <h4>DAILY SCHEDULE</h4>
+              <div>{person.schedule.map((block) => <span key={`${block.startHour}-${block.activity}`}>{String(block.startHour).padStart(2, "0")}:00 · {block.activity.toUpperCase()}</span>)}</div>
+            </section>
+            <section className="memory-record">
+              <span>MEMORY / {person.memories.length} RECORDS</span>
+              {person.memories.slice(0, 5).map((memory) => <p key={memory.id}>{formatGameDateTime(memory.timestamp)} · {memory.summary}</p>)}
+              {!person.memories.length ? <p>Общих событий пока нет.</p> : null}
+              <small>Доверие {person.trustToPlayer} · уважение {person.respectToPlayer} · раздражение {person.irritationToPlayer}</small>
+            </section>
+          </>
+        ) : (
+          <section className="memory-record">
+            <span>LAST CONTACT / {contact.lastContact}</span>
+            <p>Детальная запись человека пока не материализована.</p>
+          </section>
+        )}
       </div>
     );
   }

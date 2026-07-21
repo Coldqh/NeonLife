@@ -1159,3 +1159,125 @@
     display: none;
   }
 }
+
+/* v0.7.0 — HUMAN NETWORK mobile */
+@media (max-width: 760px) {
+  .people-workspace {
+    height: 100%;
+    min-height: 0;
+    padding: 7px;
+    gap: 6px;
+  }
+
+  .people-heading {
+    min-height: auto;
+    padding: 7px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+
+  .people-heading h1 {
+    font-size: 15px;
+  }
+
+  .people-heading p,
+  .people-heading > div:first-child > span {
+    display: none;
+  }
+
+  .people-stats {
+    width: 100%;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+  }
+
+  .people-stats > div {
+    padding: 5px;
+  }
+
+  .people-stats strong {
+    font-size: 10px;
+  }
+
+  .people-tabs {
+    min-height: 35px;
+  }
+
+  .people-list {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+
+  .people-card {
+    min-height: 68px;
+    grid-template-columns: minmax(105px, 1.05fr) minmax(100px, .95fr) auto 16px;
+    gap: 6px;
+    padding: 7px;
+  }
+
+  .people-card__status {
+    display: none;
+  }
+
+  .people-card__identity strong,
+  .people-card__problem strong {
+    font-size: 9px;
+  }
+
+  .people-card__relation {
+    grid-template-columns: repeat(2, auto);
+    gap: 3px;
+  }
+
+  .people-card__relation span {
+    padding: 2px 4px;
+    font-size: 6px;
+  }
+
+  .people-memory-list > button {
+    grid-template-columns: 64px minmax(0, 1fr) 30px;
+    min-height: 49px;
+    gap: 6px;
+    padding: 6px;
+  }
+
+  .people-memory-list time {
+    font-size: 6px;
+  }
+
+  .courier-client-line {
+    margin-top: 6px;
+    padding: 6px;
+  }
+
+  .courier-client-line em {
+    max-width: 105px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .person-schedule-record > div {
+    max-height: 82px;
+    overflow-y: auto;
+  }
+}
+
+@media (max-width: 430px) {
+  .people-card {
+    grid-template-columns: minmax(100px, 1fr) minmax(88px, .85fr) 16px;
+  }
+
+  .people-card__relation {
+    display: none;
+  }
+
+  .courier-client-line em {
+    display: none;
+  }
+
+  .courier-order__cargo {
+    display: none;
+  }
+}

@@ -3713,3 +3713,326 @@ button:disabled {
 .risk-low { color: var(--green); }
 .risk-medium { color: var(--yellow); }
 .risk-high { color: var(--red); }
+
+/* v0.7.0 — HUMAN NETWORK */
+.people-workspace {
+  height: 100%;
+  min-height: 0;
+  padding: 18px;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 10px;
+  overflow: hidden;
+}
+
+.people-heading {
+  margin: 0;
+}
+
+.people-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(78px, 1fr));
+  gap: 6px;
+}
+
+.people-stats > div {
+  padding: 8px;
+  border: 1px solid var(--line);
+  background: rgba(4, 16, 22, 0.78);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.people-stats span,
+.people-card span,
+.people-card small,
+.people-memory-list time,
+.people-memory-list small {
+  font-family: var(--font-mono);
+}
+
+.people-stats span {
+  color: var(--muted-2);
+  font-size: 7px;
+  letter-spacing: .08em;
+}
+
+.people-stats strong {
+  font: 800 13px var(--font-mono);
+}
+
+.people-tabs {
+  flex: 0 0 auto;
+}
+
+.people-list,
+.people-memory-list {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 3px;
+  padding-bottom: 8px;
+}
+
+.people-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 7px;
+}
+
+.people-card {
+  min-width: 0;
+  min-height: 86px;
+  display: grid;
+  grid-template-columns: minmax(125px, 1.15fr) minmax(130px, 1.1fr) minmax(120px, 1fr) auto 18px;
+  align-items: center;
+  gap: 9px;
+  padding: 9px;
+  color: var(--text);
+  border: 1px solid var(--line);
+  background: rgba(4, 15, 21, 0.76);
+  text-align: left;
+  cursor: pointer;
+}
+
+.people-card:hover,
+.people-card.is-selected {
+  border-color: rgba(0, 224, 255, 0.5);
+  background: rgba(0, 224, 255, 0.07);
+}
+
+.people-card.is-selected {
+  box-shadow: inset 3px 0 0 var(--cyan);
+}
+
+.people-card__identity,
+.people-card__status,
+.people-card__problem {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.people-card__code,
+.people-card__problem > span {
+  color: var(--cyan);
+  font-size: 7px;
+  letter-spacing: .08em;
+}
+
+.people-card__identity strong,
+.people-card__problem strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 800 10px var(--font-mono);
+}
+
+.people-card__identity small,
+.people-card__status span,
+.people-card__status small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-2);
+  font-size: 7px;
+}
+
+.people-card__status span {
+  color: var(--muted-1);
+  font-size: 8px;
+}
+
+.people-card__problem > i {
+  height: 3px;
+  margin-top: 2px;
+  overflow: hidden;
+  background: rgba(255,255,255,.07);
+}
+
+.people-card__problem > i > b {
+  display: block;
+  height: 100%;
+  background: var(--yellow);
+}
+
+.people-card__relation {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 4px;
+}
+
+.people-card__relation span {
+  padding: 3px 5px;
+  color: var(--muted-1);
+  border: 1px solid var(--line);
+  font-size: 7px;
+}
+
+.people-card > svg {
+  color: var(--cyan);
+}
+
+.people-memory-list {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+}
+
+.people-memory-list > button {
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr) 42px;
+  align-items: center;
+  gap: 9px;
+  padding: 8px;
+  color: var(--text);
+  border: 1px solid var(--line);
+  background: rgba(4, 15, 21, 0.76);
+  text-align: left;
+  cursor: pointer;
+}
+
+.people-memory-list time {
+  color: var(--muted-2);
+  font-size: 7px;
+}
+
+.people-memory-list > button > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.people-memory-list strong {
+  font: 800 9px var(--font-mono);
+}
+
+.people-memory-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-1);
+  font-size: 8px;
+}
+
+.people-memory-list em {
+  justify-self: end;
+  color: var(--muted-2);
+  font: 800 9px var(--font-mono);
+  font-style: normal;
+}
+
+.people-memory-list em.is-positive { color: var(--green); }
+.people-memory-list em.is-negative { color: var(--red); }
+
+.courier-client-line {
+  width: 100%;
+  margin-top: 9px;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text);
+  border: 1px solid rgba(172, 112, 255, 0.34);
+  background: rgba(121, 64, 194, 0.08);
+  text-align: left;
+  cursor: pointer;
+}
+
+.courier-client-line > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.courier-client-line strong,
+.courier-client-line small,
+.courier-client-line em,
+.courier-order__cargo {
+  font-family: var(--font-mono);
+}
+
+.courier-client-line strong {
+  font-size: 9px;
+}
+
+.courier-client-line small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-1);
+  font-size: 8px;
+}
+
+.courier-client-line em {
+  flex: 0 0 auto;
+  color: var(--purple, #b487ff);
+  font-size: 7px;
+  font-style: normal;
+}
+
+.courier-order__cargo {
+  color: var(--muted-2);
+  font-size: 7px;
+  letter-spacing: .04em;
+}
+
+.person-pressure-record,
+.person-schedule-record {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: rgba(3, 12, 17, 0.62);
+}
+
+.person-pressure-record {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.person-pressure-record > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.person-pressure-record span,
+.person-pressure-record small,
+.person-schedule-record span {
+  color: var(--muted-2);
+  font: 700 7px var(--font-mono);
+}
+
+.person-pressure-record strong {
+  font: 800 10px var(--font-mono);
+}
+
+.person-pressure-record em {
+  color: var(--yellow);
+  font: 900 18px var(--font-mono);
+  font-style: normal;
+}
+
+.person-schedule-record h4 {
+  margin: 0 0 7px;
+}
+
+.person-schedule-record > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.person-schedule-record span {
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+}

@@ -8,6 +8,7 @@ import { createInitialFoodState } from "../../gameplay/food/foodSystem";
 import { createInitialHousing } from "../../gameplay/housing/housingSystem";
 import { createInitialCourierState } from "../../gameplay/jobs/courier/courierSystem";
 import { createPrimaryContact } from "../../people/demoNpc";
+import { createHumanNetwork, getPerson, toKnownNpc } from "../../people/network/humanNetwork";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
 import type {
@@ -196,7 +197,11 @@ export function createWorldSession(seed: string): GameSession {
   attachLocations(districts, organizations, locations);
 
   const player = createInitialPlayer(seed, lower.name, lower.code);
-  const primaryContact = createPrimaryContact(seed, housing.name);
+  const people = createHumanNetwork(seed, INITIAL_GAME_TIMESTAMP, locations);
+  const selectedPerson = getPerson(people, people.selectedPersonId);
+  const primaryContact = selectedPerson
+    ? toKnownNpc(selectedPerson, locations, INITIAL_GAME_TIMESTAMP)
+    : createPrimaryContact(seed, housing.name);
   const meta = createWorldMeta(seed);
   meta.currentTimestamp = INITIAL_GAME_TIMESTAMP;
 
@@ -227,6 +232,7 @@ export function createWorldSession(seed: string): GameSession {
     world,
     player,
     primaryContact,
+    people,
     events: createInitialEvents({
       seed,
       districtName: lower.name,
@@ -244,7 +250,7 @@ export function createWorldSession(seed: string): GameSession {
       lastSleepAt: null
     },
     jobs: {
-      courier: createInitialCourierState(seed, INITIAL_GAME_TIMESTAMP, locations)
+      courier: createInitialCourierState(seed, INITIAL_GAME_TIMESTAMP, locations, people.people)
     }
   };
 }

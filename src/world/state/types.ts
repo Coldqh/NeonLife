@@ -3,6 +3,7 @@ import type { WorldMeta } from "../../core/simulation/types";
 import type { WorldEvent } from "../../core/events/types";
 import type { PlayerState } from "../../gameplay/player/demoPlayer";
 import type { KnownNpc } from "../../people/demoNpc";
+import type { HumanNetworkState } from "../../people/network/types";
 import type { DistrictPulseState } from "../city/districtPulse";
 import type { FoodState } from "../../gameplay/food/foodSystem";
 import type { HousingState } from "../../gameplay/housing/housingSystem";
@@ -93,6 +94,7 @@ export interface GameSession {
   world: WorldState;
   player: PlayerState;
   primaryContact: KnownNpc;
+  people: HumanNetworkState;
   events: WorldEvent[];
   eventQueue: ScheduledWorldEvent[];
   currentActivity: string;

@@ -1,5 +1,6 @@
 import { createStableEntityId } from "../../../core/ids/entityId";
 import { SeededRandom } from "../../../core/random/seededRandom";
+import type { PersonState } from "../../../people/network/types";
 import type { LocationState } from "../../../world/state/types";
 
 export type CourierOrderStatus = "available" | "accepted" | "in-transit" | "completed" | "failed" | "expired";
@@ -9,7 +10,9 @@ export type CargoLegality = "legal" | "restricted" | "unknown";
 export interface CourierOrder {
   id: string;
   code: string;
+  clientId: string;
   client: string;
+  requestNote: string;
   pickupLocationId: string;
   dropoffLocationId: string;
   cargoName: string;
@@ -39,7 +42,6 @@ export interface CourierState {
   cargoCapacityKg: number;
 }
 
-const CLIENTS = ["MESHLINE CO-OP", "CMU DISPATCH", "VANTA SUPPLY", "NORTHLINE FREIGHT", "SABLE LABS", "PRIVATE NODE"] as const;
 const CARGO = [
   { name: "sealed municipal documents", cargoClass: "documents" as const, weight: [0.4, 1.2], base: 48 },
   { name: "temperature-sensitive meal pack", cargoClass: "food" as const, weight: [1.4, 3.8], base: 62 },
@@ -52,16 +54,42 @@ function eligibleLocations(locations: LocationState[]): LocationState[] {
   return locations.filter((location) => location.type !== "housing" && location.open);
 }
 
-function createBoard(seed: string, timestamp: number, locations: LocationState[], generation: number): CourierOrder[] {
+function requestFor(person: PersonState, cargoClass: CourierOrder["cargoClass"]): string {
+  if (person.problem.type === "medical-debt" || person.problem.type === "family-care") {
+    return cargoClass === "medical" ? "Груз нужен до конца текущей смены." : "Человек пытается закрыть семейную проблему до утра.";
+  }
+  if (person.problem.type === "missing-supply") return "Без этой поставки рабочий узел остановится.";
+  if (person.problem.type === "job-risk") return "Опоздание станет ещё одной записью против клиента.";
+  if (person.problem.type === "rent") return "Клиент берёт дешёвый маршрут и считает каждую единицу.";
+  if (person.problem.type === "exhaustion") return "Клиент не может забрать груз лично после двойной смены.";
+  if (person.problem.type === "unsafe-housing") return "Доставку нельзя оставлять у общего входа.";
+  return "Клиент просит не передавать заказ третьим лицам.";
+}
+
+function chooseDropoff(person: PersonState, locations: LocationState[], fallback: LocationState): LocationState {
+  return locations.find((location) => location.id === person.currentLocationId)
+    ?? locations.find((location) => location.id === person.workLocationId)
+    ?? locations.find((location) => location.id === person.homeLocationId)
+    ?? fallback;
+}
+
+function createBoard(
+  seed: string,
+  timestamp: number,
+  locations: LocationState[],
+  people: PersonState[],
+  generation: number
+): CourierOrder[] {
   const candidates = eligibleLocations(locations);
-  if (candidates.length < 2) return [];
+  if (candidates.length < 2 || !people.length) return [];
   const rng = new SeededRandom(`${seed}:courier-board:${generation}`);
   const orders: CourierOrder[] = [];
 
   for (let index = 0; index < 6; index += 1) {
-    const pickup = rng.pick(candidates);
-    const destinations = candidates.filter((location) => location.id !== pickup.id);
-    const dropoff = rng.pick(destinations);
+    const client = people[(index + rng.integer(0, people.length - 1)) % people.length];
+    const dropoff = chooseDropoff(client, candidates, rng.pick(candidates));
+    const pickupCandidates = candidates.filter((location) => location.id !== dropoff.id);
+    const pickup = rng.pick(pickupCandidates.length ? pickupCandidates : candidates);
     const cargo = rng.pick(CARGO);
     const riskRoll = rng.integer(1, 100);
     const risk: CourierRisk = riskRoll > 80 ? "high" : riskRoll > 45 ? "medium" : "low";
@@ -69,13 +97,16 @@ function createBoard(seed: string, timestamp: number, locations: LocationState[]
       ? (rng.chance(0.55) ? "unknown" : "restricted")
       : cargo.cargoClass === "medical" && rng.chance(0.2) ? "restricted" : "legal";
     const weightKg = Math.round((cargo.weight[0] + rng.next() * (cargo.weight[1] - cargo.weight[0])) * 10) / 10;
+    const problemPressure = Math.round(client.problem.severity / 10);
     const durationMinutes = rng.integer(48, 150);
-    const payout = cargo.base + Math.round(weightKg * 5) + (risk === "high" ? 52 : risk === "medium" ? 24 : 0);
+    const payout = cargo.base + Math.round(weightKg * 5) + (risk === "high" ? 52 : risk === "medium" ? 24 : 0) + problemPressure;
     const code = `DLV-${generation.toString().padStart(2, "0")}${rng.integer(100, 999)}`;
     orders.push({
-      id: createStableEntityId("courier-order", `${seed}:${generation}:${index}:${pickup.id}:${dropoff.id}`),
+      id: createStableEntityId("courier-order", `${seed}:${generation}:${index}:${pickup.id}:${dropoff.id}:${client.id}`),
       code,
-      client: rng.pick(CLIENTS),
+      clientId: client.id,
+      client: client.name,
+      requestNote: requestFor(client, cargo.cargoClass),
       pickupLocationId: pickup.id,
       dropoffLocationId: dropoff.id,
       cargoName: cargo.name,
@@ -96,9 +127,9 @@ function createBoard(seed: string, timestamp: number, locations: LocationState[]
   return orders;
 }
 
-export function createInitialCourierState(seed: string, timestamp: number, locations: LocationState[]): CourierState {
+export function createInitialCourierState(seed: string, timestamp: number, locations: LocationState[], people: PersonState[]): CourierState {
   return {
-    orders: createBoard(seed, timestamp, locations, 1),
+    orders: createBoard(seed, timestamp, locations, people, 1),
     activeOrderId: null,
     boardGeneration: 1,
     boardRefreshAt: timestamp + 8 * 60 * 60_000,
@@ -114,12 +145,18 @@ export function getActiveCourierOrder(state: CourierState): CourierOrder | null 
   return state.orders.find((order) => order.id === state.activeOrderId) ?? null;
 }
 
-export function refreshCourierBoard(state: CourierState, seed: string, timestamp: number, locations: LocationState[]): CourierState {
+export function refreshCourierBoard(
+  state: CourierState,
+  seed: string,
+  timestamp: number,
+  locations: LocationState[],
+  people: PersonState[]
+): CourierState {
   if (timestamp < state.boardRefreshAt || state.activeOrderId) return state;
   const generation = state.boardGeneration + 1;
   return {
     ...state,
-    orders: createBoard(seed, timestamp, locations, generation),
+    orders: createBoard(seed, timestamp, locations, people, generation),
     boardGeneration: generation,
     boardRefreshAt: timestamp + 8 * 60 * 60_000
   };
@@ -159,6 +196,7 @@ export interface CourierCompletion {
   payout: number;
   lateMinutes: number;
   condition: number;
+  ratingDelta: number;
 }
 
 export function completeCourierOrder(state: CourierState, currentLocationId: string, timestamp: number): CourierCompletion | null {
@@ -173,6 +211,7 @@ export function completeCourierOrder(state: CourierState, currentLocationId: str
     payout,
     lateMinutes,
     condition: active.condition,
+    ratingDelta,
     state: {
       ...state,
       activeOrderId: null,

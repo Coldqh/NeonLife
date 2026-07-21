@@ -3,6 +3,7 @@ import { createStableEntityId } from "../../core/ids/entityId";
 import { processEventQueue } from "../../core/simulation/eventQueue";
 import { advanceGameTime } from "../../core/time/gameTime";
 import { getFoodProduct } from "../../data/products/foodCatalog";
+import { advanceHumanNetwork, getPerson, recordPlayerAction, toKnownNpc } from "../../people/network/humanNetwork";
 import { canPrepare, consumeFood, discardSpoiledFood, purchaseFood } from "../food/foodSystem";
 import { calculateSleepRecovery, getHousingDaysLeft } from "../housing/housingSystem";
 import { getTravelOptions, isLocationOpen } from "../travel/travelSystem";
@@ -52,6 +53,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   const nextTimestamp = advanceGameTime(session.timestamp, minutes);
   const pulse = advanceDistrictPulse(session.district, nextTimestamp);
   const queued = processEventQueue(session, nextTimestamp);
+  const network = advanceHumanNetwork(session.people, nextTimestamp, session.world.meta.seed, session.world.locations);
   const targetLocation = options.targetLocationId
     ? session.world.locations.find((location) => location.id === options.targetLocationId)
     : undefined;
@@ -73,6 +75,9 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   if (minutes >= 60 && !options.suppressTimeEvent) {
     generated.push(createEvent(session, nextTimestamp, "system", `Прошло ${minutes} минут.`, options.activity, 1));
   }
+  for (const notice of network.notices) {
+    generated.push(createEvent(session, nextTimestamp, "contact", notice.title, notice.detail, notice.importance));
+  }
 
   const baselineFatigue = Math.max(0, Math.round(minutes / 120));
   const baselineHunger = Math.max(0, Math.round(minutes / 150));
@@ -81,8 +86,11 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     expireCourierOrders(session.jobs.courier, nextTimestamp),
     session.world.meta.seed,
     nextTimestamp,
-    session.world.locations
+    session.world.locations,
+    network.state.people
   );
+  const selectedPerson = getPerson(network.state, session.world.primaryContactId)
+    ?? getPerson(network.state, network.state.selectedPersonId);
 
   return {
     ...session,
@@ -90,8 +98,13 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     world: {
       ...session.world,
       meta: { ...session.world.meta, currentTimestamp: nextTimestamp },
-      activeDistrictId: targetDistrict?.id ?? session.world.activeDistrictId
+      activeDistrictId: targetDistrict?.id ?? session.world.activeDistrictId,
+      primaryContactId: selectedPerson?.id ?? session.world.primaryContactId
     },
+    primaryContact: selectedPerson
+      ? toKnownNpc(selectedPerson, session.world.locations, nextTimestamp)
+      : session.primaryContact,
+    people: network.state,
     district: pulse.state,
     eventQueue: queued.queue,
     currentActivity: options.activity ?? session.currentActivity,
@@ -157,15 +170,29 @@ export function acceptCourierOrder(session: GameSession, orderId: string): GameS
   const nextState = acceptCourierOrderState(session.jobs.courier, orderId, session.timestamp);
   if (nextState === session.jobs.courier) return session;
   const order = nextState.orders.find((item) => item.id === orderId);
-  const pickup = session.world.locations.find((location) => location.id === order?.pickupLocationId);
-  const dropoff = session.world.locations.find((location) => location.id === order?.dropoffLocationId);
+  if (!order) return session;
+  const pickup = session.world.locations.find((location) => location.id === order.pickupLocationId);
+  const dropoff = session.world.locations.find((location) => location.id === order.dropoffLocationId);
+  const people = recordPlayerAction(
+    session.people,
+    session.world.meta.seed,
+    order.clientId,
+    session.timestamp,
+    `Игрок принял доставку ${order.code}.`,
+    { trust: 1, respect: 1, importance: 35, emotionalValue: 4 }
+  );
+  const client = getPerson(people, order.clientId);
   return {
     ...session,
     jobs: { ...session.jobs, courier: nextState },
+    people,
+    world: { ...session.world, primaryContactId: order.clientId },
+    primaryContact: client ? toKnownNpc(client, session.world.locations, session.timestamp) : session.primaryContact,
     player: { ...session.player, occupation: "FREELANCE COURIER" },
-    currentActivity: `Заказ принят: ${order?.code ?? "DELIVERY"}`,
+    currentActivity: `Заказ принят: ${order.code}`,
     events: [
-      createEvent(session, session.timestamp, "work", `Принят заказ ${order?.code}.`, `${pickup?.name} → ${dropoff?.name} · оплата ₵ ${order?.payout}`, 2),
+      createEvent(session, session.timestamp, "work", `Принят заказ ${order.code}.`, `${order.client} · ${pickup?.name} → ${dropoff?.name} · оплата ₵ ${order.payout}`, 2),
+      createEvent(session, session.timestamp, "contact", `${order.client} ждёт доставку.`, order.requestNote, order.risk === "high" ? 3 : 2),
       ...session.events
     ].slice(0, 100)
   };
@@ -182,12 +209,54 @@ export function pickupCourierOrder(session: GameSession): GameSession {
     fatigueDelta: 1,
     activity: `Доставка ${active.code}: груз на руках`
   });
-  return { ...progressed, jobs: { ...progressed.jobs, courier: nextState } };
+  const people = recordPlayerAction(
+    progressed.people,
+    progressed.world.meta.seed,
+    active.clientId,
+    progressed.timestamp,
+    `Груз по заказу ${active.code} забран со склада.`,
+    { respect: 1, importance: 28, emotionalValue: 2 }
+  );
+  const client = getPerson(people, active.clientId);
+  return {
+    ...progressed,
+    people,
+    primaryContact: client ? toKnownNpc(client, progressed.world.locations, progressed.timestamp) : progressed.primaryContact,
+    jobs: { ...progressed.jobs, courier: nextState }
+  };
 }
 
 export function deliverCourierOrder(session: GameSession): GameSession {
   const active = getActiveCourierOrder(session.jobs.courier);
   if (!active) return session;
+  const clientAtDelivery = getPerson(session.people, active.clientId);
+  if (clientAtDelivery && clientAtDelivery.currentLocationId !== active.dropoffLocationId) {
+    const redirected = {
+      ...session.jobs.courier,
+      orders: session.jobs.courier.orders.map((order) => order.id === active.id
+        ? { ...order, dropoffLocationId: clientAtDelivery.currentLocationId }
+        : order)
+    };
+    const location = session.world.locations.find((item) => item.id === clientAtDelivery.currentLocationId);
+    return {
+      ...session,
+      jobs: { ...session.jobs, courier: redirected },
+      world: { ...session.world, primaryContactId: clientAtDelivery.id },
+      primaryContact: toKnownNpc(clientAtDelivery, session.world.locations, session.timestamp),
+      currentActivity: `Клиент сменил точку: ${location?.name ?? "UNKNOWN NODE"}`,
+      events: [
+        createEvent(
+          session,
+          session.timestamp,
+          "contact",
+          `${clientAtDelivery.name} ушёл с точки передачи.`,
+          `Новая точка: ${location?.name ?? "неизвестный узел"}. Заказ ${active.code} остаётся активным.`,
+          2
+        ),
+        ...session.events
+      ].slice(0, 100)
+    };
+  }
   const completionTimestamp = session.timestamp + 5 * 60_000;
   const completion = completeCourierOrder(session.jobs.courier, session.life.currentLocationId, completionTimestamp);
   if (!completion) return session;
@@ -200,7 +269,42 @@ export function deliverCourierOrder(session: GameSession): GameSession {
     stressDelta: -2,
     activity: "Свободен для нового заказа"
   });
-  return { ...progressed, jobs: { ...progressed.jobs, courier: completion.state } };
+  const cleanDelivery = completion.lateMinutes === 0 && completion.condition >= 90;
+  const badDelivery = completion.lateMinutes > 15 || completion.condition < 70;
+  const summary = cleanDelivery
+    ? `Игрок доставил заказ ${active.code} вовремя и без повреждений.`
+    : badDelivery
+      ? `Игрок доставил заказ ${active.code} с серьёзной проблемой.`
+      : `Игрок завершил заказ ${active.code} с небольшими отклонениями.`;
+  const people = recordPlayerAction(
+    progressed.people,
+    progressed.world.meta.seed,
+    active.clientId,
+    progressed.timestamp,
+    summary,
+    cleanDelivery
+      ? { trust: 6, respect: 5, irritation: -2, debtToPlayer: 1, importance: 75, emotionalValue: 32 }
+      : badDelivery
+        ? { trust: -7, respect: -4, irritation: 12, importance: 82, emotionalValue: -44 }
+        : { trust: 2, respect: 1, irritation: 2, importance: 50, emotionalValue: 8 }
+  );
+  const client = getPerson(people, active.clientId);
+  const reaction = cleanDelivery
+    ? `${active.client} подтвердил получение и сохранил твой контакт.`
+    : badDelivery
+      ? `${active.client} принял груз, но оставил претензию в MESHLINE.`
+      : `${active.client} подтвердил получение без дополнительных требований.`;
+  return {
+    ...progressed,
+    people,
+    world: { ...progressed.world, primaryContactId: active.clientId },
+    primaryContact: client ? toKnownNpc(client, progressed.world.locations, progressed.timestamp) : progressed.primaryContact,
+    jobs: { ...progressed.jobs, courier: completion.state },
+    events: [
+      createEvent(progressed, progressed.timestamp, "contact", reaction, client?.problem.detail, badDelivery ? 3 : cleanDelivery ? 2 : 1),
+      ...progressed.events
+    ].slice(0, 100)
+  };
 }
 
 export function buyFoodAtCurrentLocation(session: GameSession, productId: string): GameSession {
@@ -225,7 +329,6 @@ export function buyFoodAtCurrentLocation(session: GameSession, productId: string
     }
   };
 }
-
 
 export function orderFoodToHome(session: GameSession, productId: string): GameSession {
   const market = session.world.locations.find((location) => location.type === "market");
@@ -307,7 +410,7 @@ export function sleepAtHome(session: GameSession, hours: number): GameSession {
     stressDelta: recovery.stressDelta,
     healthDelta: recovery.healthDelta,
     hungerDelta: 9,
-    activity: `В жилом блоке`,
+    activity: "В жилом блоке",
     suppressTimeEvent: true
   });
   return {
