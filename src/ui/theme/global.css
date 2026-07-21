@@ -1,0 +1,105 @@
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  background: var(--bg-0);
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 74% 0%, rgba(37, 151, 188, 0.10), transparent 32rem),
+    radial-gradient(circle at 4% 90%, rgba(93, 33, 134, 0.07), transparent 30rem),
+    var(--bg-0);
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  overflow-x: hidden;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button,
+select {
+  color: inherit;
+}
+
+button {
+  border: 0;
+}
+
+button:focus-visible,
+select:focus-visible,
+input:focus-visible {
+  outline: 1px solid var(--cyan);
+  outline-offset: 3px;
+}
+
+::selection {
+  background: rgba(75, 220, 255, 0.26);
+  color: var(--white);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(96, 183, 209, 0.28);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.has-scanlines::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  pointer-events: none;
+  opacity: 0.12;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 3px,
+    rgba(173, 240, 255, 0.045) 4px
+  );
+  mix-blend-mode: screen;
+}
+
+.has-scanlines::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 998;
+  pointer-events: none;
+  background: radial-gradient(circle at center, transparent 50%, rgba(0, 0, 0, 0.27) 100%);
+}
+
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-duration: 0.001ms !important;
+}
+
+.high-contrast {
+  --line: rgba(125, 231, 255, 0.35);
+  --line-strong: rgba(125, 231, 255, 0.72);
+  --muted: #a1bac3;
+  --muted-2: #78909a;
+}
