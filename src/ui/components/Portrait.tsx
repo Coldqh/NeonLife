@@ -1,5 +1,5 @@
 interface PortraitProps {
-  kind: "player" | "mira";
+  kind: "player" | "contact";
   label: string;
 }
 
@@ -12,7 +12,7 @@ export function Portrait({ kind, label }: PortraitProps) {
       <div className="portrait__body" />
       <span className="portrait__corner portrait__corner--tl" />
       <span className="portrait__corner portrait__corner--br" />
-      <span className="portrait__code">BIO//{kind === "player" ? "K-019" : "M-7719"}</span>
+      <span className="portrait__code">BIO//{kind === "player" ? "P-ACT" : "C-PRI"}</span>
     </div>
   );
 }

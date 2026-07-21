@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useVersionGuard, type VersionGuardController } from "./providers/useVersionGuard";
+import { useWorldSave, type WorldSaveController } from "./providers/useWorldSave";
+import type { GameSession } from "../world/state/types";
 import { NeonShell } from "./layout/NeonShell";
-import { initialEvents } from "../core/events/demoEvents";
 import type { EventCategory, WorldEvent } from "../core/events/types";
 import {
   advanceGameTime,
@@ -12,10 +13,11 @@ import {
   INITIAL_GAME_TIMESTAMP
 } from "../core/time/gameTime";
 import { readLocal, writeLocal } from "../core/storage/localStore";
+import { processEventQueue } from "../core/simulation/eventQueue";
+import type { SaveSlotId } from "../core/saves/types";
 import { createStableEntityId } from "../core/ids/entityId";
 import { APP_VERSION } from "../core/version/versionService";
-import { initialPlayer, type PlayerState } from "../gameplay/player/demoPlayer";
-import { miraKoval } from "../people/demoNpc";
+import type { PlayerState } from "../gameplay/player/demoPlayer";
 import { defaultUiSettings, type UiSettings } from "../ui/theme/settings";
 import { Icon, type IconName } from "../ui/components/Icons";
 import { Meter } from "../ui/components/Meter";
@@ -23,7 +25,6 @@ import { Portrait } from "../ui/components/Portrait";
 import { SystemPanel } from "../ui/components/SystemPanel";
 import { WindowFrame } from "../ui/components/WindowFrame";
 import { VersionGate } from "../ui/components/VersionGate";
-import { DEMO_WORLD_SEED } from "../world/city/demoWorld";
 import {
   advanceDistrictPulse,
   createInitialDistrictPulse,
@@ -33,19 +34,10 @@ import {
 } from "../world/city/districtPulse";
 
 const UI_SETTINGS_KEY = "neon-life/ui-settings/v1";
-const SESSION_KEY = "neon-life/demo-session/v1";
 
 type NavId = "life" | "city" | "people" | "work" | "network" | "inventory" | "health" | "home" | "messages" | "archive";
-type WindowId = "profile" | "mira" | "messages" | "vacancy" | "local" | "journal" | "settings" | "diagnostics";
+type WindowId = "profile" | "contact" | "messages" | "vacancy" | "local" | "journal" | "settings" | "diagnostics";
 type MobileLifeTab = "now" | "plan" | "feed" | "log";
-
-interface DemoSession {
-  timestamp: number;
-  player: PlayerState;
-  events: WorldEvent[];
-  currentActivity: string;
-  district: DistrictPulseState;
-}
 
 interface ActionDefinition {
   id: string;
@@ -76,75 +68,85 @@ const navItems: Array<{ id: NavId; label: string; icon: IconName; badge?: string
   { id: "archive", label: "ARCHIVE", icon: "archive" }
 ];
 
-const quickActions: ActionDefinition[] = [
-  {
-    id: "travel-orbis",
-    title: "Ехать в Orbis Repair Hub",
-    code: "MOVE/TRANSIT",
-    duration: 35,
-    cost: 12,
-    location: "INDUSTRIAL BELT / ORBIS HUB",
-    risk: "MED",
-    category: "personal",
-    result: "Ты добрался до Orbis Repair Hub. Мира оставила пропуск на сервисной стойке.",
-    activityAfter: "У входа в Orbis Repair Hub",
-    fatigueDelta: 3,
-    stressDelta: 1,
-    hungerDelta: 2
-  },
-  {
-    id: "reply-mira",
-    title: "Ответить Мире",
-    code: "COMMS/CONTACT",
-    duration: 5,
-    cost: 0,
-    location: "LOWER CITY / REMOTE",
-    risk: "LOW",
-    category: "contact",
-    result: "Мира подтвердила встречу в 23:20 и попросила не заходить через главный вход.",
-    activityAfter: "Ожидание у станции",
-    stressDelta: -2
-  },
-  {
-    id: "buy-meal",
-    title: "Купить горячую еду",
-    code: "LIFE/SUPPLY",
-    duration: 20,
-    cost: 28,
-    location: "SECTOR 04 / NIGHT CANTEEN",
-    risk: "LOW",
-    category: "health",
-    result: "Голод снижен. Качество еды низкое, но состояние стабилизировалось.",
-    activityAfter: "Возвращение к станции",
-    fatigueDelta: -2,
-    hungerDelta: -24
-  },
-  {
-    id: "scan-vacancies",
-    title: "Проверить ночные вакансии",
-    code: "WORK/SEARCH",
-    duration: 30,
-    cost: 0,
-    location: "CITYLINK / EMPLOYMENT NODE",
-    risk: "LOW",
-    category: "work",
-    result: "Найдены две вакансии: помощник техника и ночной сортировщик грузов.",
-    activityAfter: "Просмотр городской сети",
-    fatigueDelta: 1,
-    stressDelta: 1
-  }
-];
+function createQuickActions(session: GameSession): ActionDefinition[] {
+  const contact = session.primaryContact;
+  const workshop = session.world.locations.find((location) => location.type === "workshop")?.name ?? "VECTRA SERVICE NODE";
+  const district = session.world.districts.find((item) => item.id === session.world.activeDistrictId) ?? session.world.districts[0];
+  return [
+    {
+      id: "travel-vectra",
+      title: `Ехать в ${workshop}`,
+      code: "MOVE/TRANSIT",
+      duration: 35,
+      cost: 12,
+      location: `${session.world.districts[1]?.name ?? "FOUNDRY ARC"} / ${workshop}`,
+      risk: "MED",
+      category: "personal",
+      result: `Ты добрался до ${workshop}. ${contact.name} оставил временный пропуск на сервисной стойке.`,
+      activityAfter: `У входа в ${workshop}`,
+      fatigueDelta: 3,
+      stressDelta: 1,
+      hungerDelta: 2
+    },
+    {
+      id: "reply-contact",
+      title: `Ответить: ${contact.name}`,
+      code: "COMMS/CONTACT",
+      duration: 5,
+      cost: 0,
+      location: `${district.name} / REMOTE`,
+      risk: "LOW",
+      category: "contact",
+      result: `${contact.name} подтвердил встречу в 23:20 и попросил использовать сервисный вход.`,
+      activityAfter: "Ожидание у транспортного узла",
+      stressDelta: -2
+    },
+    {
+      id: "buy-meal",
+      title: "Купить горячую еду",
+      code: "LIFE/SUPPLY",
+      duration: 20,
+      cost: 28,
+      location: `${district.code} / NIGHT KITCHEN`,
+      risk: "LOW",
+      category: "health",
+      result: "Голод снижен. Качество еды низкое, состояние стабилизировалось.",
+      activityAfter: "Возвращение к транспортному узлу",
+      fatigueDelta: -2,
+      hungerDelta: -24
+    },
+    {
+      id: "scan-vacancies",
+      title: "Проверить ночные вакансии",
+      code: "WORK/SEARCH",
+      duration: 30,
+      cost: 0,
+      location: `${session.world.city.code} / EMPLOYMENT NODE`,
+      risk: "LOW",
+      category: "work",
+      result: "Найдены две вакансии: помощник техника и ночной сортировщик грузов.",
+      activityAfter: "Просмотр городской сети",
+      fatigueDelta: 1,
+      stressDelta: 1
+    }
+  ];
+}
 
-const plans = [
-  { time: "22:55", title: "Ответить Мире", status: "urgent", detail: "Окно связи закроется через 19 минут" },
-  { time: "23:20", title: "Встреча у Orbis Hub", status: "planned", detail: "Сервисный вход · нужен транспорт" },
-  { time: "00:10", title: "Собеседование на ночную смену", status: "planned", detail: "Оплата ₵ 188 · 6 часов" },
-  { time: "06:30", title: "Вернуться в капсулу", status: "open", detail: "Жильё оплачено ещё на 7 дней" }
-];
+function createPlans(session: GameSession) {
+  const contact = session.primaryContact.name;
+  const workshop = session.world.locations.find((location) => location.type === "workshop")?.name ?? "VECTRA SERVICE NODE";
+  return [
+    { time: "22:55", title: `Ответить: ${contact}`, status: "urgent", detail: "Окно связи скоро закроется" },
+    { time: "23:20", title: `Встреча у ${workshop}`, status: "planned", detail: "Сервисный вход · нужен транспорт" },
+    { time: "00:10", title: "Собеседование на ночную смену", status: "planned", detail: "Оплата ₵ 188 · 6 часов" },
+    { time: "06:30", title: "Вернуться в жилой блок", status: "open", detail: `Жильё оплачено ещё на ${session.player.housingDaysLeft} дней` }
+  ];
+}
+
 
 const windowLabels: Record<WindowId, string> = {
-  profile: "KAIN VALE",
-  mira: "MIRA KOVAL",
+  profile: "CITIZEN PROFILE",
+  contact: "CONTACT RECORD",
   messages: "MESSAGES",
   vacancy: "VACANCY",
   local: "LOCAL CHANNEL",
@@ -157,42 +159,15 @@ function clamp(value: number): number {
   return Math.max(0, Math.min(100, value));
 }
 
-function createEventId(timestamp: number, category: EventCategory, source: string, sequence: number): string {
-  return createStableEntityId("event", `${DEMO_WORLD_SEED}:${timestamp}:${category}:${source}:${sequence}`);
+function createEventId(seed: string, timestamp: number, category: EventCategory, source: string, sequence: number): string {
+  return createStableEntityId("event", `${seed}:${timestamp}:${category}:${source}:${sequence}`);
 }
 
-function createDefaultSession(): DemoSession {
-  return {
-    timestamp: INITIAL_GAME_TIMESTAMP,
-    player: initialPlayer,
-    events: initialEvents,
-    currentActivity: "Ожидание у станции Sector 04",
-    district: createInitialDistrictPulse(INITIAL_GAME_TIMESTAMP)
-  };
-}
-
-function loadSession(): DemoSession {
-  const fallback = createDefaultSession();
-  const stored = readLocal<Partial<DemoSession>>(SESSION_KEY, {});
-  return {
-    ...fallback,
-    ...stored,
-    player: {
-      ...fallback.player,
-      ...(stored.player ?? {}),
-      condition: {
-        ...fallback.player.condition,
-        ...(stored.player?.condition ?? {})
-      }
-    },
-    events: Array.isArray(stored.events) ? stored.events : fallback.events,
-    district: stored.district ?? createInitialDistrictPulse(stored.timestamp ?? fallback.timestamp)
-  };
-}
 
 export default function App() {
   const [settings, setSettings] = useState<UiSettings>(() => readLocal(UI_SETTINGS_KEY, defaultUiSettings));
-  const [session, setSession] = useState<DemoSession>(loadSession);
+  const saveController = useWorldSave();
+  const { session, setSession } = saveController;
   const versionGuard = useVersionGuard();
   const [activeNav, setActiveNav] = useState<NavId>("life");
   const [journalFilter, setJournalFilter] = useState<EventCategory | "all">("all");
@@ -202,12 +177,13 @@ export default function App() {
   const [actionSheetOpen, setActionSheetOpen] = useState(false);
 
   useEffect(() => writeLocal(UI_SETTINGS_KEY, settings), [settings]);
-  useEffect(() => writeLocal(SESSION_KEY, session), [session]);
 
   const filteredEvents = useMemo(
-    () => session.events.filter((event) => journalFilter === "all" || event.category === journalFilter),
-    [session.events, journalFilter]
+    () => session ? session.events.filter((event) => journalFilter === "all" || event.category === journalFilter) : [],
+    [session, journalFilter]
   );
+  const quickActions = useMemo(() => session ? createQuickActions(session) : [], [session]);
+  const plans = useMemo(() => session ? createPlans(session) : [], [session]);
 
   const rootClass = [
     settings.scanlines ? "has-scanlines" : "",
@@ -221,7 +197,7 @@ export default function App() {
       ...current,
       events: [{
         ...event,
-        id: createEventId(event.timestamp, event.category, event.title, current.events.length)
+        id: createEventId(current.world.meta.seed, event.timestamp, event.category, event.title, current.events.length)
       }, ...current.events].slice(0, 80)
     }));
   }
@@ -230,8 +206,9 @@ export default function App() {
     setSession((current) => {
       const nextTimestamp = advanceGameTime(current.timestamp, minutes);
       const pulse = advanceDistrictPulse(current.district, nextTimestamp);
+      const queued = processEventQueue(current, nextTimestamp);
       const timeEvent: WorldEvent[] = minutes >= 60 ? [{
-        id: createEventId(nextTimestamp, "system", source, current.events.length),
+        id: createEventId(current.world.meta.seed, nextTimestamp, "system", source, current.events.length),
         timestamp: nextTimestamp,
         category: "system",
         title: `${source}: +${minutes} мин.`,
@@ -241,7 +218,9 @@ export default function App() {
       return {
         ...current,
         timestamp: nextTimestamp,
+        world: { ...current.world, meta: { ...current.world.meta, currentTimestamp: nextTimestamp } },
         district: pulse.state,
+        eventQueue: queued.queue,
         player: {
           ...current.player,
           condition: {
@@ -250,7 +229,7 @@ export default function App() {
             hunger: clamp(current.player.condition.hunger + Math.max(1, Math.round(minutes / 120)))
           }
         },
-        events: [...timeEvent, ...pulse.events.reverse(), ...current.events].slice(0, 80)
+        events: [...timeEvent, ...queued.events.reverse(), ...pulse.events.reverse(), ...current.events].slice(0, 80)
       };
     });
   }
@@ -259,6 +238,7 @@ export default function App() {
     setSession((current) => {
       const nextTimestamp = advanceGameTime(current.timestamp, action.duration);
       const pulse = advanceDistrictPulse(current.district, nextTimestamp);
+      const queued = processEventQueue(current, nextTimestamp);
       const nextPlayer: PlayerState = {
         ...current.player,
         balance: current.player.balance - action.cost,
@@ -271,7 +251,7 @@ export default function App() {
       };
 
       const actionEvent: WorldEvent = {
-        id: createEventId(nextTimestamp, action.category, action.id, current.events.length),
+        id: createEventId(current.world.meta.seed, nextTimestamp, action.category, action.id, current.events.length),
         timestamp: nextTimestamp,
         category: action.category,
         title: action.result,
@@ -282,10 +262,12 @@ export default function App() {
       return {
         ...current,
         timestamp: nextTimestamp,
+        world: { ...current.world, meta: { ...current.world.meta, currentTimestamp: nextTimestamp } },
         district: pulse.state,
+        eventQueue: queued.queue,
         player: nextPlayer,
         currentActivity: action.activityAfter,
-        events: [actionEvent, ...pulse.events.reverse(), ...current.events].slice(0, 80)
+        events: [actionEvent, ...queued.events.reverse(), ...pulse.events.reverse(), ...current.events].slice(0, 80)
       };
     });
     setActionSheetOpen(false);
@@ -301,16 +283,20 @@ export default function App() {
     setActiveWindow((current) => current === id ? null : current);
   }
 
-  function resetDemo(): void {
-    const fresh = createDefaultSession();
-    setSession(fresh);
-    writeLocal(SESSION_KEY, fresh);
-    addEvent({
-      timestamp: INITIAL_GAME_TIMESTAMP,
-      category: "system",
-      title: "Демонстрационная сессия восстановлена.",
-      importance: 1
-    });
+  function resetWorld(): void {
+    void saveController.createNewWorld();
+  }
+
+
+  if (!session) {
+    return (
+      <div className="boot-screen">
+        <div className="boot-screen__mark">N/L</div>
+        <strong>{saveController.status === "error" ? "SAVE SYSTEM ERROR" : "INITIALIZING WORLD STATE"}</strong>
+        <span>{saveController.error ?? "INDEXEDDB / MIGRATIONS / WORLD SEED"}</span>
+        <VersionGate guard={versionGuard} />
+      </div>
+    );
   }
 
   const topbar = (
@@ -334,7 +320,7 @@ export default function App() {
         <span className="status-dot status-dot--cyan" />
         <span>
           <strong>{session.player.district}</strong>
-          <small>{session.player.sector} · ACID RAIN 11°C</small>
+          <small>{session.player.sector} · {session.world.city.weather} {session.world.city.temperatureC}°C</small>
         </span>
       </div>
       <div className="topbar__status topbar__status--money">
@@ -347,8 +333,8 @@ export default function App() {
       <div className="topbar__status topbar__status--network">
         <Icon name="signal" />
         <span>
-          <strong>NET: STABLE</strong>
-          <small>LC04 NODE / 84%</small>
+          <strong>NET: {session.world.city.networkStatus.toUpperCase()}</strong>
+          <small>{session.world.city.code} / 84%</small>
         </span>
       </div>
       <button type="button" className="alert-button" onClick={() => openWindow("messages")}>
@@ -379,7 +365,7 @@ export default function App() {
       </nav>
       <div className="sidebar__footer">
         <span>WORLD</span>
-        <strong>NL-7DB-0441</strong>
+        <strong>{session.world.meta.worldId.slice(-12).toUpperCase()}</strong>
         <small>SIM v{APP_VERSION}</small>
       </div>
     </aside>
@@ -405,30 +391,31 @@ export default function App() {
     </nav>
   );
 
+  const contact = session.primaryContact;
   const context = (
     <aside className={`context-panel ${contextOpen ? "is-open" : ""}`}>
       <header className="context-panel__header">
         <div>
           <span>CONTEXT / PERSON</span>
-          <h2>MIRA KOVAL</h2>
+          <h2>{contact.name}</h2>
         </div>
         <button type="button" className="icon-button context-panel__mobile-close" onClick={() => setContextOpen(false)} aria-label="Закрыть">
           <Icon name="close" />
         </button>
       </header>
-      <Portrait kind="mira" label="Стилизованный профиль Миры Коваль" />
+      <Portrait kind="contact" label={`Профиль ${contact.name}`} />
       <div className="context-id-line">
-        <span>PROFILE {miraKoval.profileCode}</span>
+        <span>PROFILE {contact.profileCode}</span>
         <span className="status-chip status-chip--online">ACTIVE</span>
       </div>
       <div className="context-block">
         <small>STATUS</small>
-        <strong>{miraKoval.status}</strong>
-        <span>{miraKoval.location}</span>
+        <strong>{contact.status}</strong>
+        <span>{contact.location}</span>
       </div>
       <div className="context-block">
         <small>RELATION</small>
-        {miraKoval.relations.map((relation) => (
+        {contact.relations.map((relation) => (
           <div className="relation-row" key={relation.label}>
             <span>{relation.label}</span>
             <div><i style={{ width: `${relation.value}%` }} /></div>
@@ -439,12 +426,12 @@ export default function App() {
       <div className="context-block">
         <small>KNOWN FACTS</small>
         <ul className="fact-list">
-          {miraKoval.knownFacts.slice(0, 3).map((fact) => <li key={fact}>{fact}</li>)}
+          {contact.knownFacts.slice(0, 3).map((fact) => <li key={fact}>{fact}</li>)}
         </ul>
       </div>
       <div className="context-actions">
         <button type="button" className="button button--primary" onClick={() => openWindow("messages")}>Открыть канал</button>
-        <button type="button" className="button button--ghost" onClick={() => openWindow("mira")}>Полное досье</button>
+        <button type="button" className="button button--ghost" onClick={() => openWindow("contact")}>Полное досье</button>
       </div>
     </aside>
   );
@@ -460,6 +447,8 @@ export default function App() {
       onOpenWindow={openWindow}
       onOpenContext={() => setContextOpen(true)}
       onOpenActions={() => setActionSheetOpen(true)}
+      actions={quickActions}
+      plans={plans}
     />
   ) : (
     <ModulePreview activeNav={activeNav} onReturn={() => setActiveNav("life")} onOpenWindow={openWindow} />
@@ -499,11 +488,13 @@ export default function App() {
             settings={settings}
             setSettings={setSettings}
             onAction={executeAction}
-            onReset={resetDemo}
+            onReset={resetWorld}
             session={session}
             journalFilter={journalFilter}
             setJournalFilter={setJournalFilter}
             versionGuard={versionGuard}
+            saveController={saveController}
+            actions={quickActions}
           />
         </WindowFrame>
       ) : null}
@@ -534,7 +525,7 @@ export default function App() {
 }
 
 interface LifeWorkspaceProps {
-  session: DemoSession;
+  session: GameSession;
   filteredEvents: WorldEvent[];
   journalFilter: EventCategory | "all";
   setJournalFilter: (filter: EventCategory | "all") => void;
@@ -543,6 +534,8 @@ interface LifeWorkspaceProps {
   onOpenWindow: (id: WindowId) => void;
   onOpenContext: () => void;
   onOpenActions: () => void;
+  actions: ActionDefinition[];
+  plans: ReturnType<typeof createPlans>;
 }
 
 function LifeWorkspace({
@@ -554,7 +547,9 @@ function LifeWorkspace({
   onAction,
   onOpenWindow,
   onOpenContext,
-  onOpenActions
+  onOpenActions,
+  actions,
+  plans
 }: LifeWorkspaceProps) {
   const { player } = session;
   const localEvents = session.events.filter((event) => event.category === "local").slice(0, 3);
@@ -584,16 +579,18 @@ function LifeWorkspace({
         onOpenWindow={onOpenWindow}
         onOpenContext={onOpenContext}
         onOpenActions={onOpenActions}
+        actions={actions}
+        plans={plans}
       />
 
       <div className="life-grid life-grid--desktop">
-        <SystemPanel title="KAIN VALE" code="CITIZEN/PROFILE" className="hero-panel" action={<span className="status-chip">ONLINE</span>}>
+        <SystemPanel title={player.name} code="CITIZEN/PROFILE" className="hero-panel" action={<span className="status-chip">ONLINE</span>}>
           <div className="hero-summary">
-            <Portrait kind="player" label="Стилизованный профиль Каина Вейла" />
+            <Portrait kind="player" label={`Профиль ${player.name}`} />
             <div className="hero-summary__identity">
               <span>AGE {player.age} · {player.occupation}</span>
               <strong>{player.origin}</strong>
-              <small>ID LC04-19-8841 · CLEARANCE 0</small>
+              <small>ID {player.id.slice(-8).toUpperCase()} · CLEARANCE 0</small>
               <button type="button" className="text-link" onClick={() => onOpenWindow("profile")}>Открыть полную запись <Icon name="chevron" size={14} /></button>
             </div>
           </div>
@@ -616,16 +613,16 @@ function LifeWorkspace({
             <div>
               <span>STATUS / WAITING</span>
               <h3>{session.currentActivity}</h3>
-              <p>На главной улице нет света. До встречи с Мирой 39 минут.</p>
+              <p>Районная сеть нестабильна. Следующее окно связи открыто до 23:20.</p>
             </div>
           </div>
           <div className="activity-meta">
-            <div><span>LOCATION</span><strong>LOWER CITY / SECTOR 04</strong></div>
+            <div><span>LOCATION</span><strong>{player.district} / {player.sector}</strong></div>
             <div><span>EXPOSURE</span><strong className="warning-text">MEDIUM</strong></div>
-            <div><span>NEXT STOP</span><strong>ORBIS REPAIR HUB</strong></div>
+            <div><span>NEXT STOP</span><strong>{session.primaryContact.location}</strong></div>
           </div>
           <div className="activity-controls">
-            <button type="button" className="button button--primary" onClick={() => onAction(quickActions[0])}>Начать поездку · 35 мин</button>
+            <button type="button" className="button button--primary" onClick={() => onAction(actions[0])}>Начать поездку · 35 мин</button>
             <button type="button" className="button button--ghost" onClick={() => onAdvance(15, "Ожидание")}>Ждать 15 минут</button>
           </div>
         </SystemPanel>
@@ -647,7 +644,7 @@ function LifeWorkspace({
 
         <SystemPanel title="ВОЗМОЖНОСТИ РЯДОМ" code="LOCAL/OPPORTUNITIES" className="opportunities-panel" action={<span className="panel-counter">4 FOUND</span>}>
           <div className="opportunity-list">
-            {quickActions.map((action) => <ActionCard action={action} onAction={onAction} key={action.id} />)}
+            {actions.map((action) => <ActionCard action={action} onAction={onAction} key={action.id} />)}
           </div>
         </SystemPanel>
 
@@ -655,7 +652,7 @@ function LifeWorkspace({
           <div className="feed-map">
             <div className="feed-map__grid" />
             <span className="map-node map-node--player" style={{ left: "31%", top: "58%" }}>YOU</span>
-            <span className="map-node map-node--contact" style={{ left: "73%", top: "36%" }}>MIRA</span>
+            <span className="map-node map-node--contact" style={{ left: "73%", top: "36%" }}>{session.primaryContact.name.split(" ")[0]}</span>
             <span className="map-node map-node--alert" style={{ left: "52%", top: "72%" }}>POLICE</span>
             <div className="route-line" />
           </div>
@@ -704,10 +701,10 @@ function LifeWorkspace({
 
         <SystemPanel title="КОНТАКТЫ" code="SOCIAL/ACTIVE" className="contacts-panel">
           <button type="button" className="contact-card" onClick={onOpenContext}>
-            <Portrait kind="mira" label="Мира Коваль" />
+            <Portrait kind="contact" label={session.primaryContact.name} />
             <span>
-              <strong>MIRA KOVAL</strong>
-              <small>DRONE TECHNICIAN · ORBIS HUB</small>
+              <strong>{session.primaryContact.name}</strong>
+              <small>{session.primaryContact.role} · {session.primaryContact.location}</small>
               <em>Ответила 3 минуты назад</em>
             </span>
             <Icon name="chevron" />
@@ -715,8 +712,8 @@ function LifeWorkspace({
           <button type="button" className="contact-card contact-card--muted" onClick={() => onOpenWindow("messages")}>
             <div className="contact-card__initial">JN</div>
             <span>
-              <strong>JONAS NERI</strong>
-              <small>CAPSULE BLOCK MANAGER</small>
+              <strong>PETR HALDEN</strong>
+              <small>HAB-STACK MANAGER</small>
               <em>Последний контакт вчера</em>
             </span>
             <Icon name="chevron" />
@@ -741,7 +738,9 @@ function MobileLifeWorkspace({
   onAction,
   onOpenWindow,
   onOpenContext,
-  onOpenActions
+  onOpenActions,
+  actions,
+  plans
 }: MobileLifeWorkspaceProps) {
   const [activeTab, setActiveTab] = useState<MobileLifeTab>("now");
   const { player } = session;
@@ -752,9 +751,9 @@ function MobileLifeWorkspace({
     <section className="mobile-life" aria-label="Мобильный экран жизни">
       <div className="mobile-life__identity-row">
         <button type="button" className="mobile-identity" onClick={() => onOpenWindow("profile")}>
-          <Portrait kind="player" label="Каин Вейл" />
+          <Portrait kind="player" label={player.name} />
           <span>
-            <strong>KAIN VALE</strong>
+            <strong>{player.name}</strong>
             <small>{player.occupation} · {player.sector}</small>
           </span>
           <Icon name="chevron" size={16} />
@@ -779,12 +778,12 @@ function MobileLifeWorkspace({
         </header>
         <h2>{session.currentActivity}</h2>
         <div className="mobile-current-action__meta">
-          <span>LC / SECTOR 04</span>
+          <span>{player.district} / {player.sector}</span>
           <span className="warning-text">EXPOSURE MED</span>
           <span>39 MIN LEFT</span>
         </div>
         <div className="mobile-current-action__buttons">
-          <button type="button" className="button button--primary" onClick={() => onAction(quickActions[0])}>Ехать · 35 мин</button>
+          <button type="button" className="button button--primary" onClick={() => onAction(actions[0])}>Ехать · 35 мин</button>
           <button type="button" className="button button--ghost" onClick={() => onAdvance(15, "Ожидание")}>Ждать 15</button>
         </div>
       </section>
@@ -810,7 +809,7 @@ function MobileLifeWorkspace({
               <button type="button" onClick={onOpenActions}>ВСЕ 4</button>
             </div>
             <div className="mobile-action-list">
-              {quickActions.slice(0, 3).map((action) => (
+              {actions.slice(0, 3).map((action) => (
                 <button type="button" className="mobile-action-row" key={action.id} onClick={() => onAction(action)}>
                   <span className={`risk-dot risk-dot--${action.risk.toLowerCase()}`} />
                   <span>
@@ -822,8 +821,8 @@ function MobileLifeWorkspace({
               ))}
             </div>
             <button type="button" className="mobile-contact-row" onClick={onOpenContext}>
-              <Portrait kind="mira" label="Мира Коваль" />
-              <span><strong>MIRA KOVAL</strong><small>Ответила 3 минуты назад</small></span>
+              <Portrait kind="contact" label={session.primaryContact.name} />
+              <span><strong>{session.primaryContact.name}</strong><small>Ответил 3 минуты назад</small></span>
               <span className="status-chip status-chip--online">1 NEW</span>
             </button>
           </div>
@@ -844,7 +843,7 @@ function MobileLifeWorkspace({
         {activeTab === "feed" ? (
           <div className="mobile-feed">
             <button type="button" className="mobile-map-button" onClick={() => onOpenWindow("local")}>
-              <span><strong>SECTOR 04</strong><small>Живое состояние района</small></span>
+              <span><strong>{player.sector}</strong><small>Живое состояние района</small></span>
               <span className="status-chip">OPEN MAP</span>
             </button>
             <DistrictPulseStrip state={session.district} compact />
@@ -961,17 +960,21 @@ function WindowContent({
   session,
   journalFilter,
   setJournalFilter,
-  versionGuard
+  versionGuard,
+  saveController,
+  actions
 }: {
   id: WindowId;
   settings: UiSettings;
   setSettings: (settings: UiSettings) => void;
   onAction: (action: ActionDefinition) => void;
   onReset: () => void;
-  session: DemoSession;
+  session: GameSession;
   journalFilter: EventCategory | "all";
   setJournalFilter: (filter: EventCategory | "all") => void;
   versionGuard: VersionGuardController;
+  saveController: WorldSaveController;
+  actions: ActionDefinition[];
 }) {
 
   if (id === "profile") {
@@ -979,10 +982,10 @@ function WindowContent({
     return (
       <div className="profile-window">
         <div className="profile-window__head">
-          <Portrait kind="player" label="Каин Вейл" />
+          <Portrait kind="player" label={player.name} />
           <div>
-            <span>CITIZEN LC04-19-8841</span>
-            <h3>KAIN VALE</h3>
+            <span>CITIZEN {player.id.slice(-8).toUpperCase()}</span>
+            <h3>{player.name}</h3>
             <p>AGE {player.age} · {player.occupation}</p>
             <strong>{player.origin}</strong>
           </div>
@@ -1002,31 +1005,32 @@ function WindowContent({
     );
   }
 
-  if (id === "mira") {
+  if (id === "contact") {
+    const contact = session.primaryContact;
     return (
       <div className="dossier-window">
         <div className="dossier-window__identity">
-          <Portrait kind="mira" label="Мира Коваль" />
+          <Portrait kind="contact" label={contact.name} />
           <div>
-            <span>PROFILE {miraKoval.profileCode}</span>
-            <h3>{miraKoval.name}</h3>
-            <p>{miraKoval.role} · AGE {miraKoval.age}</p>
-            <strong>{miraKoval.status} · {miraKoval.location}</strong>
+            <span>PROFILE {contact.profileCode}</span>
+            <h3>{contact.name}</h3>
+            <p>{contact.role} · AGE {contact.age}</p>
+            <strong>{contact.status} · {contact.location}</strong>
           </div>
         </div>
         <div className="window-columns">
           <section>
             <h4>KNOWN CONDITION</h4>
-            <ul>{miraKoval.condition.map((item) => <li key={item}>{item}</li>)}</ul>
+            <ul>{contact.condition.map((item) => <li key={item}>{item}</li>)}</ul>
           </section>
           <section>
             <h4>KNOWN FACTS</h4>
-            <ul>{miraKoval.knownFacts.map((item) => <li key={item}>{item}</li>)}</ul>
+            <ul>{contact.knownFacts.map((item) => <li key={item}>{item}</li>)}</ul>
           </section>
         </div>
         <section className="memory-record">
-          <span>LAST CONTACT / {miraKoval.lastContact}</span>
-          <p>«Я могу провести тебя внутрь, но только через сервисный вход. После 23:20. Не опаздывай.»</p>
+          <span>LAST CONTACT / {contact.lastContact}</span>
+          <p>«Временный пропуск будет на сервисной стойке. Используй боковой вход после 23:20.»</p>
           <small>Достоверность записи: 100% · Источник: прямое сообщение</small>
         </section>
       </div>
@@ -1034,19 +1038,20 @@ function WindowContent({
   }
 
   if (id === "messages") {
+    const contact = session.primaryContact;
     return (
       <div className="messages-window">
         <aside>
-          <button type="button" className="is-active"><strong>MIRA KOVAL</strong><span>3 мин</span><small>Я оставлю пропуск...</small></button>
-          <button type="button"><strong>JONAS NERI</strong><span>1 день</span><small>Оплата за капсулу...</small></button>
+          <button type="button" className="is-active"><strong>{contact.name}</strong><span>3 мин</span><small>Пропуск будет на стойке...</small></button>
+          <button type="button"><strong>PETR HALDEN</strong><span>1 день</span><small>Оплата за капсулу...</small></button>
           <button type="button"><strong>CITY EMPLOYMENT</strong><span>2 дня</span><small>Профиль подтверждён</small></button>
         </aside>
         <section>
-          <header><strong>MIRA KOVAL</strong><span>ENCRYPTION: BASIC</span></header>
-          <div className="message-bubble message-bubble--incoming">Я оставлю пропуск на сервисной стойке. Главный вход не используй.</div>
+          <header><strong>{contact.name}</strong><span>ENCRYPTION: BASIC</span></header>
+          <div className="message-bubble message-bubble--incoming">Пропуск будет на сервисной стойке. Главный вход не используй.</div>
           <div className="message-bubble message-bubble--outgoing">Во сколько быть?</div>
-          <div className="message-bubble message-bubble--incoming">После 23:20. И не тащи за собой патруль.</div>
-          <button type="button" className="button button--primary" onClick={() => onAction(quickActions[1])}>Подтвердить встречу · 5 мин</button>
+          <div className="message-bubble message-bubble--incoming">После 23:20. У узла сейчас проверяют документы.</div>
+          <button type="button" className="button button--primary" onClick={() => onAction(actions[1])}>Подтвердить встречу · 5 мин</button>
         </section>
       </div>
     );
@@ -1055,12 +1060,12 @@ function WindowContent({
   if (id === "vacancy") {
     return (
       <div className="vacancy-window">
-        <span className="vacancy-window__company">ORBIS REPAIR HUB / STAFF NODE</span>
+        <span className="vacancy-window__company">{session.primaryContact.location} / STAFF NODE</span>
         <h3>Помощник техника · ночная смена</h3>
         <div className="vacancy-grid">
           <div><span>Смена</span><strong>23:30–05:30</strong></div>
           <div><span>Оплата</span><strong>₵ 188</strong></div>
-          <div><span>Район</span><strong>INDUSTRIAL BELT</strong></div>
+          <div><span>Район</span><strong>{session.world.districts[1]?.name}</strong></div>
           <div><span>Риск</span><strong className="warning-text">MEDIUM</strong></div>
         </div>
         <h4>ТРЕБОВАНИЯ</h4>
@@ -1071,7 +1076,7 @@ function WindowContent({
         </ul>
         <h4>ВОЗМОЖНЫЕ СОБЫТИЯ СМЕНЫ</h4>
         <p>Диагностика дронов, сортировка деталей, конфликт с мастером смены, аварийный ремонт, проверка службы безопасности.</p>
-        <button type="button" className="button button--primary" onClick={() => onAction(quickActions[0])}>Ехать на собеседование · 35 мин</button>
+        <button type="button" className="button button--primary" onClick={() => onAction(actions[0])}>Ехать на собеседование · 35 мин</button>
       </div>
     );
   }
@@ -1083,7 +1088,7 @@ function WindowContent({
         <div className="feed-map local-window__map">
           <div className="feed-map__grid" />
           <span className="map-node map-node--player" style={{ left: "31%", top: "58%" }}>YOU</span>
-          <span className="map-node map-node--contact" style={{ left: "73%", top: "36%" }}>MIRA</span>
+          <span className="map-node map-node--contact" style={{ left: "73%", top: "36%" }}>{session.primaryContact.name.split(" ")[0]}</span>
           <span className="map-node map-node--alert" style={{ left: "52%", top: "72%" }}>POLICE</span>
           <div className="route-line" />
         </div>
@@ -1141,6 +1146,39 @@ function WindowContent({
         <SettingToggle label="REDUCED MOTION" detail="Отключает сканирование, мигание и переходы." checked={settings.reducedMotion} onChange={(value) => setSettings({ ...settings, reducedMotion: value })} />
         <SettingToggle label="COMPACT MODE" detail="Уменьшает отступы и плотнее размещает данные." checked={settings.compactMode} onChange={(value) => setSettings({ ...settings, compactMode: value })} />
         <SettingToggle label="HIGH CONTRAST" detail="Усиливает границы, текст и сигнальные состояния." checked={settings.highContrast} onChange={(value) => setSettings({ ...settings, highContrast: value })} />
+
+        <section className="save-slots">
+          <header>
+            <div><span>INDEXEDDB / WORLD SLOTS</span><strong>СОХРАНЕНИЯ</strong></div>
+            <button type="button" className="button button--ghost" onClick={() => void saveController.saveNow()} disabled={saveController.status === "saving"}>
+              {saveController.status === "saving" ? "SAVING..." : "SAVE NOW"}
+            </button>
+          </header>
+          <div className="save-slots__list">
+            {saveController.summaries.map((summary) => {
+              const active = saveController.activeSlotId === summary.slotId;
+              return (
+                <article className={`save-slot ${active ? "is-active" : ""}`} key={summary.slotId}>
+                  <div>
+                    <span>{summary.slotId.toUpperCase()} {active ? "· ACTIVE" : ""}</span>
+                    <strong>{summary.exists ? `${summary.playerName} / ${summary.cityName}` : "EMPTY SLOT"}</strong>
+                    <small>{summary.updatedAt ? new Date(summary.updatedAt).toLocaleString("ru-RU") : "Нет сохранения"}</small>
+                  </div>
+                  <div className="save-slot__actions">
+                    <button type="button" onClick={() => void saveController.switchSlot(summary.slotId as SaveSlotId)}>{summary.exists ? "LOAD" : "CREATE"}</button>
+                    <button type="button" onClick={() => void saveController.createNewWorld(summary.slotId as SaveSlotId)}>NEW</button>
+                    {summary.exists && !active ? <button type="button" onClick={() => void saveController.deleteSlot(summary.slotId as SaveSlotId)}>DELETE</button> : null}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+          <footer>
+            <span>AUTOSAVE: {saveController.status.toUpperCase()}</span>
+            <span>RECOVERY RECORDS: {saveController.recoveryCount}</span>
+          </footer>
+        </section>
+
         <div className="settings-version-card">
           <div>
             <span>APPLICATION VERSION</span>
@@ -1152,8 +1190,8 @@ function WindowContent({
           </button>
         </div>
         <div className="settings-danger-zone">
-          <div><strong>DEMO SESSION</strong><span>Сбросить время, состояние героя и журнал к старту.</span></div>
-          <button type="button" className="button button--danger" onClick={onReset}>Сбросить демо</button>
+          <div><strong>ACTIVE WORLD</strong><span>Создать новый город и заменить активный слот.</span></div>
+          <button type="button" className="button button--danger" onClick={onReset}>Новый мир</button>
         </div>
       </div>
     );
@@ -1165,8 +1203,11 @@ function WindowContent({
       <div className="diagnostic-row"><span>VERSION GUARD</span><strong>{versionGuard.status.toUpperCase()}</strong><i>{versionGuard.remoteVersion === versionGuard.localVersion ? "100%" : "CHECK"}</i></div>
       <div className="diagnostic-row"><span>PWA CACHE</span><strong>NETWORK FIRST</strong><i>100%</i></div>
       <div className="diagnostic-row"><span>WORLD PULSE</span><strong>ACTIVE</strong><i>{session.district.pulseCount}</i></div>
-      <div className="diagnostic-row diagnostic-row--warning"><span>INDEXED DB</span><strong>NOT CONNECTED</strong><i>0%</i></div>
-      <pre>{`NEON/LINK DIAGNOSTIC\nBUILD: ${APP_VERSION}\nREMOTE: ${versionGuard.remoteVersion ?? "UNKNOWN"}\nWORLD: NL-7DB-0441\nDISTRICT PULSES: ${session.district.pulseCount}\nLOCAL EVENTS: ${session.events.filter((event) => event.category === "local").length}\nSTATUS: ${versionGuard.status.toUpperCase()}`}</pre>
+      <div className="diagnostic-row"><span>INDEXED DB</span><strong>{saveController.status === "error" ? "ERROR" : "CONNECTED"}</strong><i>{saveController.summaries.filter((slot) => slot.exists).length}/3</i></div>
+      <pre>{`NEON/LINK DIAGNOSTIC\nBUILD: ${APP_VERSION}\nREMOTE: ${versionGuard.remoteVersion ?? "UNKNOWN"}\nWORLD: ${session.world.meta.worldId}\nDISTRICT PULSES: ${session.district.pulseCount}\nLOCAL EVENTS: ${session.events.filter((event) => event.category === "local").length}\nSAVE SLOT: ${saveController.activeSlotId}
+SAVE STATUS: ${saveController.status.toUpperCase()}
+RECOVERY: ${saveController.recoveryCount}
+STATUS: ${versionGuard.status.toUpperCase()}`}</pre>
     </div>
   );
 }

@@ -779,3 +779,30 @@
     height: 44px;
   }
 }
+
+@media (max-width: 860px) {
+  .save-slots {
+    padding: 9px;
+  }
+
+  .save-slot {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .save-slot__actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .save-slot__actions button {
+    width: 100%;
+  }
+
+  .save-slots > footer {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+  }
+}

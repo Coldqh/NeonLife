@@ -1,7 +1,6 @@
 import { createStableEntityId } from "../../core/ids/entityId";
 import { SeededRandom } from "../../core/random/seededRandom";
 import type { WorldEvent } from "../../core/events/types";
-import { DEMO_WORLD_SEED } from "./demoWorld";
 
 const PULSE_MINUTES = 30;
 const PULSE_MS = PULSE_MINUTES * 60_000;
@@ -19,6 +18,7 @@ export interface DistrictPulseState {
   powerGrid: PowerGridStatus;
   lastProcessedBucket: number;
   pulseCount: number;
+  seedScope: string;
 }
 
 export interface DistrictPulseResult {
@@ -34,13 +34,13 @@ function bucketFor(timestamp: number): number {
   return Math.floor(timestamp / PULSE_MS);
 }
 
-function eventId(bucket: number, type: string): string {
-  return createStableEntityId("event", `${DEMO_WORLD_SEED}:sector04:${bucket}:${type}`);
+function eventId(seedScope: string, bucket: number, type: string): string {
+  return createStableEntityId("event", `${seedScope}:district-pulse:${bucket}:${type}`);
 }
 
-function eventAt(bucket: number, type: string, title: string, detail: string, importance: 1 | 2 | 3 = 2): WorldEvent {
+function eventAt(seedScope: string, bucket: number, type: string, title: string, detail: string, importance: 1 | 2 | 3 = 2): WorldEvent {
   return {
-    id: eventId(bucket, type),
+    id: eventId(seedScope, bucket, type),
     timestamp: bucket * PULSE_MS,
     category: "local",
     title,
@@ -49,21 +49,23 @@ function eventAt(bucket: number, type: string, title: string, detail: string, im
   };
 }
 
-export function createInitialDistrictPulse(timestamp: number): DistrictPulseState {
+export function createInitialDistrictPulse(timestamp: number, seedScope = "NEON-LIFE-DEFAULT"): DistrictPulseState {
+  const rng = new SeededRandom(`${seedScope}:district-initial`);
   return {
-    security: 34,
-    policePresence: 48,
-    gangPressure: 57,
-    transitDelayMinutes: 12,
-    marketActivity: 46,
+    security: rng.integer(30, 39),
+    policePresence: rng.integer(42, 53),
+    gangPressure: rng.integer(49, 61),
+    transitDelayMinutes: rng.integer(8, 15),
+    marketActivity: rng.integer(41, 52),
     powerGrid: "offline",
     lastProcessedBucket: bucketFor(timestamp),
-    pulseCount: 0
+    pulseCount: 0,
+    seedScope
   };
 }
 
 function processBucket(current: DistrictPulseState, bucket: number): DistrictPulseResult {
-  const rng = new SeededRandom(`${DEMO_WORLD_SEED}:sector04:pulse:${bucket}`);
+  const rng = new SeededRandom(`${current.seedScope}:district-pulse:${bucket}`);
   const pulseTimestamp = bucket * PULSE_MS;
   const previous = current;
   const after0130 = pulseTimestamp >= POWER_PARTIAL_RESTORE_AT;
@@ -88,29 +90,33 @@ function processBucket(current: DistrictPulseState, bucket: number): DistrictPul
     marketActivity,
     powerGrid,
     lastProcessedBucket: bucket,
-    pulseCount: previous.pulseCount + 1
+    pulseCount: previous.pulseCount + 1,
+    seedScope: previous.seedScope
   };
 
   const events: WorldEvent[] = [];
 
   if (previous.powerGrid === "offline" && powerGrid === "unstable") {
     events.push(eventAt(
+      current.seedScope,
       bucket,
       "power-partial",
-      "Аварийная линия LC-04 частично запущена.",
+      "Аварийная районная линия частично запущена.",
       "Свет появился на главной улице. Дворы и часть жилых блоков остаются без питания.",
       3
     ));
   } else if (previous.powerGrid === "unstable" && powerGrid === "stable") {
     events.push(eventAt(
+      current.seedScope,
       bucket,
       "power-stable",
-      "Энергоснабжение Sector 04 восстановлено.",
+      "Энергоснабжение активного блока восстановлено.",
       "Транспортные узлы возвращаются к штатному графику. Частные блоки ещё проверяют сеть.",
       2
     ));
   } else if (previous.policePresence < 65 && policePresence >= 65) {
     events.push(eventAt(
+      current.seedScope,
       bucket,
       "police-surge",
       "Полиция расширила проверку документов у станции.",
@@ -119,22 +125,25 @@ function processBucket(current: DistrictPulseState, bucket: number): DistrictPul
     ));
   } else if (previous.gangPressure < 65 && gangPressure >= 65) {
     events.push(eventAt(
+      current.seedScope,
       bucket,
       "gang-surge",
-      "Наблюдатели Iron Veil заняли два прохода к рынку.",
+      "Наблюдатели CUTWIRE заняли два прохода к рынку.",
       `Давление банды выросло до ${gangPressure}%. Независимые продавцы закрывают дальние ряды.`,
       3
     ));
   } else if (previous.transitDelayMinutes < 20 && state.transitDelayMinutes >= 20) {
     events.push(eventAt(
+      current.seedScope,
       bucket,
       "transit-delay",
       "Задержка транспорта превысила двадцать минут.",
-      "Линия LC-04 перегружена после отключения питания. На платформе растёт очередь.",
+      "Транспортная линия перегружена после отключения питания. На платформе растёт очередь.",
       2
     ));
   } else if (previous.marketActivity >= 35 && marketActivity < 35) {
     events.push(eventAt(
+      current.seedScope,
       bucket,
       "market-closing",
       "Часть ночного рынка закрылась раньше срока.",
@@ -143,15 +152,17 @@ function processBucket(current: DistrictPulseState, bucket: number): DistrictPul
     ));
   } else if (security <= 25 && previous.security > 25) {
     events.push(eventAt(
+      current.seedScope,
       bucket,
       "security-critical",
-      "Безопасность Sector 04 упала до критического уровня.",
+      "Безопасность активного блока упала до критического уровня.",
       "Сервис городской сети рекомендует избегать дворов и неосвещённых переходов.",
       3
     ));
   } else if (rng.chance(0.34)) {
     if (powerGrid === "offline") {
       events.push(eventAt(
+        current.seedScope,
         bucket,
         "repair-team",
         "Ремонтная группа добралась до распределительного узла.",
@@ -160,6 +171,7 @@ function processBucket(current: DistrictPulseState, bucket: number): DistrictPul
       ));
     } else if (policePresence > gangPressure) {
       events.push(eventAt(
+        current.seedScope,
         bucket,
         "patrol-shift",
         "Патруль сместился к транспортному терминалу.",
@@ -168,6 +180,7 @@ function processBucket(current: DistrictPulseState, bucket: number): DistrictPul
       ));
     } else {
       events.push(eventAt(
+        current.seedScope,
         bucket,
         "street-pressure",
         "Уличная активность сместилась к старым жилым блокам.",
