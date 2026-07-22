@@ -7,6 +7,7 @@ import { createInitialPlayer } from "../../gameplay/player/demoPlayer";
 import { createInitialFoodState } from "../../gameplay/food/foodSystem";
 import { createInitialHousing } from "../../gameplay/housing/housingSystem";
 import { createInitialCourierState } from "../../gameplay/jobs/courier/courierSystem";
+import { createLocalEconomy } from "../../gameplay/economy/localEconomy";
 import { createPressureState } from "../../gameplay/pressure/pressureSystem";
 import { createPrimaryContact } from "../../people/demoNpc";
 import { createHumanNetwork, getPerson, toKnownNpc } from "../../people/network/humanNetwork";
@@ -218,6 +219,8 @@ export function createWorldSession(seed: string): GameSession {
 
   const housingState = createInitialHousing(housing.id, INITIAL_GAME_TIMESTAMP);
   const foodState = createInitialFoodState(seed, INITIAL_GAME_TIMESTAMP, market.id, canteen.id, clinic.id);
+  const districtPulse = createInitialDistrictPulse(INITIAL_GAME_TIMESTAMP, seed);
+  const economy = createLocalEconomy(seed, INITIAL_GAME_TIMESTAMP, locations, people.people, foodState, districtPulse);
   const pressure = createPressureState(seed, INITIAL_GAME_TIMESTAMP, housingState, people.people, locations);
 
   const world: WorldState = {
@@ -239,6 +242,7 @@ export function createWorldSession(seed: string): GameSession {
     primaryContact,
     people,
     pressure,
+    economy,
     events: createInitialEvents({
       seed,
       districtName: lower.name,
@@ -248,7 +252,7 @@ export function createWorldSession(seed: string): GameSession {
     }),
     eventQueue: createQueue(seed, INITIAL_GAME_TIMESTAMP, world),
     currentActivity: `В жилом блоке ${housing.name}`,
-    district: createInitialDistrictPulse(INITIAL_GAME_TIMESTAMP, seed),
+    district: districtPulse,
     life: {
       currentLocationId: housing.id,
       housing: housingState,
@@ -256,7 +260,7 @@ export function createWorldSession(seed: string): GameSession {
       lastSleepAt: null
     },
     jobs: {
-      courier: createInitialCourierState(seed, INITIAL_GAME_TIMESTAMP, locations, people.people)
+      courier: createInitialCourierState(seed, INITIAL_GAME_TIMESTAMP, locations, people.people, economy.businesses)
     }
   };
 }

@@ -1429,3 +1429,98 @@
     grid-template-columns: 64px 64px minmax(0, 1fr);
   }
 }
+
+/* v0.9.0 — local economy mobile density */
+@media (max-width: 760px) {
+  .city-workspace {
+    min-height: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .city-heading {
+    flex: 0 0 auto;
+    align-items: center;
+  }
+
+  .city-heading > div:first-child p {
+    display: none;
+  }
+
+  .city-economy-stats {
+    grid-template-columns: repeat(3, minmax(48px, 1fr));
+    gap: 4px;
+  }
+
+  .city-economy-stats > div {
+    min-height: 34px;
+    padding: 5px 6px;
+  }
+
+  .city-economy-stats span { font-size: 5px; }
+  .city-economy-stats strong { font-size: 10px; }
+
+  .city-tabs {
+    flex: 0 0 auto;
+    margin-bottom: 5px;
+  }
+
+  .city-tabs button {
+    min-height: 31px;
+    padding: 0 6px;
+    font-size: 6px;
+  }
+
+  .economy-business-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+
+  .economy-business > header {
+    min-height: 42px;
+    padding: 6px 7px 6px 9px;
+  }
+
+  .economy-business > header strong { font-size: 9px; }
+  .economy-business > header span,
+  .economy-business > header small,
+  .economy-business > header em { font-size: 6px; }
+
+  .economy-business__metrics > div {
+    padding: 6px;
+  }
+
+  .economy-business__metrics strong { font-size: 9px; }
+  .economy-business > footer { min-height: 34px; padding: 5px 6px 5px 9px; }
+  .economy-business > footer span,
+  .economy-business > footer strong,
+  .economy-business > footer button { font-size: 6px; }
+
+  .route-card__meta .business-state {
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .courier-active__badges {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 430px) {
+  .city-economy-stats > div:nth-child(2) {
+    display: none;
+  }
+
+  .city-economy-stats {
+    grid-template-columns: repeat(2, minmax(48px, 1fr));
+  }
+
+  .economy-business__metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

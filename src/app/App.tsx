@@ -21,6 +21,8 @@ import { defaultUiSettings, type UiSettings } from "../ui/theme/settings";
 import { FOOD_CATALOG, getFoodProduct } from "../data/products/foodCatalog";
 import { canPrepare, getFoodFreshness, getFreshFoodUnits } from "../gameplay/food/foodSystem";
 import { getTravelOptions, isLocationOpen } from "../gameplay/travel/travelSystem";
+import { businessCanServe, getBusinessAtLocation, localPrice } from "../gameplay/economy/localEconomy";
+import type { BusinessState } from "../gameplay/economy/types";
 import {
   acceptCourierOrder,
   acceptPersonalRequest,
@@ -172,6 +174,18 @@ function createPlans(session: GameSession) {
       title: requests[0].title,
       status: requests[0].dueAt < session.timestamp + 3 * 60 * 60_000 ? "urgent" : "open",
       detail: `${person?.name ?? "Контакт"} · ${requests[0].status === "accepted" ? "принято" : "ожидает ответа"}`
+    });
+  }
+  const urgentBusiness = [...session.economy.businesses]
+    .filter((business) => business.status !== "stable")
+    .sort((left, right) => left.stock - right.stock)[0];
+  if (urgentBusiness) {
+    const location = session.world.locations.find((item) => item.id === urgentBusiness.locationId);
+    items.push({
+      time: "—",
+      title: `${location?.name ?? "Рабочая точка"}: ${urgentBusiness.status.toUpperCase()}`,
+      status: urgentBusiness.status === "closed" || urgentBusiness.status === "restricted" ? "urgent" : "open",
+      detail: `Запас ${urgentBusiness.stock}% · цены ${urgentBusiness.priceIndex}%`
     });
   }
   items.push({
@@ -1063,39 +1077,109 @@ function ActionCard({ action, onAction, compact = false }: { action: ActionDefin
 
 
 function PlacesWorkspace({ session, onTravel, onOpenWindow }: { session: GameSession; onTravel: (locationId: string) => void; onOpenWindow: (id: WindowId) => void }) {
+  const [tab, setTab] = useState<"routes" | "economy">("routes");
   const current = session.world.locations.find((location) => location.id === session.life.currentLocationId);
   const options = getTravelOptions(session);
+  const strained = session.economy.businesses.filter((business) => business.status === "strained").length;
+  const critical = session.economy.businesses.filter((business) => business.status === "restricted" || business.status === "closed").length;
+  const averagePrice = session.economy.businesses.length
+    ? Math.round(session.economy.businesses.reduce((total, business) => total + business.priceIndex, 0) / session.economy.businesses.length)
+    : 100;
+
   return (
-    <div className="life-module life-module--places">
-      <header className="module-heading">
-        <div><span>CITY / ROUTE CONTROL</span><h1>МЕСТА</h1><p>{current?.name ?? "UNKNOWN"} · {session.player.district}</p></div>
-        <button type="button" className="button button--ghost" onClick={() => onOpenWindow("local")}>Состояние района</button>
+    <div className="life-module life-module--places city-workspace">
+      <header className="module-heading city-heading">
+        <div><span>CITY / LOCAL FEEDBACK</span><h1>ГОРОД</h1><p>{current?.name ?? "UNKNOWN"} · маршруты и состояние рабочих точек</p></div>
+        <div className="city-economy-stats">
+          <div><span>PRICE</span><strong>{averagePrice}%</strong></div>
+          <div><span>STRAIN</span><strong>{strained}</strong></div>
+          <div><span>CRITICAL</span><strong className={critical ? "warning-text" : ""}>{critical}</strong></div>
+        </div>
       </header>
-      <section className="current-location-card">
-        <div className="location-sigil">YOU</div>
-        <div><span>CURRENT LOCATION</span><strong>{current?.name ?? "UNKNOWN LOCATION"}</strong><small>{current?.code} · SECURITY {current?.security ?? 0}%</small></div>
-        <span className="status-chip status-chip--online">ON SITE</span>
-      </section>
-      <div className="route-list">
-        {options.map((option) => {
-          const open = isLocationOpen(option.location, session.timestamp + option.durationMinutes * 60_000);
-          return (
-            <article className="route-card" key={option.location.id}>
-              <div className="route-card__code">{option.location.code}</div>
-              <div className="route-card__body">
-                <span>{option.districtName}</span>
-                <strong>{option.location.name}</strong>
-                <small>{option.location.type.toUpperCase()} · SECURITY {option.location.security}%</small>
-              </div>
-              <div className="route-card__meta">
-                <span>{option.durationMinutes} MIN</span><span>₵ {option.cost}</span><span className={open ? "ok-text" : "warning-text"}>{open ? "OPEN" : "CLOSED"}</span>
-              </div>
-              <button type="button" disabled={session.player.balance < option.cost} onClick={() => onTravel(option.location.id)}>GO</button>
-            </article>
-          );
-        })}
-      </div>
+
+      <nav className="terminal-tabs city-tabs" aria-label="Разделы города">
+        <button type="button" className={tab === "routes" ? "is-active" : ""} onClick={() => setTab("routes")}>МАРШРУТЫ</button>
+        <button type="button" className={tab === "economy" ? "is-active" : ""} onClick={() => setTab("economy")}>ЛОКАЛЬНАЯ ЭКОНОМИКА</button>
+        <button type="button" onClick={() => onOpenWindow("local")}>РАЙОН</button>
+      </nav>
+
+      {tab === "routes" ? (
+        <>
+          <section className="current-location-card">
+            <div className="location-sigil">YOU</div>
+            <div><span>CURRENT LOCATION</span><strong>{current?.name ?? "UNKNOWN LOCATION"}</strong><small>{current?.code} · SECURITY {current?.security ?? 0}%</small></div>
+            <span className="status-chip status-chip--online">ON SITE</span>
+          </section>
+          <div className="route-list">
+            {options.map((option) => {
+              const openByTime = isLocationOpen(option.location, session.timestamp + option.durationMinutes * 60_000);
+              const business = getBusinessAtLocation(session.economy, option.location.id);
+              const operational = businessCanServe(business);
+              return (
+                <article className={`route-card ${business ? `route-card--${business.status}` : ""}`} key={option.location.id}>
+                  <div className="route-card__code">{option.location.code}</div>
+                  <div className="route-card__body">
+                    <span>{option.districtName}</span>
+                    <strong>{option.location.name}</strong>
+                    <small>{option.location.type.toUpperCase()} · SECURITY {option.location.security}%</small>
+                  </div>
+                  <div className="route-card__meta">
+                    <span>{option.durationMinutes} MIN</span>
+                    <span>₵ {option.cost}</span>
+                    {business ? <span className={`business-state business-state--${business.status}`}>{business.status.toUpperCase()} · ₵{business.priceIndex}%</span> : <span className={openByTime ? "ok-text" : "warning-text"}>{openByTime ? "OPEN" : "CLOSED"}</span>}
+                  </div>
+                  <button type="button" disabled={session.player.balance < option.cost} onClick={() => onTravel(option.location.id)}>{!openByTime || !operational ? "GO / LIMITED" : "GO"}</button>
+                </article>
+              );
+            })}
+          </div>
+        </>
+      ) : (
+        <div className="economy-business-list">
+          {session.economy.businesses
+            .slice()
+            .sort((left, right) => businessStatusRank(right.status) - businessStatusRank(left.status) || left.stock - right.stock)
+            .map((business) => (
+              <BusinessEconomyCard
+                key={business.id}
+                business={business}
+                location={session.world.locations.find((location) => location.id === business.locationId)}
+                workers={session.people.people.filter((person) => person.workLocationId === business.locationId)}
+                current={current?.id === business.locationId}
+                onTravel={onTravel}
+              />
+            ))}
+        </div>
+      )}
     </div>
+  );
+}
+
+function businessStatusRank(status: BusinessState["status"]): number {
+  if (status === "closed") return 4;
+  if (status === "restricted") return 3;
+  if (status === "strained") return 2;
+  return 1;
+}
+
+function BusinessEconomyCard({ business, location, workers, current, onTravel }: { business: BusinessState; location: GameSession["world"]["locations"][number] | undefined; workers: PersonState[]; current: boolean; onTravel: (locationId: string) => void }) {
+  return (
+    <article className={`economy-business economy-business--${business.status}`}>
+      <header>
+        <div><span>{location?.code ?? business.id.slice(-8)}</span><strong>{location?.name ?? "UNKNOWN BUSINESS"}</strong><small>{business.kind.toUpperCase()} · {workers.length} KNOWN WORKERS</small></div>
+        <em>{business.status.toUpperCase()}</em>
+      </header>
+      <div className="economy-business__metrics">
+        <div><span>STOCK</span><strong>{business.stock}%</strong><i><b style={{ width: `${business.stock}%` }} /></i></div>
+        <div><span>STAFF</span><strong>{business.staffing}%</strong><i><b style={{ width: `${business.staffing}%` }} /></i></div>
+        <div><span>DEMAND</span><strong>{business.demand}%</strong><i><b style={{ width: `${business.demand}%` }} /></i></div>
+      </div>
+      <footer>
+        <span>PRICE INDEX <strong className={business.priceIndex > 125 ? "warning-text" : ""}>{business.priceIndex}%</strong></span>
+        <span>CASH <strong>₵ {Math.max(0, business.cash).toLocaleString("ru-RU")}</strong></span>
+        <button type="button" disabled={current || !location} onClick={() => location && onTravel(location.id)}>{current ? "YOU ARE HERE" : "GO"}</button>
+      </footer>
+    </article>
   );
 }
 
@@ -1251,17 +1335,23 @@ function FoodTerminal({ session, onBuy, onEat, onDiscard, onOrder, onOpenPlaces 
   const localStock = current ? session.life.food.shopStocks[current.id] : undefined;
   const market = session.world.locations.find((location) => location.type === "market");
   const deliveryStock = market ? session.life.food.shopStocks[market.id] : undefined;
+  const currentBusiness = current ? getBusinessAtLocation(session.economy, current.id) : null;
+  const marketBusiness = market ? getBusinessAtLocation(session.economy, market.id) : null;
   const atHome = session.life.currentLocationId === session.life.housing.locationId;
   const spoiled = session.life.food.storage.some((stack) => getFoodFreshness(stack, session.timestamp) === "spoiled");
   const renderProduct = (productId: string, stock: number, mode: "buy" | "order") => {
     const product = getFoodProduct(productId);
-    const total = mode === "order" ? product.price + 14 : product.price;
+    const business = mode === "buy" ? currentBusiness : marketBusiness;
+    const price = localPrice(product.price, business);
+    const deliveryFee = 14 + Math.max(0, Math.round((business?.priceIndex ?? 100) / 25) - 4);
+    const total = mode === "order" ? price + deliveryFee : price;
+    const serviceAvailable = businessCanServe(business);
     return (
-      <article className="supply-product" key={`${mode}-${product.id}`}>
+      <article className={`supply-product ${business ? `supply-product--${business.status}` : ""}`} key={`${mode}-${product.id}`}>
         <div className="supply-product__mark"><span>{product.code}</span><i>{product.category.toUpperCase()}</i></div>
         <div className="supply-product__body"><span>{product.maker}</span><strong>{product.name}</strong><p>{product.description}</p><div>{product.tags.map((tag) => <i key={tag}>{tag}</i>)}</div></div>
-        <div className="supply-product__stats"><span>FOOD −{product.hungerRelief}</span><span>PREP {product.preparationMinutes}M</span><span>LIFE {product.shelfLifeHours}H</span><span>STOCK {stock}</span></div>
-        <button type="button" disabled={stock <= 0 || session.player.balance < total || (mode === "buy" && (!current || !isLocationOpen(current, session.timestamp)))} onClick={() => mode === "buy" ? onBuy(product.id) : onOrder(product.id)}>{mode === "buy" ? `КУПИТЬ ₵ ${product.price}` : `ДОСТАВИТЬ ₵ ${total}`}</button>
+        <div className="supply-product__stats"><span>FOOD −{product.hungerRelief}</span><span>PREP {product.preparationMinutes}M</span><span>LIFE {product.shelfLifeHours}H</span><span>STOCK {stock}</span><span>INDEX {business?.priceIndex ?? 100}%</span></div>
+        <button type="button" disabled={!serviceAvailable || stock <= 0 || session.player.balance < total || (mode === "buy" && (!current || !isLocationOpen(current, session.timestamp)))} onClick={() => mode === "buy" ? onBuy(product.id) : onOrder(product.id)}>{!serviceAvailable ? "SERVICE CLOSED" : mode === "buy" ? `КУПИТЬ ₵ ${price}` : `ДОСТАВИТЬ ₵ ${total}`}</button>
       </article>
     );
   };
@@ -1275,8 +1365,8 @@ function FoodTerminal({ session, onBuy, onEat, onDiscard, onOrder, onOpenPlaces 
           return <article className={`storage-row storage-row--${freshness}`} key={stack.id}><span className="food-code">{product.code}</span><div><strong>{product.name}</strong><small>{product.maker} · ×{stack.quantity}</small></div><div><span>{freshness.toUpperCase()}</span><small>{product.requirement.toUpperCase()}</small></div><button type="button" disabled={!ready} onClick={() => onEat(product.id)}>{ready ? "EAT" : freshness === "spoiled" ? "SPOILED" : "HOME PREP"}</button></article>;
         })}
       </div> : null}
-      {tab === "store" ? <div className="supply-list"><header className="supply-location"><div><span>LOCAL RETAIL</span><strong>{current?.name ?? "UNKNOWN"}</strong><small>{current && isLocationOpen(current, session.timestamp) ? "OPEN NOW" : "NO ACTIVE RETAIL"}</small></div>{!localStock ? <button type="button" onClick={onOpenPlaces}>Найти магазин</button> : null}</header>{localStock ? Object.entries(localStock).map(([productId, stock]) => renderProduct(productId, stock, "buy")) : <div className="empty-terminal">На текущей локации нет продуктового терминала.</div>}</div> : null}
-      {tab === "delivery" ? <div className="supply-list"><header className="supply-location"><div><span>CITY DELIVERY</span><strong>{market?.name ?? "MARKET OFFLINE"}</strong><small>Доставка в домашний пищевой шкаф · 25 минут · ₵ 14</small></div></header>{deliveryStock ? Object.entries(deliveryStock).map(([productId, stock]) => renderProduct(productId, stock, "order")) : null}</div> : null}
+      {tab === "store" ? <div className="supply-list"><header className="supply-location"><div><span>LOCAL RETAIL</span><strong>{current?.name ?? "UNKNOWN"}</strong><small>{currentBusiness ? `${currentBusiness.status.toUpperCase()} · PRICE ${currentBusiness.priceIndex}% · STOCK ${currentBusiness.stock}%` : current && isLocationOpen(current, session.timestamp) ? "OPEN NOW" : "NO ACTIVE RETAIL"}</small></div>{!localStock ? <button type="button" onClick={onOpenPlaces}>Найти магазин</button> : null}</header>{localStock ? Object.entries(localStock).map(([productId, stock]) => renderProduct(productId, stock, "buy")) : <div className="empty-terminal">На текущей локации нет продуктового терминала.</div>}</div> : null}
+      {tab === "delivery" ? <div className="supply-list"><header className="supply-location"><div><span>CITY DELIVERY</span><strong>{market?.name ?? "MARKET OFFLINE"}</strong><small>{marketBusiness ? `${marketBusiness.status.toUpperCase()} · PRICE ${marketBusiness.priceIndex}% · STOCK ${marketBusiness.stock}%` : "Доставка в домашний пищевой шкаф · 25 минут"}</small></div></header>{deliveryStock ? Object.entries(deliveryStock).map(([productId, stock]) => renderProduct(productId, stock, "order")) : null}</div> : null}
     </div>
   );
 }
@@ -1305,6 +1395,7 @@ function CourierWorkspace({
   const atPickup = active?.pickupLocationId === session.life.currentLocationId;
   const atDropoff = active?.dropoffLocationId === session.life.currentLocationId;
   const activeClient = active ? getPerson(session.people, active.clientId) : null;
+  const activeBusiness = active?.businessId ? session.economy.businesses.find((business) => business.id === active.businessId) : null;
   const clientMoved = Boolean(active && activeClient && activeClient.currentLocationId !== active.dropoffLocationId);
 
   return (
@@ -1326,7 +1417,7 @@ function CourierWorkspace({
         <section className={`courier-active courier-active--${active.risk}`}>
           <header>
             <div><span>ACTIVE DELIVERY</span><h2>{active.code}</h2></div>
-            <span className={`status-chip risk-${active.risk}`}>{active.status.toUpperCase()}</span>
+            <div className="courier-active__badges"><span className={`status-chip risk-${active.risk}`}>{active.status.toUpperCase()}</span><span className={`status-chip ${active.economicPurpose === "restock" ? "status-chip--warning" : ""}`}>{active.economicPurpose === "restock" ? "SUPPLY" : "PERSONAL"}</span></div>
           </header>
           <button type="button" className="courier-client-line" onClick={() => onTravel(active.dropoffLocationId)}>
             <span><strong>{active.client}</strong><small>{active.requestNote}</small></span>
@@ -1343,7 +1434,7 @@ function CourierWorkspace({
             <div><span>CONDITION</span><strong>{active.condition}%</strong></div>
             <div><span>DEADLINE</span><strong className={courierMinutesLeft(active, session.timestamp) < 25 ? "warning-text" : ""}>{courierMinutesLeft(active, session.timestamp)} MIN</strong></div>
             <div><span>PAYOUT</span><strong>₵ {active.payout}</strong></div>
-            <div><span>LEGALITY</span><strong>{active.legality.toUpperCase()}</strong></div>
+            <div><span>{activeBusiness ? "BUSINESS" : "LEGALITY"}</span><strong>{activeBusiness ? `${activeBusiness.status.toUpperCase()} / STOCK ${activeBusiness.stock}%` : active.legality.toUpperCase()}</strong></div>
           </div>
           <div className="courier-active__actions">
             {active.status === "accepted" && atPickup ? <button type="button" className="button button--primary" onClick={onPickup}>ЗАБРАТЬ ГРУЗ · 6 MIN</button> : null}
@@ -1364,9 +1455,9 @@ function CourierWorkspace({
         <div className="courier-order-list">
           {available.map((order) => (
             <article className={`courier-order courier-order--${order.risk}`} key={order.id}>
-              <header><div><span>{order.code}</span><strong>{order.client}</strong></div><em>{order.risk.toUpperCase()}</em></header>
+              <header><div><span>{order.code} · {order.economicPurpose === "restock" ? "SUPPLY" : "PERSONAL"}</span><strong>{order.client}</strong></div><em>{order.risk.toUpperCase()}</em></header>
               <div className="courier-order__route"><span>{locationName(order.pickupLocationId)}</span><Icon name="chevron" size={14} /><span>{locationName(order.dropoffLocationId)}</span></div>
-              <div className="courier-order__meta"><span>{order.weightKg} KG</span><span>{courierMinutesLeft(order, session.timestamp)} MIN</span><span>₵ {order.payout}</span><span>{order.legality.toUpperCase()}</span></div>
+              <div className="courier-order__meta"><span>{order.weightKg} KG</span><span>{courierMinutesLeft(order, session.timestamp)} MIN</span><span>₵ {order.payout}</span><span>{order.businessId ? `STOCK ${session.economy.businesses.find((business) => business.id === order.businessId)?.stock ?? "?"}%` : order.legality.toUpperCase()}</span></div>
               <p>{order.requestNote}</p>
               <small className="courier-order__cargo">{order.cargoName}</small>
               <button type="button" disabled={Boolean(active) || order.weightKg > state.cargoCapacityKg} onClick={() => onAccept(order.id)}>ПРИНЯТЬ ЗАКАЗ</button>
@@ -1701,6 +1792,7 @@ function WindowContent({
       <div className="diagnostic-row"><span>VERSION GUARD</span><strong>{versionGuard.status.toUpperCase()}</strong><i>{versionGuard.remoteVersion === versionGuard.localVersion ? "100%" : "CHECK"}</i></div>
       <div className="diagnostic-row"><span>PWA CACHE</span><strong>NETWORK FIRST</strong><i>100%</i></div>
       <div className="diagnostic-row"><span>WORLD PULSE</span><strong>ACTIVE</strong><i>{session.district.pulseCount}</i></div>
+      <div className="diagnostic-row"><span>LOCAL ECONOMY</span><strong>{session.economy.businesses.some((business) => business.status === "closed") ? "DISRUPTED" : "ACTIVE"}</strong><i>{session.economy.businesses.filter((business) => business.status !== "stable").length}</i></div>
       <div className="diagnostic-row"><span>INDEXED DB</span><strong>{saveController.status === "error" ? "ERROR" : "CONNECTED"}</strong><i>{saveController.summaries.filter((slot) => slot.exists).length}/3</i></div>
       <pre>{`NEON/LINK DIAGNOSTIC\nBUILD: ${APP_VERSION}\nREMOTE: ${versionGuard.remoteVersion ?? "UNKNOWN"}\nWORLD: ${session.world.meta.worldId}\nDISTRICT PULSES: ${session.district.pulseCount}\nLOCAL EVENTS: ${session.events.filter((event) => event.category === "local").length}\nSAVE SLOT: ${saveController.activeSlotId}
 SAVE STATUS: ${saveController.status.toUpperCase()}

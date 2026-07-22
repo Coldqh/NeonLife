@@ -7,6 +7,9 @@ import { createHumanNetwork, getPerson, toKnownNpc } from "../../people/network/
 import type { HumanNetworkState, PersonState } from "../../people/network/types";
 import { createPressureState } from "../../gameplay/pressure/pressureSystem";
 import type { PressureState } from "../../gameplay/pressure/types";
+import { createLocalEconomy } from "../../gameplay/economy/localEconomy";
+import type { LocalEconomyState } from "../../gameplay/economy/types";
+import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -55,6 +58,14 @@ function hasPressureState(value: unknown): value is PressureState {
     && Array.isArray(value.summaries);
 }
 
+
+function hasEconomyState(value: unknown): value is LocalEconomyState {
+  return isObject(value)
+    && Array.isArray(value.businesses)
+    && typeof value.lastUpdatedAt === "number"
+    && typeof value.cycle === "number";
+}
+
 function migrateCourierOrder(order: unknown, people: PersonState[], index: number): CourierOrder | null {
   if (!isObject(order) || typeof order.id !== "string" || typeof order.code !== "string") return null;
   const matchedPerson = typeof order.clientId === "string"
@@ -68,6 +79,8 @@ function migrateCourierOrder(order: unknown, people: PersonState[], index: numbe
     clientId: person.id,
     client: matchedPerson && typeof order.client === "string" ? order.client : person.name,
     requestNote: typeof order.requestNote === "string" ? order.requestNote : person.problem.detail,
+    businessId: typeof order.businessId === "string" ? order.businessId : null,
+    economicPurpose: order.economicPurpose === "restock" ? "restock" : "personal",
     pickupLocationId: String(order.pickupLocationId ?? "location-missing"),
     dropoffLocationId: String(order.dropoffLocationId ?? person.currentLocationId),
     cargoName: String(order.cargoName ?? "sealed parcel"),
@@ -95,15 +108,16 @@ function migrateCourierState(
   seed: string,
   timestamp: number,
   locations: LocationState[],
-  people: PersonState[]
+  people: PersonState[],
+  businesses: LocalEconomyState["businesses"]
 ): CourierState {
   if (!isObject(value) || !Array.isArray(value.orders)) {
-    return createInitialCourierState(seed, timestamp, locations, people);
+    return createInitialCourierState(seed, timestamp, locations, people, businesses);
   }
   const orders = value.orders
     .map((order, index) => migrateCourierOrder(order, people, index))
     .filter((order): order is CourierOrder => Boolean(order));
-  if (!orders.length) return createInitialCourierState(seed, timestamp, locations, people);
+  if (!orders.length) return createInitialCourierState(seed, timestamp, locations, people, businesses);
   return {
     orders,
     activeOrderId: typeof value.activeOrderId === "string" ? value.activeOrderId : null,
@@ -160,10 +174,25 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     ?? housingLocation?.name
     ?? "LOCAL DISTRICT";
   const existingJobs = isObject(payload.jobs) ? payload.jobs : {};
-  const courier = migrateCourierState(existingJobs.courier, seed, timestamp, locations, people.people);
   const housingState = existingLife && isObject(existingLife.housing)
     ? existingLife.housing as unknown as GameSession["life"]["housing"]
     : createInitialHousing(housingLocation?.id ?? "location-missing", timestamp);
+  const foodState = existingLife && isObject(existingLife.food)
+    ? existingLife.food as unknown as GameSession["life"]["food"]
+    : createInitialFoodState(
+      seed,
+      timestamp,
+      marketLocation?.id ?? "market-missing",
+      kitchenLocation?.id ?? "kitchen-missing",
+      clinicLocation?.id ?? "clinic-missing"
+    );
+  const pulseState = isObject(payload.district)
+    ? payload.district as unknown as GameSession["district"]
+    : createInitialDistrictPulse(timestamp, seed);
+  const economy = hasEconomyState(payload.economy)
+    ? payload.economy
+    : createLocalEconomy(seed, timestamp, locations, people.people, foodState, pulseState);
+  const courier = migrateCourierState(existingJobs.courier, seed, timestamp, locations, people.people, economy.businesses);
   const pressure = hasPressureState(payload.pressure)
     ? payload.pressure
     : createPressureState(seed, timestamp, housingState, people.people, locations);
@@ -176,6 +205,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     primaryContact,
     people,
     pressure,
+    economy,
     currentActivity: `На месте: ${existingLocationName}`,
     world: {
       ...world,
@@ -186,7 +216,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
       ...district,
       seedScope: typeof district.seedScope === "string" ? district.seedScope : seed
     },
-    life: existingLife ?? {
+    life: existingLife ? { ...existingLife, food: foodState, housing: housingState } : {
       currentLocationId: housingLocation?.id ?? "location-missing",
       housing: createInitialHousing(housingLocation?.id ?? "location-missing", timestamp),
       food: createInitialFoodState(

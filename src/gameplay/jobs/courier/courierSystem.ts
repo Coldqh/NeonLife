@@ -2,6 +2,7 @@ import { createStableEntityId } from "../../../core/ids/entityId";
 import { SeededRandom } from "../../../core/random/seededRandom";
 import type { PersonState } from "../../../people/network/types";
 import type { LocationState } from "../../../world/state/types";
+import type { BusinessState } from "../../economy/types";
 
 export type CourierOrderStatus = "available" | "accepted" | "in-transit" | "completed" | "failed" | "expired";
 export type CourierRisk = "low" | "medium" | "high";
@@ -13,6 +14,8 @@ export interface CourierOrder {
   clientId: string;
   client: string;
   requestNote: string;
+  businessId: string | null;
+  economicPurpose: "personal" | "restock";
   pickupLocationId: string;
   dropoffLocationId: string;
   cargoName: string;
@@ -73,11 +76,25 @@ function chooseDropoff(person: PersonState, locations: LocationState[], fallback
     ?? fallback;
 }
 
+function cargoForSupplyClass(supplyClass: BusinessState["supplyClass"]) {
+  if (supplyClass === "food") return CARGO.find((cargo) => cargo.cargoClass === "food") ?? CARGO[0];
+  if (supplyClass === "medical") return CARGO.find((cargo) => cargo.cargoClass === "medical") ?? CARGO[0];
+  if (supplyClass === "parts") return CARGO.find((cargo) => cargo.cargoClass === "parts") ?? CARGO[0];
+  if (supplyClass === "documents") return CARGO.find((cargo) => cargo.cargoClass === "documents") ?? CARGO[0];
+  return CARGO.find((cargo) => cargo.cargoClass === "sealed") ?? CARGO[0];
+}
+
+function businessClient(people: PersonState[], business: BusinessState): PersonState | null {
+  const workers = people.filter((person) => person.workLocationId === business.locationId);
+  return workers.sort((left, right) => right.problem.severity - left.problem.severity)[0] ?? null;
+}
+
 function createBoard(
   seed: string,
   timestamp: number,
   locations: LocationState[],
   people: PersonState[],
+  businesses: BusinessState[],
   generation: number
 ): CourierOrder[] {
   const candidates = eligibleLocations(locations);
@@ -85,12 +102,19 @@ function createBoard(
   const rng = new SeededRandom(`${seed}:courier-board:${generation}`);
   const orders: CourierOrder[] = [];
 
+  const urgentBusinesses = businesses
+    .filter((business) => business.shortage || business.status === "restricted" || business.status === "closed")
+    .sort((left, right) => left.stock - right.stock);
+
   for (let index = 0; index < 6; index += 1) {
-    const client = people[(index + rng.integer(0, people.length - 1)) % people.length];
-    const dropoff = chooseDropoff(client, candidates, rng.pick(candidates));
+    const business = index < Math.min(3, urgentBusinesses.length) ? urgentBusinesses[index] : null;
+    const businessPerson = business ? businessClient(people, business) : null;
+    const client = businessPerson ?? people[(index + rng.integer(0, people.length - 1)) % people.length];
+    const businessLocation = business ? locations.find((location) => location.id === business.locationId) : null;
+    const dropoff = businessLocation ?? chooseDropoff(client, candidates, rng.pick(candidates));
     const pickupCandidates = candidates.filter((location) => location.id !== dropoff.id);
     const pickup = rng.pick(pickupCandidates.length ? pickupCandidates : candidates);
-    const cargo = rng.pick(CARGO);
+    const cargo = business ? cargoForSupplyClass(business.supplyClass) : rng.pick(CARGO);
     const riskRoll = rng.integer(1, 100);
     const risk: CourierRisk = riskRoll > 80 ? "high" : riskRoll > 45 ? "medium" : "low";
     const legality: CargoLegality = cargo.cargoClass === "sealed"
@@ -99,14 +123,19 @@ function createBoard(
     const weightKg = Math.round((cargo.weight[0] + rng.next() * (cargo.weight[1] - cargo.weight[0])) * 10) / 10;
     const problemPressure = Math.round(client.problem.severity / 10);
     const durationMinutes = rng.integer(48, 150);
-    const payout = cargo.base + Math.round(weightKg * 5) + (risk === "high" ? 52 : risk === "medium" ? 24 : 0) + problemPressure;
+    const supplyUrgency = business ? Math.max(0, Math.round((55 - business.stock) * 0.9)) : 0;
+    const payout = cargo.base + Math.round(weightKg * 5) + (risk === "high" ? 52 : risk === "medium" ? 24 : 0) + problemPressure + supplyUrgency;
     const code = `DLV-${generation.toString().padStart(2, "0")}${rng.integer(100, 999)}`;
     orders.push({
       id: createStableEntityId("courier-order", `${seed}:${generation}:${index}:${pickup.id}:${dropoff.id}:${client.id}`),
       code,
       clientId: client.id,
       client: client.name,
-      requestNote: requestFor(client, cargo.cargoClass),
+      requestNote: business
+        ? `Рабочая точка теряет запас: ${business.stock}% · состояние ${business.status.toUpperCase()}.`
+        : requestFor(client, cargo.cargoClass),
+      businessId: business?.id ?? null,
+      economicPurpose: business ? "restock" : "personal",
       pickupLocationId: pickup.id,
       dropoffLocationId: dropoff.id,
       cargoName: cargo.name,
@@ -127,9 +156,9 @@ function createBoard(
   return orders;
 }
 
-export function createInitialCourierState(seed: string, timestamp: number, locations: LocationState[], people: PersonState[]): CourierState {
+export function createInitialCourierState(seed: string, timestamp: number, locations: LocationState[], people: PersonState[], businesses: BusinessState[] = []): CourierState {
   return {
-    orders: createBoard(seed, timestamp, locations, people, 1),
+    orders: createBoard(seed, timestamp, locations, people, businesses, 1),
     activeOrderId: null,
     boardGeneration: 1,
     boardRefreshAt: timestamp + 8 * 60 * 60_000,
@@ -150,13 +179,14 @@ export function refreshCourierBoard(
   seed: string,
   timestamp: number,
   locations: LocationState[],
-  people: PersonState[]
+  people: PersonState[],
+  businesses: BusinessState[] = []
 ): CourierState {
   if (timestamp < state.boardRefreshAt || state.activeOrderId) return state;
   const generation = state.boardGeneration + 1;
   return {
     ...state,
-    orders: createBoard(seed, timestamp, locations, people, generation),
+    orders: createBoard(seed, timestamp, locations, people, businesses, generation),
     boardGeneration: generation,
     boardRefreshAt: timestamp + 8 * 60 * 60_000
   };

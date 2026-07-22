@@ -4373,3 +4373,221 @@ button:disabled {
   min-height: 39px;
   margin-bottom: 5px;
 }
+
+/* v0.9.0 — local economy feedback */
+.city-heading {
+  align-items: flex-end;
+}
+
+.city-economy-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(72px, 1fr));
+  gap: 6px;
+}
+
+.city-economy-stats > div {
+  min-height: 46px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  background: rgba(8, 20, 28, .74);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+}
+
+.city-economy-stats span,
+.city-economy-stats strong {
+  font-family: var(--font-mono);
+}
+
+.city-economy-stats span {
+  color: var(--muted-2);
+  font-size: 7px;
+  letter-spacing: .08em;
+}
+
+.city-economy-stats strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.city-tabs {
+  margin-bottom: 8px;
+}
+
+.business-state {
+  white-space: nowrap;
+}
+
+.business-state--stable { color: var(--green); }
+.business-state--strained { color: var(--yellow); }
+.business-state--restricted,
+.business-state--closed { color: var(--red); }
+
+.route-card--strained { border-color: rgba(255, 190, 75, .34); }
+.route-card--restricted,
+.route-card--closed { border-color: rgba(255, 83, 104, .42); }
+
+.economy-business-list {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.economy-business {
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(10, 25, 34, .94), rgba(5, 14, 20, .92));
+  position: relative;
+  overflow: hidden;
+}
+
+.economy-business::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--cyan);
+}
+
+.economy-business--strained::before { background: var(--yellow); }
+.economy-business--restricted::before,
+.economy-business--closed::before { background: var(--red); }
+
+.economy-business > header,
+.economy-business > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.economy-business > header {
+  min-height: 54px;
+  padding: 9px 10px 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.economy-business > header > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.economy-business > header span,
+.economy-business > header small,
+.economy-business > header em {
+  font-family: var(--font-mono);
+  font-style: normal;
+}
+
+.economy-business > header span,
+.economy-business > header small {
+  color: var(--muted-2);
+  font-size: 7px;
+}
+
+.economy-business > header strong {
+  color: var(--text);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.economy-business > header em {
+  flex: 0 0 auto;
+  color: var(--cyan);
+  font-size: 7px;
+  border: 1px solid rgba(72, 225, 255, .35);
+  padding: 4px 6px;
+}
+
+.economy-business--strained > header em { color: var(--yellow); border-color: rgba(255, 190, 75, .4); }
+.economy-business--restricted > header em,
+.economy-business--closed > header em { color: var(--red); border-color: rgba(255, 83, 104, .4); }
+
+.economy-business__metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+}
+
+.economy-business__metrics > div {
+  min-width: 0;
+  padding: 8px;
+  background: rgba(5, 15, 21, .96);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.economy-business__metrics span,
+.economy-business__metrics strong {
+  font-family: var(--font-mono);
+}
+
+.economy-business__metrics span { color: var(--muted-2); font-size: 6px; }
+.economy-business__metrics strong { color: var(--text); font-size: 10px; }
+
+.economy-business__metrics i {
+  display: block;
+  height: 2px;
+  background: rgba(255,255,255,.08);
+}
+
+.economy-business__metrics i b {
+  display: block;
+  height: 100%;
+  background: var(--cyan);
+}
+
+.economy-business > footer {
+  min-height: 40px;
+  padding: 7px 8px 7px 12px;
+}
+
+.economy-business > footer span,
+.economy-business > footer strong,
+.economy-business > footer button {
+  font-family: var(--font-mono);
+  font-size: 7px;
+}
+
+.economy-business > footer span { color: var(--muted-2); }
+.economy-business > footer strong { color: var(--text); }
+.economy-business > footer button {
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid rgba(72, 225, 255, .35);
+  background: rgba(72, 225, 255, .08);
+  color: var(--cyan);
+  cursor: pointer;
+}
+
+.economy-business > footer button:disabled {
+  opacity: .45;
+  cursor: default;
+}
+
+.supply-product--strained { border-color: rgba(255, 190, 75, .36); }
+.supply-product--restricted,
+.supply-product--closed { border-color: rgba(255, 83, 104, .44); }
+
+.courier-active__badges {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.status-chip--warning {
+  color: var(--yellow);
+  border-color: rgba(255, 190, 75, .42);
+  background: rgba(255, 190, 75, .08);
+}

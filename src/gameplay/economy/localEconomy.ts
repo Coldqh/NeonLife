@@ -1,0 +1,364 @@
+import { createStableEntityId } from "../../core/ids/entityId";
+import { SeededRandom } from "../../core/random/seededRandom";
+import type { FoodState } from "../food/foodSystem";
+import type { DistrictPulseState } from "../../world/city/districtPulse";
+import type { LocationState } from "../../world/state/types";
+import type { HumanNetworkState, PersonState } from "../../people/network/types";
+import type { CourierOrder } from "../jobs/courier/courierSystem";
+import type { BusinessKind, BusinessState, BusinessStatus, EconomyNotice, LocalEconomyState, SupplyClass } from "./types";
+
+const CYCLE_MS = 6 * 60 * 60_000;
+
+function clamp(value: number, min = 0, max = 100): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function businessKind(location: LocationState): BusinessKind | null {
+  if (location.type === "market") return "retail";
+  if (location.type === "food") return "food-service";
+  if (location.type === "clinic") return "medical";
+  if (location.type === "workshop") return "repair";
+  if (location.type === "office") return "corporate";
+  if (location.type === "transport" && location.name.includes("MESHLINE")) return "logistics";
+  return null;
+}
+
+function supplyClass(kind: BusinessKind): SupplyClass {
+  if (kind === "retail" || kind === "food-service") return "food";
+  if (kind === "medical") return "medical";
+  if (kind === "repair") return "parts";
+  if (kind === "corporate") return "documents";
+  return "mixed";
+}
+
+function initialCash(kind: BusinessKind, rng: SeededRandom): number {
+  if (kind === "corporate") return rng.integer(18_000, 32_000);
+  if (kind === "medical") return rng.integer(8_000, 15_000);
+  if (kind === "logistics") return rng.integer(5_000, 10_000);
+  return rng.integer(1_400, 6_500);
+}
+
+function initialStock(kind: BusinessKind, rng: SeededRandom): number {
+  if (kind === "corporate") return rng.integer(70, 94);
+  if (kind === "logistics") return rng.integer(58, 84);
+  return rng.integer(42, 78);
+}
+
+function workersAt(people: PersonState[], locationId: string): PersonState[] {
+  return people.filter((person) => person.workLocationId === locationId);
+}
+
+function staffingFor(people: PersonState[], locationId: string, fallback: number): number {
+  const workers = workersAt(people, locationId);
+  if (!workers.length) return fallback;
+  const strain = workers.reduce((total, person) => total + person.fatigue * 0.55 + person.stress * 0.45, 0) / workers.length;
+  const attendance = Math.min(18, workers.length * 6);
+  return clamp(Math.round(100 - strain + attendance), 12, 100);
+}
+
+function statusFor(stock: number, staffing: number, cash: number): BusinessStatus {
+  if (stock <= 4 || staffing <= 16 || cash <= 0) return "closed";
+  if (stock < 18 || staffing < 31 || cash < 240) return "restricted";
+  if (stock < 42 || staffing < 52 || cash < 900) return "strained";
+  return "stable";
+}
+
+function priceIndexFor(stock: number, demand: number, status: BusinessStatus, transitDelayMinutes: number): number {
+  const scarcity = Math.max(0, 55 - stock) * 0.72;
+  const demandPressure = Math.max(0, demand - 50) * 0.32;
+  const statusPressure = status === "closed" ? 42 : status === "restricted" ? 24 : status === "strained" ? 10 : 0;
+  return clamp(Math.round(94 + scarcity + demandPressure + statusPressure + transitDelayMinutes * 0.7), 82, 175);
+}
+
+function capacityFor(kind: BusinessKind): number {
+  if (kind === "retail") return 70;
+  if (kind === "food-service") return 34;
+  if (kind === "medical") return 18;
+  return 100;
+}
+
+function totalFoodStock(food: FoodState, locationId: string): number | null {
+  const stock = food.shopStocks[locationId];
+  if (!stock) return null;
+  return Object.values(stock).reduce((total, value) => total + value, 0);
+}
+
+function consumeFoodStock(food: FoodState, locationId: string, units: number, rng: SeededRandom): FoodState {
+  const current = food.shopStocks[locationId];
+  if (!current || units <= 0) return food;
+  const next = { ...current };
+  const keys = Object.keys(next);
+  let remaining = units;
+  let safety = 0;
+  while (remaining > 0 && keys.some((key) => next[key] > 0) && safety < 200) {
+    const key = rng.pick(keys);
+    if (next[key] > 0) {
+      next[key] -= 1;
+      remaining -= 1;
+    }
+    safety += 1;
+  }
+  return { ...food, shopStocks: { ...food.shopStocks, [locationId]: next } };
+}
+
+function restockFoodStock(food: FoodState, locationId: string, units: number): FoodState {
+  const current = food.shopStocks[locationId];
+  if (!current || units <= 0) return food;
+  const keys = Object.keys(current);
+  if (!keys.length) return food;
+  const each = Math.max(1, Math.floor(units / keys.length));
+  const next = Object.fromEntries(keys.map((key) => [key, Math.min(30, current[key] + each)]));
+  return { ...food, shopStocks: { ...food.shopStocks, [locationId]: next } };
+}
+
+function statusTitle(name: string, status: BusinessStatus): string {
+  if (status === "closed") return `${name} прекратил обслуживание.`;
+  if (status === "restricted") return `${name} ограничил работу.`;
+  if (status === "strained") return `${name} работает с перебоями.`;
+  return `${name} вернулся к устойчивой работе.`;
+}
+
+function statusDetail(status: BusinessStatus, stock: number, staffing: number, priceIndex: number): string {
+  if (status === "closed") return `Запас ${stock}% · персонал ${staffing}% · обслуживание остановлено.`;
+  if (status === "restricted") return `Запас ${stock}% · персонал ${staffing}% · цены ${priceIndex}%.`;
+  if (status === "strained") return `Поставки и смены нестабильны · цены ${priceIndex}%.`;
+  return `Запас ${stock}% · персонал ${staffing}% · цены стабилизированы.`;
+}
+
+export function createLocalEconomy(
+  seed: string,
+  timestamp: number,
+  locations: LocationState[],
+  people: PersonState[],
+  food: FoodState,
+  pulse: DistrictPulseState
+): LocalEconomyState {
+  const rng = new SeededRandom(`${seed}:local-economy`);
+  const businesses = locations.flatMap((location): BusinessState[] => {
+    const kind = businessKind(location);
+    if (!kind) return [];
+    const foodUnits = totalFoodStock(food, location.id);
+    const stock = foodUnits === null
+      ? initialStock(kind, rng)
+      : clamp(Math.round(foodUnits / capacityFor(kind) * 100), 8, 100);
+    const staffing = staffingFor(people, location.id, rng.integer(48, 82));
+    const demand = clamp(rng.integer(38, 72) + Math.round(pulse.marketActivity / 8));
+    const cash = initialCash(kind, rng);
+    const status = statusFor(stock, staffing, cash);
+    return [{
+      id: createStableEntityId("business", `${seed}:${location.id}`),
+      locationId: location.id,
+      organizationId: location.organizationId,
+      kind,
+      supplyClass: supplyClass(kind),
+      cash,
+      stock,
+      staffing,
+      demand,
+      priceIndex: priceIndexFor(stock, demand, status, pulse.transitDelayMinutes),
+      status,
+      shortage: stock < 42,
+      lastStatusChangeAt: timestamp,
+      lastUpdatedAt: timestamp
+    }];
+  });
+  return { businesses, lastUpdatedAt: timestamp, cycle: Math.floor(timestamp / CYCLE_MS) };
+}
+
+export interface EconomyAdvanceResult {
+  state: LocalEconomyState;
+  food: FoodState;
+  notices: EconomyNotice[];
+}
+
+export function advanceLocalEconomy(
+  state: LocalEconomyState,
+  timestamp: number,
+  seed: string,
+  locations: LocationState[],
+  people: PersonState[],
+  foodState: FoodState,
+  pulse: DistrictPulseState
+): EconomyAdvanceResult {
+  if (timestamp <= state.lastUpdatedAt) return { state, food: foodState, notices: [] };
+  const targetCycle = Math.floor(timestamp / CYCLE_MS);
+  let cycle = Math.max(state.cycle, Math.floor(state.lastUpdatedAt / CYCLE_MS));
+  let businesses = state.businesses;
+  let food = foodState;
+  const notices: EconomyNotice[] = [];
+
+  while (cycle < targetCycle) {
+    cycle += 1;
+    businesses = businesses.map((business) => {
+      const location = locations.find((item) => item.id === business.locationId);
+      if (!location) return business;
+      const rng = new SeededRandom(`${seed}:economy:${cycle}:${business.id}`);
+      const staffing = staffingFor(people, business.locationId, business.staffing);
+      const demand = clamp(Math.round(
+        business.demand * 0.55
+        + pulse.marketActivity * 0.28
+        + (business.kind === "medical" ? 8 : 0)
+        + rng.integer(-9, 12)
+      ), 18, 100);
+      const consumption = Math.max(1, Math.round(demand / 17));
+      food = consumeFoodStock(food, business.locationId, consumption, rng);
+      const actualFoodStock = totalFoodStock(food, business.locationId);
+      let stock = actualFoodStock === null
+        ? clamp(business.stock - consumption + rng.integer(-2, 2))
+        : clamp(Math.round(actualFoodStock / capacityFor(business.kind) * 100));
+      let cash = Math.max(-500, business.cash + Math.round(demand * business.priceIndex / 42) - Math.max(12, workersAt(people, business.locationId).length * 17));
+      const canRestock = stock < 48 && cash > 420 && pulse.transitDelayMinutes < 18;
+      const restockSucceeded = canRestock && rng.chance(0.62 - Math.min(0.3, pulse.transitDelayMinutes / 60));
+      if (restockSucceeded) {
+        const restock = rng.integer(14, 28);
+        stock = clamp(stock + restock);
+        cash -= restock * 7;
+        food = restockFoodStock(food, business.locationId, restock);
+      }
+      const status = statusFor(stock, staffing, cash);
+      const priceIndex = priceIndexFor(stock, demand, status, pulse.transitDelayMinutes);
+      if (status !== business.status && notices.length < 5) {
+        notices.push({
+          locationId: business.locationId,
+          title: statusTitle(location.name, status),
+          detail: statusDetail(status, stock, staffing, priceIndex),
+          importance: status === "closed" ? 3 : status === "restricted" ? 2 : 1,
+          previousStatus: business.status,
+          status
+        });
+      }
+      return {
+        ...business,
+        cash,
+        stock,
+        staffing,
+        demand,
+        priceIndex,
+        status,
+        shortage: stock < 42,
+        lastStatusChangeAt: status === business.status ? business.lastStatusChangeAt : timestamp,
+        lastUpdatedAt: timestamp
+      };
+    });
+  }
+
+  return {
+    state: { businesses, lastUpdatedAt: timestamp, cycle },
+    food,
+    notices
+  };
+}
+
+export function getBusinessAtLocation(state: LocalEconomyState, locationId: string | null | undefined): BusinessState | null {
+  if (!locationId) return null;
+  return state.businesses.find((business) => business.locationId === locationId) ?? null;
+}
+
+export function localPrice(basePrice: number, business: BusinessState | null | undefined): number {
+  return Math.max(1, Math.round(basePrice * (business?.priceIndex ?? 100) / 100));
+}
+
+export function businessCanServe(business: BusinessState | null | undefined): boolean {
+  return !business || business.status !== "closed";
+}
+
+export function registerBusinessSale(state: LocalEconomyState, locationId: string, revenue: number): LocalEconomyState {
+  return {
+    ...state,
+    businesses: state.businesses.map((business) => business.locationId === locationId
+      ? { ...business, cash: business.cash + revenue, demand: clamp(business.demand + 2), stock: clamp(business.stock - 1) }
+      : business)
+  };
+}
+
+export interface CourierSupplyResult {
+  state: LocalEconomyState;
+  food: FoodState;
+}
+
+export function applyCourierSupplyDelivery(
+  state: LocalEconomyState,
+  food: FoodState,
+  order: CourierOrder,
+  payout: number,
+  condition: number,
+  lateMinutes: number
+): CourierSupplyResult {
+  if (!order.businessId) return { state, food };
+  const quality = clamp(Math.round(condition - Math.min(45, lateMinutes)), 0, 100);
+  const stockGain = Math.max(2, Math.round(quality / 5));
+  const target = state.businesses.find((business) => business.id === order.businessId);
+  return {
+    food: target ? restockFoodStock(food, target.locationId, stockGain) : food,
+    state: {
+      ...state,
+      businesses: state.businesses.map((business) => {
+        if (business.id !== order.businessId) return business;
+        const stock = clamp(business.stock + stockGain);
+        const cash = business.cash - payout;
+        const status = statusFor(stock, business.staffing, cash);
+        return {
+          ...business,
+          cash,
+          stock,
+          shortage: stock < 42,
+          status,
+          priceIndex: priceIndexFor(stock, business.demand, status, 0)
+        };
+      })
+    }
+  };
+}
+
+export function applyRequestToEconomy(
+  state: LocalEconomyState,
+  food: FoodState,
+  locationId: string,
+  requestType: "medicine" | "supply" | "loan" | "cover-shift" | "move-load"
+): { state: LocalEconomyState; food: FoodState } {
+  const stockGain = requestType === "supply" ? 18 : requestType === "move-load" ? 8 : 0;
+  const staffingGain = requestType === "cover-shift" ? 14 : 0;
+  return {
+    food: stockGain > 0 ? restockFoodStock(food, locationId, stockGain) : food,
+    state: {
+      ...state,
+      businesses: state.businesses.map((business) => {
+        if (business.locationId !== locationId) return business;
+        const stock = clamp(business.stock + stockGain);
+        const staffing = clamp(business.staffing + staffingGain);
+        const status = statusFor(stock, staffing, business.cash);
+        return {
+          ...business,
+          stock,
+          staffing,
+          shortage: stock < 42,
+          status,
+          priceIndex: priceIndexFor(stock, business.demand, status, 0)
+        };
+      })
+    }
+  };
+}
+
+export function applyEconomyPressureToPeople(
+  people: HumanNetworkState,
+  economy: LocalEconomyState,
+  notices: EconomyNotice[]
+): HumanNetworkState {
+  if (!notices.length) return people;
+  const affected = new Map(notices.map((notice) => [notice.locationId, notice.status]));
+  return {
+    ...people,
+    people: people.people.map((person) => {
+      const status = affected.get(person.workLocationId);
+      if (!status) return person;
+      const stressDelta = status === "closed" ? 10 : status === "restricted" ? 6 : status === "strained" ? 3 : -3;
+      const severityDelta = status === "closed" ? 7 : status === "restricted" ? 4 : status === "stable" ? -3 : 1;
+      return {
+        ...person,
+        stress: clamp(person.stress + stressDelta),
+        problem: { ...person.problem, severity: clamp(person.problem.severity + severityDelta) }
+      };
+    })
+  };
+}

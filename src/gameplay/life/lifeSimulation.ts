@@ -28,6 +28,16 @@ import {
   trackPressureMetrics
 } from "../pressure/pressureSystem";
 import type { GameSession } from "../../world/state/types";
+import {
+  advanceLocalEconomy,
+  applyCourierSupplyDelivery,
+  applyEconomyPressureToPeople,
+  applyRequestToEconomy,
+  businessCanServe,
+  getBusinessAtLocation,
+  localPrice,
+  registerBusinessSale
+} from "../economy/localEconomy";
 
 function clamp(value: number): number {
   return Math.max(0, Math.min(100, value));
@@ -42,6 +52,10 @@ function createEvent(session: GameSession, timestamp: number, category: EventCat
     detail,
     importance
   };
+}
+
+function locationNameForSession(session: GameSession, locationId: string): string {
+  return session.world.locations.find((location) => location.id === locationId)?.name ?? "UNKNOWN NODE";
 }
 
 interface ProgressOptions {
@@ -69,8 +83,17 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   const pulse = advanceDistrictPulse(session.district, nextTimestamp);
   const queued = processEventQueue(session, nextTimestamp);
   const network = advanceHumanNetwork(session.people, nextTimestamp, session.world.meta.seed, session.world.locations);
-  const pressureAdvance = advancePressureState(session.pressure, nextTimestamp, session.world.meta.seed, network.state.people);
-  let peopleState = network.state;
+  const economyAdvance = advanceLocalEconomy(
+    session.economy,
+    nextTimestamp,
+    session.world.meta.seed,
+    session.world.locations,
+    network.state.people,
+    session.life.food,
+    pulse.state
+  );
+  let peopleState = applyEconomyPressureToPeople(network.state, economyAdvance.state, economyAdvance.notices);
+  const pressureAdvance = advancePressureState(session.pressure, nextTimestamp, session.world.meta.seed, peopleState.people);
   for (const notice of pressureAdvance.notices) {
     if (!notice.personId || !notice.memorySummary) continue;
     peopleState = recordPlayerAction(
@@ -117,6 +140,9 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   for (const notice of network.notices) {
     generated.push(createEvent(session, nextTimestamp, "contact", notice.title, notice.detail, notice.importance));
   }
+  for (const notice of economyAdvance.notices) {
+    generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
+  }
   for (const notice of pressureAdvance.notices) {
     generated.push(createEvent(session, nextTimestamp, notice.category, notice.title, notice.detail, notice.importance));
   }
@@ -129,11 +155,12 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     session.world.meta.seed,
     nextTimestamp,
     session.world.locations,
-    peopleState.people
+    peopleState.people,
+    economyAdvance.state.businesses
   );
   const selectedPerson = getPerson(peopleState, session.world.primaryContactId)
     ?? getPerson(peopleState, peopleState.selectedPersonId);
-  const worldEventCount = options.worldEvents ?? (queued.events.length + pulse.events.length + network.notices.length + pressureAdvance.notices.length);
+  const worldEventCount = options.worldEvents ?? (queued.events.length + pulse.events.length + network.notices.length + economyAdvance.notices.length + pressureAdvance.notices.length);
   const pressure = trackPressureMetrics(pressureAdvance.state, {
     balanceDelta: options.trackBalance === false ? 0 : options.balanceDelta,
     deliveries: options.deliveryCompleted ? 1 : 0,
@@ -156,6 +183,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
       : session.primaryContact,
     people: peopleState,
     pressure,
+    economy: economyAdvance.state,
     district: pulse.state,
     eventQueue: queued.queue,
     currentActivity: pressureAdvance.evicted
@@ -163,6 +191,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
       : options.activity ?? session.currentActivity,
     life: {
       ...session.life,
+      food: economyAdvance.food,
       currentLocationId: targetLocation?.id ?? session.life.currentLocationId
     },
     jobs: {
@@ -349,13 +378,34 @@ export function deliverCourierOrder(session: GameSession): GameSession {
     : badDelivery
       ? `${active.client} принял груз, но оставил претензию в MESHLINE.`
       : `${active.client} подтвердил получение без дополнительных требований.`;
+  const supply = applyCourierSupplyDelivery(
+    progressed.economy,
+    progressed.life.food,
+    active,
+    completion.payout,
+    completion.condition,
+    completion.lateMinutes
+  );
+  const economicEvent = active.economicPurpose === "restock"
+    ? createEvent(
+      progressed,
+      progressed.timestamp,
+      "local",
+      cleanDelivery ? "Поставка восстановила рабочий запас." : "Поставка принята с потерями.",
+      `${locationNameForSession(progressed, active.dropoffLocationId)} · запас зависит от состояния груза и срока.`,
+      cleanDelivery ? 2 : badDelivery ? 3 : 1
+    )
+    : null;
   return {
     ...progressed,
     people,
+    economy: supply.state,
+    life: { ...progressed.life, food: supply.food },
     world: { ...progressed.world, primaryContactId: active.clientId },
     primaryContact: client ? toKnownNpc(client, progressed.world.locations, progressed.timestamp) : progressed.primaryContact,
     jobs: { ...progressed.jobs, courier: completion.state },
     events: [
+      ...(economicEvent ? [economicEvent] : []),
       createEvent(progressed, progressed.timestamp, "contact", reaction, client?.problem.detail, badDelivery ? 3 : cleanDelivery ? 2 : 1),
       ...progressed.events
     ].slice(0, 100)
@@ -478,9 +528,12 @@ export function completePersonalRequest(session: GameSession, requestId: string)
       : { trust: 5, respect: 5, irritation: -2, debtToPlayer: 1, importance: 70, emotionalValue: 28 }
   );
   const contact = getPerson(people, request.personId);
+  const economyOutcome = applyRequestToEconomy(progressed.economy, progressed.life.food, request.targetLocationId, request.type);
   return {
     ...progressed,
     people,
+    economy: economyOutcome.state,
+    life: { ...progressed.life, food: economyOutcome.food },
     world: { ...progressed.world, primaryContactId: request.personId },
     primaryContact: contact ? toKnownNpc(contact, progressed.world.locations, progressed.timestamp) : progressed.primaryContact
   };
@@ -633,14 +686,16 @@ export function buyFoodAtCurrentLocation(session: GameSession, productId: string
   const location = session.world.locations.find((item) => item.id === session.life.currentLocationId);
   if (!location || !isLocationOpen(location, session.timestamp)) return session;
   const product = getFoodProduct(productId);
-  if (session.player.balance < product.price) return session;
+  const business = getBusinessAtLocation(session.economy, location.id);
+  const price = localPrice(product.price, business);
+  if (!businessCanServe(business) || session.player.balance < price) return session;
   const purchase = purchaseFood(session.life.food, session.world.meta.seed, location.id, productId, 1, session.timestamp);
   if (!purchase) return session;
   const progressed = progressLife(session, 4, {
     category: "finance",
     title: `Куплено: ${product.name}.`,
-    detail: `${location.name} · −₵ ${product.price} · срок хранения ${product.shelfLifeHours} ч.`,
-    balanceDelta: -product.price,
+    detail: `${location.name} · −₵ ${price} · индекс цены ${business?.priceIndex ?? 100}% · срок хранения ${product.shelfLifeHours} ч.`,
+    balanceDelta: -price,
     activity: `Покупки: ${location.name}`
   });
   return {
@@ -648,7 +703,8 @@ export function buyFoodAtCurrentLocation(session: GameSession, productId: string
     life: {
       ...progressed.life,
       food: purchase.state
-    }
+    },
+    economy: registerBusinessSale(progressed.economy, location.id, price)
   };
 }
 
@@ -657,16 +713,18 @@ export function orderFoodToHome(session: GameSession, productId: string): GameSe
   const market = session.world.locations.find((location) => location.type === "market");
   if (!market) return session;
   const product = getFoodProduct(productId);
-  const deliveryFee = 14;
-  const totalCost = product.price + deliveryFee;
-  if (session.player.balance < totalCost) return session;
+  const business = getBusinessAtLocation(session.economy, market.id);
+  const deliveryFee = 14 + Math.max(0, Math.round((business?.priceIndex ?? 100) / 25) - 4);
+  const productPrice = localPrice(product.price, business);
+  const totalCost = productPrice + deliveryFee;
+  if (!businessCanServe(business) || session.player.balance < totalCost) return session;
   const deliveryTimestamp = session.timestamp + 25 * 60_000;
   const purchase = purchaseFood(session.life.food, session.world.meta.seed, market.id, productId, 1, deliveryTimestamp);
   if (!purchase) return session;
   const progressed = progressLife(session, 25, {
     category: "finance",
     title: `Доставка получена: ${product.name}.`,
-    detail: `${market.name} → ${session.world.locations.find((location) => location.id === session.life.housing.locationId)?.name ?? "HOME"} · товар ₵ ${product.price} · доставка ₵ ${deliveryFee}`,
+    detail: `${market.name} → ${session.world.locations.find((location) => location.id === session.life.housing.locationId)?.name ?? "HOME"} · товар ₵ ${productPrice} · доставка ₵ ${deliveryFee}`,
     balanceDelta: -totalCost,
     stressDelta: -1,
     activity: "Заказ продуктов через городскую сеть"
@@ -676,7 +734,8 @@ export function orderFoodToHome(session: GameSession, productId: string): GameSe
     life: {
       ...progressed.life,
       food: purchase.state
-    }
+    },
+    economy: registerBusinessSale(progressed.economy, market.id, productPrice)
   };
 }
 
