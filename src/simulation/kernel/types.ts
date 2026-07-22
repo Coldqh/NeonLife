@@ -35,7 +35,7 @@ export type KernelResource =
 
 export type KernelAssetKind = "business-operation" | "housing-block" | "facility" | "district-land" | "infrastructure-node" | "infrastructure-link" | "production-facility" | "warehouse";
 export type KernelAssetStatus = "active" | "strained" | "restricted" | "offline";
-export type KernelContractKind = "employment" | "lease" | "supply" | "service" | "loan" | "utility" | "procurement" | "logistics";
+export type KernelContractKind = "employment" | "lease" | "supply" | "service" | "loan" | "utility" | "procurement" | "logistics" | "license" | "tax" | "public-service";
 export type KernelContractStatus = "active" | "suspended" | "breached" | "ended";
 export type KernelTransactionReason =
   | "wage"
@@ -62,6 +62,16 @@ export type KernelTransactionReason =
   | "black-market-delivery"
   | "organization-investment"
   | "interorganization-transfer"
+  | "tax"
+  | "license-fee"
+  | "fine"
+  | "social-transfer"
+  | "public-grant"
+  | "extortion"
+  | "bribe"
+  | "seizure"
+  | "contraband-sale"
+  | "cargo-theft"
   | "domain-reconciliation";
 
 export interface KernelResourceBalance {

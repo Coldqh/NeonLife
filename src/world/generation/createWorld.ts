@@ -12,10 +12,11 @@ import { createPressureState } from "../../gameplay/pressure/pressureSystem";
 import { createPrimaryContact } from "../../people/demoNpc";
 import { createHumanNetwork, getPerson, toKnownNpc } from "../../people/network/humanNetwork";
 import { createPopulationState } from "../../simulation/population/populationSystem";
-import { createSimulationKernel } from "../../simulation/kernel/simulationKernel";
+import { advanceSimulationKernel, createSimulationKernel } from "../../simulation/kernel/simulationKernel";
 import { createInfrastructureState } from "../../simulation/infrastructure/infrastructureSystem";
 import { createProductionState } from "../../simulation/production/productionSystem";
 import { createOrganizationEcosystem } from "../../simulation/organizations/organizationSystem";
+import { createGovernmentCrimeState } from "../../simulation/government/governmentSystem";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
 import type {
@@ -115,7 +116,6 @@ function attachLocations(
 }
 
 function createQueue(seed: string, start: number, world: WorldState): ScheduledWorldEvent[] {
-  const lower = world.districts[0];
   return [
     {
       id: createStableEntityId("scheduled", `${seed}:rent-warning`),
@@ -124,14 +124,6 @@ function createQueue(seed: string, start: number, world: WorldState): ScheduledW
       status: "queued",
       entityIds: [world.playerId],
       payload: { daysLeft: 2 }
-    },
-    {
-      id: createStableEntityId("scheduled", `${seed}:patrol-shift`),
-      dueAt: start + 49 * 60_000,
-      type: "patrol-shift",
-      status: "queued",
-      entityIds: [lower.id],
-      payload: { checkpoint: "TRANSIT NODE U-07" }
     }
   ];
 }
@@ -180,12 +172,13 @@ export function createWorldSession(seed: string): GameSession {
   const meshline = createOrganization(seed, "meshline", "MESHLINE COURIER CO-OP", "MSH/DLV", "company", 1_140_000, 46, 214);
   const transit = createOrganization(seed, "transit", "NORTHLINE TRANSIT", "NL/T", "transport", 18_200_000, 43, 4_900);
   const medical = createOrganization(seed, "medical", "CIVIC MEDICAL UNION", "CMU", "medical", 31_600_000, 57, 7_120);
+  const civic = createOrganization(seed, "civic-authority", `${cityName} CIVIC AUTHORITY`, "CIV/AUTH", "government", 46_000_000, 39, 8_200);
   const police = createOrganization(seed, "police", "DISTRICT SECURITY BUREAU", "DSB", "police", 27_900_000, 32, 6_300);
   const gang = createOrganization(seed, "cutwire", "CUTWIRE", "CW", "gang", 410_000, 19, 86);
   const habstack = createOrganization(seed, "habstack-trust", "HABSTACK PROPERTY TRUST", "HAB/TRUST", "company", 780_000, 28, 54);
   const marketCoop = createOrganization(seed, "underline-market", "UNDERLINE MARKET COOPERATIVE", "MKT/COOP", "independent", 620_000, 44, 96);
   const kitchenCollective = createOrganization(seed, "night-kitchen", "NIGHT KITCHEN COLLECTIVE", "FOOD/COL", "independent", 240_000, 38, 34);
-  const organizations = [aurelian, vectra, meshline, transit, medical, police, gang, habstack, marketCoop, kitchenCollective];
+  const organizations = [aurelian, vectra, meshline, transit, medical, civic, police, gang, habstack, marketCoop, kitchenCollective];
 
   const housing = createLocation(seed, "capsule", lower.id, "HAB-STACK 07", "HAB/U07", "housing", 31, habstack.id, 0, 24);
   const canteen = createLocation(seed, "canteen", lower.id, "NIGHT KITCHEN 14", "FOOD/U14", "food", 24, kitchenCollective.id, 18, 5);
@@ -197,7 +190,8 @@ export function createWorldSession(seed: string): GameSession {
   const tower = createLocation(seed, "tower", corporate.id, "AURELIAN CROWN TOWER", "AUR/CT-01", "office", 94, aurelian.id, 7, 22);
   const market = createLocation(seed, "market", lower.id, "UNDERLINE NIGHT MARKET", "MKT/U09", "market", 26, marketCoop.id, 16, 6);
   const courierHub = createLocation(seed, "courier-hub", lower.id, "MESHLINE DISPATCH HALL", "MSH/U11", "transport", 41, meshline.id, 0, 24);
-  const locations = [housing, canteen, transitNode, workerDorm, workshop, clinic, crownHousing, tower, market, courierHub];
+  const civicHall = createLocation(seed, "civic-hall", corporate.id, `${cityName} CIVIC ADMINISTRATION`, "CIV/T01", "government", 82, civic.id, 7, 21);
+  const locations = [housing, canteen, transitNode, workerDorm, workshop, clinic, crownHousing, tower, market, courierHub, civicHall];
   attachLocations(districts, organizations, locations);
 
   const player = createInitialPlayer(seed, lower.name, lower.code);
@@ -264,6 +258,34 @@ export function createWorldSession(seed: string): GameSession {
     districts,
     locations
   });
+  const government = createGovernmentCrimeState({
+    timestamp: INITIAL_GAME_TIMESTAMP,
+    seed,
+    cityId: city.id,
+    districts,
+    locations,
+    organizations,
+    population,
+    economy,
+    infrastructure,
+    production,
+    organizationEcosystem
+  });
+  const syncedKernel = advanceSimulationKernel(kernel, {
+    timestamp: INITIAL_GAME_TIMESTAMP,
+    seed,
+    city,
+    districts,
+    locations,
+    organizations,
+    player,
+    population,
+    economy,
+    infrastructure,
+    production,
+    organizationEcosystem,
+    government
+  });
 
   return {
     schemaVersion: SAVE_SCHEMA_VERSION,
@@ -275,10 +297,11 @@ export function createWorldSession(seed: string): GameSession {
     pressure,
     economy,
     population,
-    kernel,
+    kernel: syncedKernel,
     infrastructure,
     production,
     organizationEcosystem,
+    government,
     events: createInitialEvents({
       seed,
       districtName: lower.name,

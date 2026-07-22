@@ -5318,3 +5318,103 @@ button:disabled {
 .organization-relation--rival,
 .organization-relation--hostile { border-color: rgba(255,88,105,.28); }
 .organization-relation--partner { border-color: rgba(71,255,161,.26); }
+
+/* v0.18.0 — government and autonomous crime */
+.government-workspace {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 7px;
+  overflow: auto;
+}
+.government-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,.012);
+}
+.government-summary > div {
+  min-width: 0;
+  min-height: 58px;
+  padding: 8px;
+  display: grid;
+  gap: 3px;
+  border-right: 1px solid var(--line);
+}
+.government-summary > div:last-child { border-right: 0; }
+.government-summary span,
+.government-summary small,
+.government-list span,
+.government-list small,
+.government-cases span,
+.government-cases small { color: var(--muted-2); font: 600 6px/1.2 var(--font-mono); }
+.government-summary strong { color: var(--cyan); font: 700 11px/1.15 var(--font-mono); }
+.government-columns {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+.government-list {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: rgba(5,15,21,.9);
+}
+.government-list > header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  min-height: 38px;
+  padding: 7px 9px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(5,15,21,.98);
+}
+.government-list > header span,
+.government-list > header strong { font: 600 7px/1.2 var(--font-mono); }
+.government-list > header strong { color: var(--cyan); }
+.government-district {
+  min-height: 62px;
+  padding: 7px 9px;
+  display: grid;
+  grid-template-columns: minmax(0,1.2fr) repeat(3, minmax(80px,.8fr));
+  gap: 7px;
+  align-items: center;
+  border-bottom: 1px solid rgba(95,230,255,.08);
+}
+.government-district > div,
+.crime-network > div { min-width: 0; display: grid; gap: 3px; }
+.government-district strong,
+.crime-network strong { overflow: hidden; color: var(--text); font: 700 8px/1.2 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.crime-network {
+  min-height: 62px;
+  padding: 7px 9px;
+  display: grid;
+  grid-template-columns: minmax(0,1.2fr) minmax(100px,.9fr) minmax(100px,.9fr);
+  gap: 7px;
+  align-items: center;
+  border-bottom: 1px solid rgba(255,88,105,.12);
+}
+.crime-network strong { color: var(--red); }
+.government-cases {
+  min-height: 45px;
+  max-height: 118px;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0,1fr));
+  gap: 5px;
+}
+.government-case {
+  min-width: 0;
+  padding: 7px 8px;
+  display: grid;
+  gap: 3px;
+  border: 1px solid rgba(255,173,77,.22);
+  background: rgba(255,173,77,.025);
+}
+.government-case strong { overflow: hidden; color: var(--yellow); font: 700 8px/1.2 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.government-case--charged { border-color: rgba(255,88,105,.35); }
+.government-case--investigating { border-color: rgba(95,230,255,.25); }

@@ -6,6 +6,7 @@ import type { CityState, DistrictState, LocationState, OrganizationState } from 
 import type { InfrastructureKind, InfrastructureState } from "../infrastructure/types";
 import type { ProductionResource, ProductionState, ProductionSupplyContract } from "../production/types";
 import type { OrganizationAgreementState, OrganizationEcosystemState } from "../organizations/types";
+import type { GovernmentCrimeState } from "../government/types";
 import type {
   KernelAccountState,
   KernelAssetState,
@@ -28,7 +29,7 @@ const DAY_MS = 24 * HOUR_MS;
 const WEEK_MS = 7 * DAY_MS;
 const MAX_TRANSACTIONS = 2_000;
 
-export type KernelSystemAccount = "clearing" | "wholesale" | "maintenance" | "credit-bureau" | "housing-authority" | "city-services" | "consumption" | "power-grid" | "water-grid" | "data-grid" | "transport-grid" | "waste-grid" | "logistics-clearing" | "external-trade" | "production-consumption" | "production-output" | "unregistered-market";
+export type KernelSystemAccount = "clearing" | "wholesale" | "maintenance" | "credit-bureau" | "housing-authority" | "city-services" | "consumption" | "power-grid" | "water-grid" | "data-grid" | "transport-grid" | "waste-grid" | "logistics-clearing" | "external-trade" | "production-consumption" | "production-output" | "unregistered-market" | "illegal-consumption" | "corrupt-officials";
 
 export interface KernelSyncInput {
   timestamp: number;
@@ -43,6 +44,7 @@ export interface KernelSyncInput {
   infrastructure: InfrastructureState;
   production: ProductionState;
   organizationEcosystem?: OrganizationEcosystemState;
+  government?: GovernmentCrimeState;
   drafts?: KernelTransactionDraft[];
 }
 
@@ -171,7 +173,7 @@ function snapshotAccounts(input: KernelSyncInput): KernelAccountState[] {
       balance("housing-beds", Math.max(0, housing.capacity - housing.occupied))
     ], input.timestamp));
   }
-  for (const kind of ["clearing", "wholesale", "maintenance", "credit-bureau", "housing-authority", "city-services", "consumption", "power-grid", "water-grid", "data-grid", "transport-grid", "waste-grid", "logistics-clearing", "external-trade", "production-consumption", "production-output", "unregistered-market"] as const) {
+  for (const kind of ["clearing", "wholesale", "maintenance", "credit-bureau", "housing-authority", "city-services", "consumption", "power-grid", "water-grid", "data-grid", "transport-grid", "waste-grid", "logistics-clearing", "external-trade", "production-consumption", "production-output", "unregistered-market", "illegal-consumption", "corrupt-officials"] as const) {
     accounts.push(account(kernelSystemEntityId(input.seed, kind), "system", [], input.timestamp));
   }
   return dedupeAccounts(accounts);
@@ -501,13 +503,37 @@ function organizationAgreementContract(input: KernelSyncInput, agreement: Organi
   };
 }
 
+function governmentLicenseContracts(input: KernelSyncInput): KernelContractState[] {
+  if (!input.government) return [];
+  return input.government.licenses.map((license) => {
+    const business = input.economy.businesses.find((item) => item.id === license.businessId);
+    return {
+      id: createStableEntityId("contract", `license:${license.id}`),
+      kind: "license" as const,
+      sourceEntityId: license.businessId,
+      targetEntityId: input.government!.budget.authorityOrganizationId,
+      beneficiaryEntityId: input.city.id,
+      assetId: business ? assetId("business", business.id) : undefined,
+      locationId: business?.locationId,
+      status: license.status === "revoked" ? "ended" as const : license.status === "suspended" ? "suspended" as const : license.status === "probation" ? "breached" as const : "active" as const,
+      startedAt: license.issuedAt,
+      endedAt: license.status === "revoked" ? input.timestamp : undefined,
+      nextSettlementAt: license.nextReviewAt,
+      breachCount: license.violations,
+      terms: [{ resource: "credits" as const, amount: license.feePerWeek, unitValue: 1, intervalMinutes: 7 * 24 * 60 }],
+      metadata: { kind: license.kind, status: license.status, expiresAt: license.expiresAt }
+    };
+  });
+}
+
 function buildContracts(input: KernelSyncInput, previous: KernelContractState[]): KernelContractState[] {
   const generated = [
     ...input.population.employments.map((item) => activeEmploymentContract(input, item)).filter((item): item is KernelContractState => Boolean(item)),
     ...input.population.households.map((item) => leaseContract(input, item)).filter((item): item is KernelContractState => Boolean(item)),
     ...input.production.contracts.map((item) => productionContract(input, item)),
     ...utilityContracts(input),
-    ...(input.organizationEcosystem?.agreements ?? []).map((item) => organizationAgreementContract(input, item))
+    ...(input.organizationEcosystem?.agreements ?? []).map((item) => organizationAgreementContract(input, item)),
+    ...governmentLicenseContracts(input)
   ];
   const generatedIds = new Set(generated.map((item) => item.id));
   const ended = previous
@@ -553,7 +579,7 @@ function reconcileAccounts(
   let nextAccounts = [...accounts];
   const transactions: KernelTransactionState[] = [];
   const clearing = kernelSystemEntityId(input.seed, "clearing");
-  const protectedSystems = new Set([clearing, kernelSystemEntityId(input.seed, "wholesale"), kernelSystemEntityId(input.seed, "maintenance"), kernelSystemEntityId(input.seed, "credit-bureau"), kernelSystemEntityId(input.seed, "housing-authority"), kernelSystemEntityId(input.seed, "city-services"), kernelSystemEntityId(input.seed, "consumption"), kernelSystemEntityId(input.seed, "power-grid"), kernelSystemEntityId(input.seed, "water-grid"), kernelSystemEntityId(input.seed, "data-grid"), kernelSystemEntityId(input.seed, "transport-grid"), kernelSystemEntityId(input.seed, "waste-grid"), kernelSystemEntityId(input.seed, "logistics-clearing"), kernelSystemEntityId(input.seed, "external-trade"), kernelSystemEntityId(input.seed, "production-consumption"), kernelSystemEntityId(input.seed, "production-output"), kernelSystemEntityId(input.seed, "unregistered-market")]);
+  const protectedSystems = new Set([clearing, kernelSystemEntityId(input.seed, "wholesale"), kernelSystemEntityId(input.seed, "maintenance"), kernelSystemEntityId(input.seed, "credit-bureau"), kernelSystemEntityId(input.seed, "housing-authority"), kernelSystemEntityId(input.seed, "city-services"), kernelSystemEntityId(input.seed, "consumption"), kernelSystemEntityId(input.seed, "power-grid"), kernelSystemEntityId(input.seed, "water-grid"), kernelSystemEntityId(input.seed, "data-grid"), kernelSystemEntityId(input.seed, "transport-grid"), kernelSystemEntityId(input.seed, "waste-grid"), kernelSystemEntityId(input.seed, "logistics-clearing"), kernelSystemEntityId(input.seed, "external-trade"), kernelSystemEntityId(input.seed, "production-consumption"), kernelSystemEntityId(input.seed, "production-output"), kernelSystemEntityId(input.seed, "unregistered-market"), kernelSystemEntityId(input.seed, "illegal-consumption"), kernelSystemEntityId(input.seed, "corrupt-officials")]);
 
   for (const target of snapshot) {
     if (protectedSystems.has(target.entityId)) continue;

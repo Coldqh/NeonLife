@@ -3,7 +3,7 @@ import { getFoodProduct } from "../../data/products/foodCatalog";
 import type { HouseholdStatus } from "../../simulation/population/types";
 import type { GameSession } from "../../world/state/types";
 
-type PopulationTab = "districts" | "households" | "housing" | "labor" | "infrastructure" | "supply" | "organizations" | "flow";
+type PopulationTab = "districts" | "households" | "housing" | "labor" | "infrastructure" | "supply" | "organizations" | "government" | "flow";
 
 function statusRank(status: HouseholdStatus): number {
   if (status === "displaced") return 4;
@@ -40,7 +40,13 @@ function kernelEntityName(session: GameSession, entityId: string): string {
   if (resident) return resident.name;
   const housing = session.population.housing.find((item) => item.id === entityId);
   if (housing) return locationName(session, housing.locationId);
-  return entityId.startsWith("kernel-system") ? "CITY CLEARING" : entityId;
+  if (entityId.startsWith("kernel-system")) {
+    if (entityId.includes("corrupt-officials")) return "CORRUPT OFFICIALS";
+    if (entityId.includes("illegal-consumption")) return "UNREGISTERED DEMAND";
+    if (entityId.includes("city-courts")) return "CITY COURTS";
+    return "CITY CLEARING";
+  }
+  return entityId;
 }
 
 function transactionLabel(reason: string): string {
@@ -108,6 +114,10 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
   const organizationState = session.organizationEcosystem;
   const recentOrganizationDecisions = organizationState.decisions.slice(-14).reverse();
   const strainedOrganizations = organizationState.actors.filter((actor) => actor.health === "strained" || actor.health === "distressed").length;
+  const government = session.government;
+  const openCases = government.cases.filter((item) => item.status === "open" || item.status === "investigating" || item.status === "charged");
+  const suspendedLicenses = government.licenses.filter((item) => item.status === "suspended" || item.status === "revoked");
+  const activeOperations = government.crimeNetworks.flatMap((network) => network.operations).filter((item) => item.status !== "dormant");
 
   return (
     <div className="population-workspace">
@@ -126,6 +136,7 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
         <button type="button" className={tab === "infrastructure" ? "is-active" : ""} onClick={() => setTab("infrastructure")}>СЕТИ</button>
         <button type="button" className={tab === "supply" ? "is-active" : ""} onClick={() => setTab("supply")}>СНАБЖЕНИЕ</button>
         <button type="button" className={tab === "organizations" ? "is-active" : ""} onClick={() => setTab("organizations")}>ОРГАНИЗАЦИИ</button>
+        <button type="button" className={tab === "government" ? "is-active" : ""} onClick={() => setTab("government")}>ВЛАСТЬ</button>
         <button type="button" className={tab === "flow" ? "is-active" : ""} onClick={() => setTab("flow")}>ПОТОКИ</button>
       </nav>
 
@@ -389,6 +400,52 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
                   <small>trust {relation.trust} · rivalry {relation.rivalry} · dependency {relation.dependency}</small>
                 </article>
               ))}
+          </div>
+        </section>
+      ) : null}
+
+      {tab === "government" ? (
+        <section className="government-workspace">
+          <div className="government-summary">
+            <div><span>CIVIC TREASURY</span><strong>₵ {Math.round(government.budget.treasury).toLocaleString("ru-RU")}</strong><small>reserve target ₵ {government.budget.reserveTarget.toLocaleString("ru-RU")}</small></div>
+            <div><span>TAXES</span><strong>₵ {government.totals.taxesCollected.toLocaleString("ru-RU")}</strong><small>licenses ₵ {government.totals.licenseFeesCollected.toLocaleString("ru-RU")}</small></div>
+            <div><span>PUBLIC SPENDING</span><strong>₵ {(government.totals.socialTransfers + government.totals.publicGrants).toLocaleString("ru-RU")}</strong><small>social support and grants</small></div>
+            <div><span>LICENSES</span><strong>{government.licenses.length - suspendedLicenses.length}/{government.licenses.length}</strong><small>{suspendedLicenses.length} suspended or revoked</small></div>
+            <div><span>ENFORCEMENT</span><strong>{openCases.length} CASES</strong><small>{government.totals.arrests} arrests · {government.totals.convictions} convictions</small></div>
+            <div><span>ILLEGAL ECONOMY</span><strong>₵ {government.totals.crimeRevenue.toLocaleString("ru-RU")}</strong><small>bribes ₵ {government.totals.bribesPaid.toLocaleString("ru-RU")}</small></div>
+          </div>
+          <div className="government-columns">
+            <section className="government-list">
+              <header><span>DISTRICT LAW</span><strong>{government.policy.enforcementFocus.replace(/-/g, " ").toUpperCase()}</strong></header>
+              {government.districts.map((law) => (
+                <article className="government-district" key={law.districtId}>
+                  <div><span>DISTRICT</span><strong>{districtName(session, law.districtId)}</strong><small>public trust {Math.round(law.publicTrust)}%</small></div>
+                  <div><span>PATROL / READINESS</span><strong>{Math.round(law.patrolCoverage)}% / {Math.round(law.policeReadiness)}%</strong><small>corruption {Math.round(law.corruption)}%</small></div>
+                  <div><span>CRIME</span><strong>{Math.round((law.violentCrime + law.propertyCrime + law.cyberCrime) / 3)}%</strong><small>illegal market {Math.round(law.illegalMarketShare)}%</small></div>
+                  <div><span>CASELOAD</span><strong>{law.unresolvedCases}</strong><small>court backlog {Math.round(law.courtBacklog)}</small></div>
+                </article>
+              ))}
+            </section>
+            <section className="government-list">
+              <header><span>CRIME NETWORKS</span><strong>{activeOperations.length} ACTIVE OPERATIONS</strong></header>
+              {government.crimeNetworks.map((network) => (
+                <article className="crime-network" key={network.id}>
+                  <div><span>{network.name}</span><strong>₵ {Math.round(network.treasury).toLocaleString("ru-RU")}</strong><small>{network.memberResidentIds.length} linked residents</small></div>
+                  <div><span>HEAT / SECRECY</span><strong>{Math.round(network.heat)}% / {Math.round(network.secrecy)}%</strong><small>corruption budget ₵ {network.corruptionBudget.toLocaleString("ru-RU")}</small></div>
+                  <div><span>OPERATIONS</span><strong>{network.operations.filter((item) => item.status !== "dormant").length}</strong><small>{network.operations.map((item) => item.kind.replace(/-/g, " ")).slice(0, 2).join(" · ")}</small></div>
+                </article>
+              ))}
+            </section>
+          </div>
+          <div className="government-cases">
+            {openCases.slice().sort((left, right) => right.priority - left.priority).slice(0, 12).map((caseState) => (
+              <article className={`government-case government-case--${caseState.status}`} key={caseState.id}>
+                <span>{caseState.kind.replace(/-/g, " ").toUpperCase()}</span>
+                <strong>{districtName(session, caseState.districtId)} · EVIDENCE {Math.round(caseState.evidence)}%</strong>
+                <small>{caseState.status.toUpperCase()} · {caseState.arrests} arrests · seized ₵ {caseState.seizedCredits}</small>
+              </article>
+            ))}
+            {!openCases.length ? <div className="empty-terminal">Открытых расследований нет.</div> : null}
           </div>
         </section>
       ) : null}

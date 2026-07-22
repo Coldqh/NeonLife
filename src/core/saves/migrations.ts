@@ -17,6 +17,7 @@ import { advanceSimulationKernel, normalizeSimulationKernel } from "../../simula
 import { normalizeInfrastructureState } from "../../simulation/infrastructure/infrastructureSystem";
 import { normalizeProductionState } from "../../simulation/production/productionSystem";
 import { normalizeOrganizationEcosystem } from "../../simulation/organizations/organizationSystem";
+import { normalizeGovernmentCrimeState } from "../../simulation/government/governmentSystem";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -209,7 +210,8 @@ function ensureDistrictHousing(
 function ensureLocalOperators(
   seed: string,
   sourceOrganizations: GameSession["world"]["organizations"],
-  sourceLocations: LocationState[]
+  sourceLocations: LocationState[],
+  cityName: string
 ): { organizations: GameSession["world"]["organizations"]; locations: LocationState[] } {
   const organizations = sourceOrganizations.map((organization) => ({ ...organization, locationIds: [...organization.locationIds] }));
   const definitions: Array<{ scope: string; name: string; code: string; type: GameSession["world"]["organizations"][number]["type"]; budget: number; reputation: number; employeeCount: number; locationType: LocationState["type"]; locationName: string }> = [
@@ -232,6 +234,30 @@ function ensureLocalOperators(
       return { ...location, organizationId: id };
     });
   }
+  const civicId = createStableEntityId("org", `${seed}:civic-authority`);
+  let civic = organizations.find((entry) => entry.id === civicId || entry.type === "government");
+  if (!civic) {
+    civic = { id: civicId, name: `${cityName} CIVIC AUTHORITY`, code: "CIV/AUTH", type: "government", budget: 46_000_000, reputation: 39, employeeCount: 8_200, locationIds: [] };
+    organizations.push(civic);
+  }
+  if (!locations.some((location) => location.type === "government" && location.organizationId === civic!.id)) {
+    const office = locations.find((location) => location.type === "office") ?? locations[0];
+    if (office) {
+      locations.push({
+        id: createStableEntityId("location", `${seed}:civic-hall`),
+        districtId: office.districtId,
+        organizationId: civic.id,
+        name: `${cityName} CIVIC ADMINISTRATION`,
+        code: "CIV/T01",
+        type: "government",
+        open: true,
+        security: Math.max(72, office.security - 8),
+        openHour: 7,
+        closeHour: 21
+      });
+    }
+  }
+
   for (const organization of organizations) {
     organization.locationIds = locations.filter((location) => location.organizationId === organization.id).map((location) => location.id);
   }
@@ -317,7 +343,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
   const districts = (Array.isArray(world.districts) ? world.districts : []) as GameSession["world"]["districts"];
   const seed = String(meta?.seed ?? "NEON-LIFE-MIGRATED");
   const districtHousingLocations = ensureDistrictHousing(seed, districts, rawLocations);
-  const localOperators = ensureLocalOperators(seed, (Array.isArray(world.organizations) ? world.organizations : []) as GameSession["world"]["organizations"], districtHousingLocations);
+  const localOperators = ensureLocalOperators(seed, (Array.isArray(world.organizations) ? world.organizations : []) as GameSession["world"]["organizations"], districtHousingLocations, String((world.city as Record<string, unknown> | undefined)?.name ?? "CITY"));
   const organizations = localOperators.organizations;
   const locations = localOperators.locations;
   const housingLocation = locations.find((location) => location.type === "housing") ?? locations[0];
@@ -326,7 +352,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
   const clinicLocation = locations.find((location) => location.type === "clinic") ?? marketLocation;
   const existingLife = isObject(payload.life) ? payload.life : null;
   const migratedEvents = (Array.isArray(payload.events) ? payload.events : []).filter((event) => !isLegacyStoryEvent(event));
-  const migratedQueue = (Array.isArray(payload.eventQueue) ? payload.eventQueue : []).filter((event) => !isObject(event) || (event.type !== "vacancy-expiry" && event.type !== "grid-restoration"));
+  const migratedQueue = (Array.isArray(payload.eventQueue) ? payload.eventQueue : []).filter((event) => !isObject(event) || (event.type !== "vacancy-expiry" && event.type !== "grid-restoration" && event.type !== "patrol-shift"));
   const people = hasHumanNetwork(payload.people)
     ? payload.people
     : createHumanNetwork(seed, timestamp, locations);
@@ -402,6 +428,19 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     districts,
     locations
   });
+  const government = normalizeGovernmentCrimeState(payload.government, {
+    timestamp,
+    seed,
+    cityId: cityState.id,
+    districts,
+    locations,
+    organizations,
+    population,
+    economy,
+    infrastructure,
+    production,
+    organizationEcosystem
+  });
   const kernel = advanceSimulationKernel(baseKernel, {
     timestamp,
     seed,
@@ -414,7 +453,8 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     economy,
     infrastructure,
     production,
-    organizationEcosystem
+    organizationEcosystem,
+    government
   });
 
   const { situations: _discardedSituations, ...payloadWithoutSituations } = payload;
@@ -432,6 +472,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     infrastructure,
     production,
     organizationEcosystem,
+    government,
     currentActivity: `На месте: ${existingLocationName}`,
     world: {
       ...world,

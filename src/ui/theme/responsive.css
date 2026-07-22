@@ -1727,3 +1727,29 @@
   .organization-card { grid-template-columns: minmax(0,1fr) 70px 60px; }
   .organization-card > div:nth-child(4) { display: none; }
 }
+
+/* v0.18.0 — government mobile density */
+@media (max-width: 760px) {
+  .population-tabs { grid-template-columns: repeat(9, minmax(0, 1fr)); }
+  .government-workspace { gap: 5px; }
+  .government-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .government-summary > div { min-height: 43px; padding: 5px 6px; border-bottom: 1px solid var(--line); }
+  .government-summary strong { font-size: 9px; }
+  .government-columns { grid-template-columns: 1fr; gap: 5px; }
+  .government-list { max-height: 250px; }
+  .government-list:nth-child(2) { display: none; }
+  .government-district { min-height: 50px; padding: 5px 6px; grid-template-columns: minmax(0,1.2fr) 72px 62px 48px; gap: 4px; }
+  .government-list span,
+  .government-list small { font-size: 5px; }
+  .government-list strong { font-size: 7px; }
+  .government-cases { grid-template-columns: 1fr; max-height: 94px; }
+}
+@media (max-width: 430px) {
+  .population-tabs { grid-template-columns: repeat(9, minmax(0, 1fr)); }
+  .population-tabs button { font-size: 3.1px; padding: 0; }
+  .government-summary > div:nth-child(5),
+  .government-summary > div:nth-child(6) { display: none; }
+  .government-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .government-district { grid-template-columns: minmax(0,1fr) 70px 58px; }
+  .government-district > div:nth-child(4) { display: none; }
+}
