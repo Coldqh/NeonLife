@@ -11,6 +11,7 @@ import type { CourierState } from "../../gameplay/jobs/courier/courierSystem";
 import type { PressureState } from "../../gameplay/pressure/types";
 import type { LocalEconomyState } from "../../gameplay/economy/types";
 import type { PopulationState } from "../../simulation/population/types";
+import type { SimulationKernelState } from "../../simulation/kernel/types";
 
 export interface CityState {
   id: EntityId;
@@ -101,6 +102,7 @@ export interface GameSession {
   pressure: PressureState;
   economy: LocalEconomyState;
   population: PopulationState;
+  kernel: SimulationKernelState;
   events: WorldEvent[];
   eventQueue: ScheduledWorldEvent[];
   currentActivity: string;

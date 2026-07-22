@@ -4953,3 +4953,68 @@ button:disabled {
 .population-labor__pressure > div {
   min-height: 48px;
 }
+
+.population-flow-stack {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  gap: 8px;
+}
+
+.population-kernel {
+  border: 1px solid rgba(95, 230, 255, 0.22);
+  background: rgba(6, 14, 18, 0.88);
+  min-height: 0;
+}
+
+.population-kernel.is-warning { border-color: rgba(255, 173, 77, 0.38); }
+.population-kernel > header {
+  min-height: 44px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid rgba(95, 230, 255, 0.15);
+}
+.population-kernel > header div { display: grid; gap: 2px; }
+.population-kernel > header span,
+.population-kernel > header small,
+.population-kernel > header em { color: var(--muted-2); font: 600 7px/1.2 var(--font-mono); font-style: normal; }
+.population-kernel > header strong { color: var(--cyan); font: 700 11px/1.2 var(--font-mono); }
+.population-kernel__summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  border-bottom: 1px solid rgba(95, 230, 255, 0.12);
+}
+.population-kernel__summary > div {
+  min-width: 0;
+  padding: 8px;
+  display: grid;
+  gap: 2px;
+  border-right: 1px solid rgba(95, 230, 255, 0.1);
+}
+.population-kernel__summary > div:last-child { border-right: 0; }
+.population-kernel__summary span,
+.population-kernel__summary small { color: var(--muted-2); font: 600 6px/1.2 var(--font-mono); }
+.population-kernel__summary strong { color: var(--cyan); font: 700 13px/1.15 var(--font-mono); }
+.population-kernel__ledger > header {
+  padding: 7px 9px;
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(95, 230, 255, 0.1);
+}
+.population-kernel__ledger > header span,
+.population-kernel__ledger > header strong { color: var(--muted-2); font: 600 7px/1.2 var(--font-mono); }
+.population-kernel__ledger article {
+  min-height: 42px;
+  padding: 6px 9px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 8px;
+  border-bottom: 1px solid rgba(95, 230, 255, 0.07);
+}
+.population-kernel__ledger article > div { min-width: 0; display: grid; gap: 2px; }
+.population-kernel__ledger span,
+.population-kernel__ledger small { overflow: hidden; color: var(--muted-2); font: 600 6px/1.2 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.population-kernel__ledger strong { overflow: hidden; color: var(--text); font: 700 8px/1.2 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }

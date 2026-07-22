@@ -1645,3 +1645,11 @@
   .population-labor__summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .population-labor__pressure { display: none; }
 }
+
+@media (max-width: 760px) {
+  .population-kernel__summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .population-kernel__summary > div { min-height: 54px; border-bottom: 1px solid rgba(95, 230, 255, 0.08); }
+  .population-kernel > header { align-items: flex-start; }
+  .population-kernel > header em { white-space: nowrap; }
+  .population-kernel__ledger article { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+}

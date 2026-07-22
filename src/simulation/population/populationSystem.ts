@@ -6,6 +6,8 @@ import { FOOD_CATALOG, getFoodProduct } from "../../data/products/foodCatalog";
 import type { HumanNetworkState, PersonState } from "../../people/network/types";
 import type { DistrictState, LocationState, OrganizationState } from "../../world/state/types";
 import { advanceLaborMarketDay, createLaborMarketState } from "../labor/laborMarket";
+import { employmentContractId, kernelSystemEntityId, leaseContractId } from "../kernel/simulationKernel";
+import type { KernelTransactionDraft } from "../kernel/types";
 import type {
   BackgroundResident,
   DistrictPopulationCohort,
@@ -609,7 +611,7 @@ export function advancePopulation(
   economy: LocalEconomyState,
   foodState: FoodState
 ): PopulationAdvanceResult {
-  if (timestamp <= state.lastUpdatedAt) return { state, economy, food: foodState, notices: [], organizationBudgetDeltas: [] };
+  if (timestamp <= state.lastUpdatedAt) return { state, economy, food: foodState, notices: [], organizationBudgetDeltas: [], transactions: [] };
   const targetDay = Math.floor(timestamp / DAY_MS);
   let dayIndex = Math.max(state.dayIndex, Math.floor(state.lastUpdatedAt / DAY_MS));
   let residents = state.residents.map((resident) => ({ ...resident }));
@@ -621,6 +623,7 @@ export function advancePopulation(
   let food = foodState;
   const notices: PopulationNotice[] = [];
   const organizationBudgetDeltas: OrganizationBudgetDelta[] = [];
+  const transactions: KernelTransactionDraft[] = [];
   const totals = { ...state.totals };
   const organizationBudgets = new Map(organizations.map((organization) => [organization.id, organization.budget]));
 
@@ -658,6 +661,19 @@ export function advancePopulation(
       const unpaid = wage - paid;
       addTotals(dayTotals, { wagesPaid: paid, unpaidWages: unpaid });
       householdIncome.set(resident.householdId, (householdIncome.get(resident.householdId) ?? 0) + paid);
+      if (paid > 0) {
+        transactions.push({
+          idempotencyKey: `${seed}:day:${dayIndex}:wage:${employment.id}`,
+          timestamp: dayIndex * DAY_MS,
+          debitEntityId: employment.organizationId ?? business?.id ?? kernelSystemEntityId(seed, "clearing"),
+          creditEntityId: resident.householdId,
+          resource: "credits",
+          amount: paid,
+          reason: "wage",
+          contractId: employmentContractId(employment.id),
+          description: `${employment.title} daily wage.`
+        });
+      }
       const unpaidDays = unpaid > 0 ? employment.unpaidDays + 1 : 0;
       const lostForNonPayment = unpaidDays >= 3;
       if (lostForNonPayment) notices.push({ districtId: resident.districtId, title: `${resident.name} покинул неоплачиваемую смену.`, detail: `${employment.title} · зарплата не выплачивалась ${unpaidDays} дня.`, importance: 2 });
@@ -674,6 +690,16 @@ export function advancePopulation(
       household.spendingMode = spendingMode(household.balance, household.debt, members.length);
       const consumed = consumePantry(household.pantry, dailyFoodNeed);
       household.pantry = consumed.pantry;
+      if (consumed.consumed > 0) transactions.push({
+        idempotencyKey: `${seed}:day:${dayIndex}:food-consumed-stock:${household.id}`,
+        timestamp: dayIndex * DAY_MS,
+        debitEntityId: household.id,
+        creditEntityId: kernelSystemEntityId(seed, "consumption"),
+        resource: "food-units",
+        amount: consumed.consumed,
+        reason: "inventory-transfer",
+        description: `Household daily food consumption.`
+      });
       let unmet = dailyFoodNeed - consumed.consumed;
       let purchases: HouseholdDailyLedger["purchases"] = [];
       let foodSpent = 0;
@@ -687,6 +713,42 @@ export function advancePopulation(
         const afterPurchase = consumePantry(household.pantry, unmet);
         household.pantry = afterPurchase.pantry;
         unmet -= afterPurchase.consumed;
+        if (afterPurchase.consumed > 0) transactions.push({
+          idempotencyKey: `${seed}:day:${dayIndex}:food-consumed-purchase:${household.id}`,
+          timestamp: dayIndex * DAY_MS,
+          debitEntityId: household.id,
+          creditEntityId: kernelSystemEntityId(seed, "consumption"),
+          resource: "food-units",
+          amount: afterPurchase.consumed,
+          reason: "inventory-transfer",
+          description: `Freshly purchased food consumed by household.`
+        });
+      }
+      for (const purchase of purchases) {
+        const seller = businessForLocation(businesses, purchase.locationId);
+        const sellerId = seller?.id ?? kernelSystemEntityId(seed, "wholesale");
+        transactions.push({
+          idempotencyKey: `${seed}:day:${dayIndex}:food-credit:${household.id}:${purchase.locationId}:${purchase.productId}`,
+          timestamp: dayIndex * DAY_MS,
+          debitEntityId: household.id,
+          creditEntityId: sellerId,
+          resource: "credits",
+          amount: purchase.paid,
+          unitValue: purchase.units ? purchase.paid / purchase.units : purchase.paid,
+          reason: "food-sale",
+          description: `${purchase.productId} household purchase.`
+        });
+        transactions.push({
+          idempotencyKey: `${seed}:day:${dayIndex}:food-unit:${household.id}:${purchase.locationId}:${purchase.productId}`,
+          timestamp: dayIndex * DAY_MS,
+          debitEntityId: kernelSystemEntityId(seed, "wholesale"),
+          creditEntityId: household.id,
+          resource: "food-units",
+          amount: purchase.units,
+          unitValue: purchase.units ? purchase.paid / purchase.units : 0,
+          reason: "inventory-transfer",
+          description: `${purchase.productId} moved into household pantry.`
+        });
       }
 
       let rentPaid = 0;
@@ -697,7 +759,34 @@ export function advancePopulation(
         rentPaid = rentDue;
         household.consecutiveRentMisses = 0;
         housing = housing.map((item) => item.id === housingUnit?.id ? { ...item, rentCollectedToday: item.rentCollectedToday + rentPaid, maintenanceFund: item.maintenanceFund + Math.round(rentPaid * 0.28) } : item);
-        if (housingUnit?.ownerOrganizationId) pushBudgetDelta(organizationBudgetDeltas, housingUnit.ownerOrganizationId, Math.round(rentPaid * 0.72));
+        const ownerId = housingUnit?.ownerOrganizationId ?? kernelSystemEntityId(seed, "housing-authority");
+        const maintenanceShare = Math.round(rentPaid * 0.28);
+        const ownerShare = rentPaid - maintenanceShare;
+        if (housingUnit?.ownerOrganizationId) pushBudgetDelta(organizationBudgetDeltas, housingUnit.ownerOrganizationId, ownerShare);
+        if (ownerShare > 0) transactions.push({
+          idempotencyKey: `${seed}:day:${dayIndex}:rent-owner:${household.id}`,
+          timestamp: dayIndex * DAY_MS,
+          debitEntityId: household.id,
+          creditEntityId: ownerId,
+          resource: "credits",
+          amount: ownerShare,
+          reason: "rent",
+          contractId: leaseContractId(household.id),
+          assetId: housingUnit ? createStableEntityId("asset", `housing:${housingUnit.id}`) : undefined,
+          description: `Daily lease payment to housing owner.`
+        });
+        if (maintenanceShare > 0) transactions.push({
+          idempotencyKey: `${seed}:day:${dayIndex}:rent-maintenance:${household.id}`,
+          timestamp: dayIndex * DAY_MS,
+          debitEntityId: household.id,
+          creditEntityId: housingUnit?.id ?? kernelSystemEntityId(seed, "maintenance"),
+          resource: "credits",
+          amount: maintenanceShare,
+          reason: "rent",
+          contractId: leaseContractId(household.id),
+          assetId: housingUnit ? createStableEntityId("asset", `housing:${housingUnit.id}`) : undefined,
+          description: `Housing maintenance reserve contribution.`
+        });
       } else if (rentDue > 0) {
         household.debt += rentDue;
         household.consecutiveRentMisses += 1;
@@ -708,24 +797,67 @@ export function advancePopulation(
       const transportDue = workingMembers * 4;
       const transportSpent = Math.min(transportDue, household.balance);
       household.balance -= transportSpent;
-      businesses = settleServicePurchase(businesses, findServiceBusiness(businesses, locations, household.districtId, "logistics"), transportSpent);
+      const transportBusiness = findServiceBusiness(businesses, locations, household.districtId, "logistics");
+      businesses = settleServicePurchase(businesses, transportBusiness, transportSpent);
+      if (transportSpent > 0) transactions.push({
+        idempotencyKey: `${seed}:day:${dayIndex}:transport:${household.id}`,
+        timestamp: dayIndex * DAY_MS,
+        debitEntityId: household.id,
+        creditEntityId: transportBusiness?.id ?? kernelSystemEntityId(seed, "city-services"),
+        resource: "credits",
+        amount: transportSpent,
+        reason: "transport-service",
+        description: `Household commuting settlement.`
+      });
 
       const illMembers = members.filter((member) => member.health === "ill" || member.health === "disabled").length;
       const medicalTarget = illMembers * (household.spendingMode === "survival" ? 2 : household.spendingMode === "restricted" ? 5 : 10);
       const medicalSpent = Math.min(medicalTarget, household.balance);
       household.balance -= medicalSpent;
-      businesses = settleServicePurchase(businesses, findServiceBusiness(businesses, locations, household.districtId, "medical"), medicalSpent);
+      const medicalBusiness = findServiceBusiness(businesses, locations, household.districtId, "medical");
+      businesses = settleServicePurchase(businesses, medicalBusiness, medicalSpent);
+      if (medicalSpent > 0) transactions.push({
+        idempotencyKey: `${seed}:day:${dayIndex}:medical:${household.id}`,
+        timestamp: dayIndex * DAY_MS,
+        debitEntityId: household.id,
+        creditEntityId: medicalBusiness?.id ?? kernelSystemEntityId(seed, "city-services"),
+        resource: "credits",
+        amount: medicalSpent,
+        reason: "medical-service",
+        description: `Household medical service settlement.`
+      });
 
       const discretionaryTarget = household.spendingMode === "comfortable" ? Math.round(members.length * 8) : household.spendingMode === "standard" ? Math.round(members.length * 3) : 0;
       const discretionarySpent = Math.min(discretionaryTarget, Math.max(0, household.balance - 120));
       household.balance -= discretionarySpent;
-      businesses = settleServicePurchase(businesses, findServiceBusiness(businesses, locations, household.districtId, "food-service"), discretionarySpent);
+      const leisureBusiness = findServiceBusiness(businesses, locations, household.districtId, "food-service");
+      businesses = settleServicePurchase(businesses, leisureBusiness, discretionarySpent);
+      if (discretionarySpent > 0) transactions.push({
+        idempotencyKey: `${seed}:day:${dayIndex}:discretionary:${household.id}`,
+        timestamp: dayIndex * DAY_MS,
+        debitEntityId: household.id,
+        creditEntityId: leisureBusiness?.id ?? kernelSystemEntityId(seed, "city-services"),
+        resource: "credits",
+        amount: discretionarySpent,
+        reason: "discretionary-service",
+        description: `Household discretionary spending.`
+      });
 
       let debtPaid = 0;
       if (household.debt > 0 && household.balance > 180) {
         debtPaid = Math.min(household.debt, Math.round((household.balance - 130) * 0.32));
         household.debt -= debtPaid;
         household.balance -= debtPaid;
+        transactions.push({
+          idempotencyKey: `${seed}:day:${dayIndex}:debt:${household.id}`,
+          timestamp: dayIndex * DAY_MS,
+          debitEntityId: household.id,
+          creditEntityId: kernelSystemEntityId(seed, "credit-bureau"),
+          resource: "credits",
+          amount: debtPaid,
+          reason: "debt-repayment",
+          description: `Household debt repayment.`
+        });
       }
 
       const expenses = foodSpent + rentPaid + transportSpent + medicalSpent + discretionarySpent + debtPaid;
@@ -786,6 +918,17 @@ export function advancePopulation(
       const crowding = occupancyRate > 0.96 ? 3 : 0;
       const condition = clamp(unit.condition + Math.round(maintenanceSpend / Math.max(20, unit.capacity)) - neglect - crowding);
       addTotals(dayTotals, { maintenanceSpent: maintenanceSpend });
+      if (maintenanceSpend > 0) transactions.push({
+        idempotencyKey: `${seed}:day:${dayIndex}:maintenance:${unit.id}`,
+        timestamp: dayIndex * DAY_MS,
+        debitEntityId: unit.id,
+        creditEntityId: kernelSystemEntityId(seed, "city-services"),
+        resource: "credits",
+        amount: maintenanceSpend,
+        reason: "maintenance",
+        assetId: createStableEntityId("asset", `housing:${unit.id}`),
+        description: `Housing maintenance expenditure.`
+      });
       return { ...unit, occupied: occupiedBeds, condition, maintenanceFund: Math.max(0, unit.maintenanceFund - maintenanceSpend), status: housingStatus(condition), lastUpdatedAt: timestamp };
     });
 
@@ -813,7 +956,7 @@ export function advancePopulation(
 
   const nextState: PopulationState = { ...state, residents, households, employments, housing, laborMarket, totals, lastUpdatedAt: timestamp, dayIndex, simulatedDays: state.simulatedDays + Math.max(0, targetDay - state.dayIndex), cohorts: [] };
   nextState.cohorts = recomputeCohorts(nextState, districts);
-  return { state: nextState, economy: { ...economy, businesses }, food, notices: notices.slice(0, 10), organizationBudgetDeltas };
+  return { state: nextState, economy: { ...economy, businesses }, food, notices: notices.slice(0, 10), organizationBudgetDeltas, transactions };
 }
 
 export function synchronizeActivePeopleFromPopulation(network: HumanNetworkState, population: PopulationState): HumanNetworkState {

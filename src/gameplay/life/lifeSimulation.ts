@@ -5,6 +5,7 @@ import { advanceGameTime } from "../../core/time/gameTime";
 import { getFoodProduct } from "../../data/products/foodCatalog";
 import { advanceHumanNetwork, getPerson, recordPlayerAction, toKnownNpc } from "../../people/network/humanNetwork";
 import { advancePopulation, synchronizeActivePeopleFromPopulation } from "../../simulation/population/populationSystem";
+import { advanceSimulationKernel, kernelSystemEntityId } from "../../simulation/kernel/simulationKernel";
 import { canPrepare, consumeFood, discardSpoiledFood, purchaseFood } from "../food/foodSystem";
 import { calculateSleepRecovery, getHousingDaysLeft } from "../housing/housingSystem";
 import { getTravelOptions, isLocationOpen } from "../travel/travelSystem";
@@ -184,6 +185,49 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     relationChanges: options.relationChanges,
     worldEvents: worldEventCount
   });
+  const nextOrganizations = session.world.organizations.map((organization) => {
+    const budgetChange = populationAdvance.organizationBudgetDeltas.find((item) => item.organizationId === organization.id)?.delta ?? 0;
+    return budgetChange ? { ...organization, budget: Math.max(0, organization.budget + budgetChange) } : organization;
+  });
+  const nextPlayer = {
+    ...session.player,
+    balance: Math.max(0, session.player.balance + (options.balanceDelta ?? 0)),
+    housingDaysLeft,
+    district: targetDistrict?.name ?? session.player.district,
+    sector: targetDistrict?.code ?? session.player.sector,
+    condition: {
+      health: clamp(session.player.condition.health + (options.healthDelta ?? 0)),
+      fatigue: clamp(session.player.condition.fatigue + baselineFatigue + (options.fatigueDelta ?? 0)),
+      stress: clamp(session.player.condition.stress + (options.stressDelta ?? 0)),
+      hunger: clamp(session.player.condition.hunger + baselineHunger + (options.hungerDelta ?? 0))
+    }
+  };
+  const kernelDrafts = [...populationAdvance.transactions];
+  if ((options.balanceDelta ?? 0) !== 0) {
+    const amount = Math.abs(options.balanceDelta ?? 0);
+    kernelDrafts.push({
+      idempotencyKey: `${session.world.meta.seed}:player:${nextTimestamp}:${options.title ?? options.activity ?? "action"}:${options.balanceDelta}`,
+      timestamp: nextTimestamp,
+      debitEntityId: (options.balanceDelta ?? 0) < 0 ? session.player.id : kernelSystemEntityId(session.world.meta.seed, "clearing"),
+      creditEntityId: (options.balanceDelta ?? 0) < 0 ? kernelSystemEntityId(session.world.meta.seed, "clearing") : session.player.id,
+      resource: "credits",
+      amount,
+      reason: "player-action",
+      description: options.title ?? options.activity ?? "Player balance action."
+    });
+  }
+  const kernel = advanceSimulationKernel(session.kernel, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    city: session.world.city,
+    districts: session.world.districts,
+    locations: session.world.locations,
+    organizations: nextOrganizations,
+    player: nextPlayer,
+    population: populationAdvance.state,
+    economy: economyAdvance.state,
+    drafts: kernelDrafts
+  });
 
   return {
     ...session,
@@ -191,10 +235,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     world: {
       ...session.world,
       meta: { ...session.world.meta, currentTimestamp: nextTimestamp },
-      organizations: session.world.organizations.map((organization) => {
-        const budgetChange = populationAdvance.organizationBudgetDeltas.find((item) => item.organizationId === organization.id)?.delta ?? 0;
-        return budgetChange ? { ...organization, budget: Math.max(0, organization.budget + budgetChange) } : organization;
-      }),
+      organizations: nextOrganizations,
       activeDistrictId: targetDistrict?.id ?? session.world.activeDistrictId,
       primaryContactId: selectedPerson?.id ?? session.world.primaryContactId
     },
@@ -205,6 +246,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     pressure,
     economy: economyAdvance.state,
     population: populationAdvance.state,
+    kernel,
     district: pulse.state,
     eventQueue: queued.queue,
     currentActivity: pressureAdvance.evicted
@@ -219,19 +261,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
       ...session.jobs,
       courier: courierState
     },
-    player: {
-      ...session.player,
-      balance: Math.max(0, session.player.balance + (options.balanceDelta ?? 0)),
-      housingDaysLeft,
-      district: targetDistrict?.name ?? session.player.district,
-      sector: targetDistrict?.code ?? session.player.sector,
-      condition: {
-        health: clamp(session.player.condition.health + (options.healthDelta ?? 0)),
-        fatigue: clamp(session.player.condition.fatigue + baselineFatigue + (options.fatigueDelta ?? 0)),
-        stress: clamp(session.player.condition.stress + (options.stressDelta ?? 0)),
-        hunger: clamp(session.player.condition.hunger + baselineHunger + (options.hungerDelta ?? 0))
-      }
-    },
+    player: nextPlayer,
     events: [...generated, ...queued.events.reverse(), ...pulse.events.reverse(), ...session.events].slice(0, 100)
   };
 }

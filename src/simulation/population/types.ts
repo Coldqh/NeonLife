@@ -2,6 +2,7 @@ import type { EntityId } from "../../core/ids/entityId";
 import type { FoodState } from "../../gameplay/food/foodSystem";
 import type { LocalEconomyState } from "../../gameplay/economy/types";
 import type { CareerPreference, JobSearchStatus, LaborMarketState, ResidentSkillProfile, SkillDomain } from "../labor/types";
+import type { KernelTransactionDraft } from "../kernel/types";
 
 export type HouseholdKind = "single" | "couple" | "family" | "shared" | "dormitory" | "temporary" | "unhoused";
 export type HouseholdStatus = "stable" | "strained" | "arrears" | "displaced";
@@ -181,4 +182,5 @@ export interface PopulationAdvanceResult {
   food: FoodState;
   notices: PopulationNotice[];
   organizationBudgetDeltas: OrganizationBudgetDelta[];
+  transactions: KernelTransactionDraft[];
 }

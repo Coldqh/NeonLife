@@ -13,6 +13,7 @@ import type { LocalEconomyState } from "../../gameplay/economy/types";
 import { createPopulationState } from "../../simulation/population/populationSystem";
 import type { PopulationState } from "../../simulation/population/types";
 import { normalizeLaborMarketState } from "../../simulation/labor/laborMarket";
+import { normalizeSimulationKernel } from "../../simulation/kernel/simulationKernel";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -329,6 +330,19 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
   const pressure = hasPressureState(payload.pressure)
     ? payload.pressure
     : createPressureState(seed, timestamp, housingState, people.people, locations);
+  const playerState = payload.player as unknown as GameSession["player"];
+  const cityState = world.city as unknown as GameSession["world"]["city"];
+  const kernel = normalizeSimulationKernel(payload.kernel, {
+    timestamp,
+    seed,
+    city: cityState,
+    districts,
+    locations,
+    organizations,
+    player: playerState,
+    population,
+    economy
+  });
 
   const { situations: _discardedSituations, ...payloadWithoutSituations } = payload;
   const migratedPayload = {
@@ -341,6 +355,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     pressure,
     economy,
     population,
+    kernel,
     currentActivity: `На месте: ${existingLocationName}`,
     world: {
       ...world,

@@ -26,6 +26,25 @@ function residentName(session: GameSession, residentId: string): string {
   return session.population.residents.find((resident) => resident.id === residentId)?.name ?? "UNKNOWN RESIDENT";
 }
 
+function kernelEntityName(session: GameSession, entityId: string): string {
+  if (entityId === session.player.id) return session.player.name;
+  const organization = session.world.organizations.find((item) => item.id === entityId);
+  if (organization) return organization.name;
+  const business = session.economy.businesses.find((item) => item.id === entityId);
+  if (business) return locationName(session, business.locationId);
+  const household = session.population.households.find((item) => item.id === entityId);
+  if (household) return `${household.kind.toUpperCase()} HOUSEHOLD`;
+  const resident = session.population.residents.find((item) => item.id === entityId);
+  if (resident) return resident.name;
+  const housing = session.population.housing.find((item) => item.id === entityId);
+  if (housing) return locationName(session, housing.locationId);
+  return entityId.startsWith("kernel-system") ? "CITY CLEARING" : entityId;
+}
+
+function transactionLabel(reason: string): string {
+  return reason.replace(/-/g, " ").toUpperCase();
+}
+
 function skillLabel(skill: string): string {
   const labels: Record<string, string> = {
     logistics: "LOGISTICS",
@@ -66,6 +85,9 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
   const recentSnapshot = labor.history[labor.history.length - 1];
   const activeLinks = state.residents.filter((resident) => resident.activePersonId).length;
   const availableBeds = state.housing.reduce((sum, housing) => sum + Math.max(0, housing.capacity - housing.occupied), 0);
+  const kernel = session.kernel;
+  const activeContracts = kernel.contracts.filter((contract) => contract.status === "active" || contract.status === "breached").length;
+  const recentKernelTransactions = kernel.transactions.slice(-8).reverse();
 
   return (
     <div className="population-workspace">
@@ -193,13 +215,39 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
       ) : null}
 
       {tab === "flow" ? (
-        <section className="population-flow">
-          <div><span>WAGES PAID</span><strong>₵ {state.totals.wagesPaid.toLocaleString("ru-RU")}</strong><small>unpaid ₵ {state.totals.unpaidWages.toLocaleString("ru-RU")}</small></div>
-          <div><span>RENT</span><strong>₵ {state.totals.rentPaid.toLocaleString("ru-RU")}</strong><small>maintenance ₵ {state.totals.maintenanceSpent.toLocaleString("ru-RU")}</small></div>
-          <div><span>FOOD SALES</span><strong>₵ {state.totals.foodSales.toLocaleString("ru-RU")}</strong><small>concrete products removed from shops</small></div>
-          <div><span>SERVICES</span><strong>₵ {(state.totals.medicalSales + state.totals.transportSales + state.totals.discretionarySales).toLocaleString("ru-RU")}</strong><small>medical, transit and leisure</small></div>
-          <div><span>DEBT REPAID</span><strong>₵ {state.totals.debtRepaid.toLocaleString("ru-RU")}</strong><small>{state.simulatedDays} settled days</small></div>
-          <div><span>MOVES</span><strong>{state.totals.moves}</strong><small>between physical housing nodes</small></div>
+        <section className="population-flow-stack">
+          <div className="population-flow">
+            <div><span>WAGES PAID</span><strong>₵ {state.totals.wagesPaid.toLocaleString("ru-RU")}</strong><small>unpaid ₵ {state.totals.unpaidWages.toLocaleString("ru-RU")}</small></div>
+            <div><span>RENT</span><strong>₵ {state.totals.rentPaid.toLocaleString("ru-RU")}</strong><small>maintenance ₵ {state.totals.maintenanceSpent.toLocaleString("ru-RU")}</small></div>
+            <div><span>FOOD SALES</span><strong>₵ {state.totals.foodSales.toLocaleString("ru-RU")}</strong><small>concrete products removed from shops</small></div>
+            <div><span>SERVICES</span><strong>₵ {(state.totals.medicalSales + state.totals.transportSales + state.totals.discretionarySales).toLocaleString("ru-RU")}</strong><small>medical, transit and leisure</small></div>
+            <div><span>DEBT REPAID</span><strong>₵ {state.totals.debtRepaid.toLocaleString("ru-RU")}</strong><small>{state.simulatedDays} settled days</small></div>
+            <div><span>MOVES</span><strong>{state.totals.moves}</strong><small>between physical housing nodes</small></div>
+          </div>
+          <section className={`population-kernel ${kernel.integrity.healthy ? "is-healthy" : "is-warning"}`}>
+            <header>
+              <div><span>SIMULATION KERNEL 2.0</span><strong>{kernel.integrity.healthy ? "LEDGER CONSISTENT" : "STRUCTURAL WARNING"}</strong><small>Ownership, contracts and resource transfers share one registry.</small></div>
+              <em>DAY {kernel.clock.dayIndex} · WEEK {kernel.clock.weekIndex}</em>
+            </header>
+            <div className="population-kernel__summary">
+              <div><span>ASSETS</span><strong>{kernel.assets.length}</strong><small>{kernel.ownership.length} ownership records</small></div>
+              <div><span>CONTRACTS</span><strong>{activeContracts}</strong><small>{kernel.contracts.filter((item) => item.status === "breached").length} breached</small></div>
+              <div><span>LEDGER</span><strong>{kernel.totals.transactions}</strong><small>₵ {Math.round(kernel.totals.creditsTransferred).toLocaleString("ru-RU")} moved</small></div>
+              <div><span>PHYSICAL FLOW</span><strong>{Math.round(kernel.totals.physicalUnitsTransferred).toLocaleString("ru-RU")}</strong><small>tracked resource units</small></div>
+              <div><span>RECONCILIATION</span><strong>{kernel.integrity.reconciliationTransactions}</strong><small>₵ {Math.round(kernel.integrity.reconciliationCreditVolume).toLocaleString("ru-RU")} current tick</small></div>
+              <div><span>INTEGRITY</span><strong>{kernel.integrity.warnings.length}</strong><small>warnings</small></div>
+            </div>
+            <div className="population-kernel__ledger">
+              <header><span>RECENT TRANSFERS</span><strong>ENTITY → ENTITY</strong></header>
+              {recentKernelTransactions.map((transaction) => (
+                <article key={transaction.id}>
+                  <div><span>{transactionLabel(transaction.reason)}</span><strong>{kernelEntityName(session, transaction.debitEntityId)}</strong><small>→ {kernelEntityName(session, transaction.creditEntityId)}</small></div>
+                  <div><span>{transaction.resource.toUpperCase()}</span><strong>{transaction.resource === "credits" ? "₵ " : ""}{transaction.amount.toLocaleString("ru-RU")}</strong><small>{transaction.description ?? "settled by kernel"}</small></div>
+                </article>
+              ))}
+              {!recentKernelTransactions.length ? <div className="empty-terminal">Транзакции появятся после первого суточного расчёта.</div> : null}
+            </div>
+          </section>
         </section>
       ) : null}
     </div>

@@ -12,6 +12,7 @@ import { createPressureState } from "../../gameplay/pressure/pressureSystem";
 import { createPrimaryContact } from "../../people/demoNpc";
 import { createHumanNetwork, getPerson, toKnownNpc } from "../../people/network/humanNetwork";
 import { createPopulationState } from "../../simulation/population/populationSystem";
+import { createSimulationKernel } from "../../simulation/kernel/simulationKernel";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
 import type {
@@ -237,6 +238,17 @@ export function createWorldSession(seed: string): GameSession {
     playerId: player.id,
     primaryContactId: primaryContact.id
   };
+  const kernel = createSimulationKernel({
+    timestamp: INITIAL_GAME_TIMESTAMP,
+    seed,
+    city,
+    districts,
+    locations,
+    organizations,
+    player,
+    population,
+    economy
+  });
 
   return {
     schemaVersion: SAVE_SCHEMA_VERSION,
@@ -248,6 +260,7 @@ export function createWorldSession(seed: string): GameSession {
     pressure,
     economy,
     population,
+    kernel,
     events: createInitialEvents({
       seed,
       districtName: lower.name,

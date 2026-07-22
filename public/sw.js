@@ -1,4 +1,4 @@
-const VERSION = "0.13.0";
+const VERSION = "0.14.0";
 const CACHE = `neon-life-v${VERSION}`;
 const CORE = ["./", "./index.html", "./manifest.webmanifest", "./version.json", "./icons/icon-192.png", "./icons/icon-512.png"];
 
