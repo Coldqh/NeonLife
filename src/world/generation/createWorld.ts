@@ -11,6 +11,7 @@ import { createLocalEconomy } from "../../gameplay/economy/localEconomy";
 import { createPressureState } from "../../gameplay/pressure/pressureSystem";
 import { createPrimaryContact } from "../../people/demoNpc";
 import { createHumanNetwork, getPerson, toKnownNpc } from "../../people/network/humanNetwork";
+import { createPopulationState } from "../../simulation/population/populationSystem";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
 import type {
@@ -190,12 +191,14 @@ export function createWorldSession(seed: string): GameSession {
   const housing = createLocation(seed, "capsule", lower.id, "HAB-STACK 07", "HAB/U07", "housing", 31, undefined, 0, 24);
   const canteen = createLocation(seed, "canteen", lower.id, "NIGHT KITCHEN 14", "FOOD/U14", "food", 24, undefined, 18, 5);
   const transitNode = createLocation(seed, "transit-node", lower.id, "TRANSIT NODE U-07", "MOVE/U07", "transport", 46, transit.id, 0, 24);
+  const workerDorm = createLocation(seed, "worker-dorm", industrial.id, "WORKER DORM 12", "HAB/R12", "housing", 47, vectra.id, 0, 24);
   const workshop = createLocation(seed, "workshop", industrial.id, "VECTRA SERVICE NODE", "VEC/SN-12", "workshop", 58, vectra.id, 6, 2);
   const clinic = createLocation(seed, "clinic", lower.id, "CMU WALK-IN CLINIC", "CMU/U03", "clinic", 52, medical.id, 0, 24);
+  const crownHousing = createLocation(seed, "crown-housing", corporate.id, "CROWN RESIDENCES 03", "HAB/T03", "housing", 88, aurelian.id, 0, 24);
   const tower = createLocation(seed, "tower", corporate.id, "AURELIAN CROWN TOWER", "AUR/CT-01", "office", 94, aurelian.id, 7, 22);
   const market = createLocation(seed, "market", lower.id, "UNDERLINE NIGHT MARKET", "MKT/U09", "market", 26, undefined, 16, 6);
   const courierHub = createLocation(seed, "courier-hub", lower.id, "MESHLINE DISPATCH HALL", "MSH/U11", "transport", 41, meshline.id, 0, 24);
-  const locations = [housing, canteen, transitNode, workshop, clinic, tower, market, courierHub];
+  const locations = [housing, canteen, transitNode, workerDorm, workshop, clinic, crownHousing, tower, market, courierHub];
   attachLocations(districts, organizations, locations);
 
   const player = createInitialPlayer(seed, lower.name, lower.code);
@@ -220,7 +223,8 @@ export function createWorldSession(seed: string): GameSession {
   const housingState = createInitialHousing(housing.id, INITIAL_GAME_TIMESTAMP);
   const foodState = createInitialFoodState(seed, INITIAL_GAME_TIMESTAMP, market.id, canteen.id, clinic.id);
   const districtPulse = createInitialDistrictPulse(INITIAL_GAME_TIMESTAMP, seed);
-  const economy = createLocalEconomy(seed, INITIAL_GAME_TIMESTAMP, locations, people.people, foodState, districtPulse);
+  const population = createPopulationState(seed, INITIAL_GAME_TIMESTAMP, districts, locations, organizations, people.people);
+  const economy = createLocalEconomy(seed, INITIAL_GAME_TIMESTAMP, locations, people.people, population, foodState, districtPulse);
   const pressure = createPressureState(seed, INITIAL_GAME_TIMESTAMP, housingState, people.people, locations);
 
   const world: WorldState = {
@@ -243,6 +247,7 @@ export function createWorldSession(seed: string): GameSession {
     people,
     pressure,
     economy,
+    population,
     events: createInitialEvents({
       seed,
       districtName: lower.name,

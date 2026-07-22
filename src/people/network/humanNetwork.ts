@@ -45,8 +45,9 @@ function clamp(value: number): number {
   return Math.max(0, Math.min(100, value));
 }
 
-function findLocation(locations: LocationState[], type: LocationState["type"], fallback: LocationState): LocationState {
-  return locations.find((location) => location.type === type) ?? fallback;
+function findLocation(locations: LocationState[], type: LocationState["type"], fallback: LocationState, rng: SeededRandom): LocationState {
+  const matches = locations.filter((location) => location.type === type);
+  return matches.length ? rng.pick(matches) : fallback;
 }
 
 function problemFor(type: PersonProblemType, severity: number): PersonProblem {
@@ -107,8 +108,8 @@ export function createHumanNetwork(seed: string, timestamp: number, locations: L
     let name = `${rng.pick(FIRST_NAMES)} ${rng.pick(LAST_NAMES)}`;
     while (usedNames.has(name)) name = `${rng.pick(FIRST_NAMES)} ${rng.pick(LAST_NAMES)}`;
     usedNames.add(name);
-    const home = findLocation(locations, template.homeType, fallback);
-    const work = findLocation(locations, template.workType, fallback);
+    const home = findLocation(locations, template.homeType, fallback, rng);
+    const work = findLocation(locations, template.workType, fallback, rng);
     const id = createStableEntityId("person", `${seed}:network:${index}:${name}`);
     const shift = ["dispatcher", "vendor", "cook", "courier", "independent"].includes(template.role) ? "night" : "day";
     const schedule = scheduleFor(home.id, work.id, shift);

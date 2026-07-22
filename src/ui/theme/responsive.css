@@ -1524,3 +1524,92 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
+
+/* v0.12.0 — population view mobile density */
+@media (max-width: 760px) {
+  .population-workspace {
+    flex: 1 1 auto;
+    min-height: 0;
+    gap: 5px;
+    overflow: auto;
+  }
+
+  .population-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .population-summary > div {
+    min-height: 44px;
+    padding: 6px 7px;
+  }
+
+  .population-summary strong { font-size: 12px; }
+  .population-summary small { font-size: 6px; }
+
+  .population-districts {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+
+  .population-district > header {
+    min-height: 46px;
+    padding: 6px 8px;
+  }
+
+  .population-district > header strong { font-size: 9px; }
+  .population-district__metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .population-district__metrics > div { padding: 5px; }
+  .population-district__metrics span { font-size: 5px; }
+  .population-district__metrics strong { font-size: 8px; }
+  .population-district > footer { display: none; }
+
+  .population-households > header {
+    padding: 6px 8px;
+  }
+  .population-households > header > small { display: none; }
+
+  .population-household-list { max-height: none; }
+  .population-household {
+    min-height: 51px;
+    padding: 6px 7px;
+    grid-template-columns: minmax(0, 1.5fr) 64px 68px 52px;
+    gap: 5px;
+  }
+  .population-household span,
+  .population-household small,
+  .population-household em { font-size: 5px; }
+  .population-household strong { font-size: 7px; }
+}
+
+@media (max-width: 430px) {
+  .population-summary > div:nth-child(4) { display: none; }
+  .population-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .population-household {
+    grid-template-columns: minmax(0, 1fr) 58px 50px;
+  }
+  .population-household > div:nth-child(3) { display: none; }
+}
+
+/* v0.12.0 — household economy mobile */
+@media (max-width: 760px) {
+  .population-tabs button { min-height: 29px; font-size: 6px; }
+  .population-housing-list { grid-template-columns: 1fr; gap: 5px; }
+  .population-housing > header { padding: 6px 7px; }
+  .population-housing > div { padding: 5px; }
+  .population-housing span,
+  .population-housing small { font-size: 5px; }
+  .population-housing strong { font-size: 7px; }
+  .population-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .population-flow > div { min-height: 60px; padding: 8px; }
+  .population-flow strong { font-size: 11px; }
+}
+
+@media (max-width: 430px) {
+  .population-tabs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .population-tabs button { padding: 0 3px; font-size: 5px; }
+  .population-housing { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .population-housing > div:nth-of-type(3),
+  .population-housing > div:nth-of-type(4) { display: none; }
+}

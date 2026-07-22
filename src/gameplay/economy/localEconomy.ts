@@ -5,6 +5,8 @@ import type { DistrictPulseState } from "../../world/city/districtPulse";
 import type { LocationState } from "../../world/state/types";
 import type { HumanNetworkState, PersonState } from "../../people/network/types";
 import type { CourierOrder } from "../jobs/courier/courierSystem";
+import type { PopulationState } from "../../simulation/population/types";
+import { getPopulationWorkerAvailability } from "../../simulation/population/populationSystem";
 import type { BusinessKind, BusinessState, BusinessStatus, EconomyNotice, LocalEconomyState, SupplyClass } from "./types";
 
 const CYCLE_MS = 6 * 60 * 60_000;
@@ -48,12 +50,17 @@ function workersAt(people: PersonState[], locationId: string): PersonState[] {
   return people.filter((person) => person.workLocationId === locationId);
 }
 
-function staffingFor(people: PersonState[], locationId: string, fallback: number): number {
-  const workers = workersAt(people, locationId);
-  if (!workers.length) return fallback;
-  const strain = workers.reduce((total, person) => total + person.fatigue * 0.55 + person.stress * 0.45, 0) / workers.length;
-  const attendance = Math.min(18, workers.length * 6);
-  return clamp(Math.round(100 - strain + attendance), 12, 100);
+function staffingFor(people: PersonState[], population: PopulationState, locationId: string, fallback: number): number {
+  const knownWorkers = workersAt(people, locationId);
+  const background = getPopulationWorkerAvailability(population, locationId);
+  if (!knownWorkers.length && !background.total) return fallback;
+  const knownStrain = knownWorkers.length
+    ? knownWorkers.reduce((total, person) => total + person.fatigue * 0.55 + person.stress * 0.45, 0) / knownWorkers.length
+    : 38;
+  const attendanceRate = background.total ? background.active / background.total : 0.72;
+  const illnessPenalty = background.total ? background.ill / background.total * 28 : 0;
+  const scaleBonus = Math.min(16, Math.log2(Math.max(1, background.total)) * 3.5);
+  return clamp(Math.round(42 + attendanceRate * 42 + scaleBonus - knownStrain * 0.32 - illnessPenalty), 8, 100);
 }
 
 function statusFor(stock: number, staffing: number, cash: number): BusinessStatus {
@@ -71,9 +78,9 @@ function priceIndexFor(stock: number, demand: number, status: BusinessStatus, tr
 }
 
 function capacityFor(kind: BusinessKind): number {
-  if (kind === "retail") return 70;
-  if (kind === "food-service") return 34;
-  if (kind === "medical") return 18;
+  if (kind === "retail") return 1_500;
+  if (kind === "food-service") return 650;
+  if (kind === "medical") return 220;
   return 100;
 }
 
@@ -107,7 +114,7 @@ function restockFoodStock(food: FoodState, locationId: string, units: number): F
   const keys = Object.keys(current);
   if (!keys.length) return food;
   const each = Math.max(1, Math.floor(units / keys.length));
-  const next = Object.fromEntries(keys.map((key) => [key, Math.min(30, current[key] + each)]));
+  const next = Object.fromEntries(keys.map((key) => [key, current[key] + each]));
   return { ...food, shopStocks: { ...food.shopStocks, [locationId]: next } };
 }
 
@@ -130,6 +137,7 @@ export function createLocalEconomy(
   timestamp: number,
   locations: LocationState[],
   people: PersonState[],
+  population: PopulationState,
   food: FoodState,
   pulse: DistrictPulseState
 ): LocalEconomyState {
@@ -141,7 +149,7 @@ export function createLocalEconomy(
     const stock = foodUnits === null
       ? initialStock(kind, rng)
       : clamp(Math.round(foodUnits / capacityFor(kind) * 100), 8, 100);
-    const staffing = staffingFor(people, location.id, rng.integer(48, 82));
+    const staffing = staffingFor(people, population, location.id, rng.integer(48, 82));
     const demand = clamp(rng.integer(38, 72) + Math.round(pulse.marketActivity / 8));
     const cash = initialCash(kind, rng);
     const status = statusFor(stock, staffing, cash);
@@ -158,6 +166,16 @@ export function createLocalEconomy(
       priceIndex: priceIndexFor(stock, demand, status, pulse.transitDelayMinutes),
       status,
       shortage: stock < 42,
+      capacityLevel: 1,
+      targetStaff: Math.max(3, Math.round(staffing / 12)),
+      revenueToday: 0,
+      operatingCostsToday: 0,
+      payrollToday: 0,
+      supplierCostsToday: 0,
+      rollingProfit: 0,
+      profitableDays: 0,
+      lossDays: 0,
+      lastSettlementDay: Math.floor(timestamp / (24 * 60 * 60_000)),
       lastStatusChangeAt: timestamp,
       lastUpdatedAt: timestamp
     }];
@@ -177,6 +195,7 @@ export function advanceLocalEconomy(
   seed: string,
   locations: LocationState[],
   people: PersonState[],
+  population: PopulationState,
   foodState: FoodState,
   pulse: DistrictPulseState
 ): EconomyAdvanceResult {
@@ -193,7 +212,7 @@ export function advanceLocalEconomy(
       const location = locations.find((item) => item.id === business.locationId);
       if (!location) return business;
       const rng = new SeededRandom(`${seed}:economy:${cycle}:${business.id}`);
-      const staffing = staffingFor(people, business.locationId, business.staffing);
+      const staffing = staffingFor(people, population, business.locationId, business.staffing);
       const demand = clamp(Math.round(
         business.demand * 0.55
         + pulse.marketActivity * 0.28
@@ -206,13 +225,17 @@ export function advanceLocalEconomy(
       let stock = actualFoodStock === null
         ? clamp(business.stock - consumption + rng.integer(-2, 2))
         : clamp(Math.round(actualFoodStock / capacityFor(business.kind) * 100));
-      let cash = Math.max(-500, business.cash + Math.round(demand * business.priceIndex / 42) - Math.max(12, workersAt(people, business.locationId).length * 17));
+      const passiveRevenue = Math.round(demand * business.priceIndex / 58);
+      const operatingCost = Math.max(8, Math.round(10 + business.capacityLevel * 4 + pulse.transitDelayMinutes * 0.35));
+      let cash = Math.max(-500, business.cash + passiveRevenue - operatingCost);
       const canRestock = stock < 48 && cash > 420 && pulse.transitDelayMinutes < 18;
       const restockSucceeded = canRestock && rng.chance(0.62 - Math.min(0.3, pulse.transitDelayMinutes / 60));
+      let restockCost = 0;
       if (restockSucceeded) {
-        const restock = rng.integer(14, 28);
+        const restock = rng.integer(80, 160);
         stock = clamp(stock + restock);
-        cash -= restock * 7;
+        restockCost = restock * 2;
+        cash -= restockCost;
         food = restockFoodStock(food, business.locationId, restock);
       }
       const status = statusFor(stock, staffing, cash);
@@ -236,6 +259,9 @@ export function advanceLocalEconomy(
         priceIndex,
         status,
         shortage: stock < 42,
+        revenueToday: business.revenueToday + passiveRevenue,
+        operatingCostsToday: business.operatingCostsToday + operatingCost,
+        supplierCostsToday: business.supplierCostsToday + restockCost,
         lastStatusChangeAt: status === business.status ? business.lastStatusChangeAt : timestamp,
         lastUpdatedAt: timestamp
       };
@@ -266,7 +292,7 @@ export function registerBusinessSale(state: LocalEconomyState, locationId: strin
   return {
     ...state,
     businesses: state.businesses.map((business) => business.locationId === locationId
-      ? { ...business, cash: business.cash + revenue, demand: clamp(business.demand + 2), stock: clamp(business.stock - 1) }
+      ? { ...business, cash: business.cash + revenue, revenueToday: business.revenueToday + revenue, demand: clamp(business.demand + 2), stock: clamp(business.stock - 1) }
       : business)
   };
 }
@@ -301,6 +327,7 @@ export function applyCourierSupplyDelivery(
           ...business,
           cash,
           stock,
+          supplierCostsToday: business.supplierCostsToday + payout,
           shortage: stock < 42,
           status,
           priceIndex: priceIndexFor(stock, business.demand, status, 0)

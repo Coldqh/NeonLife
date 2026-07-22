@@ -1,4 +1,5 @@
 import { SAVE_SCHEMA_VERSION, type SaveEnvelope, type SaveSlotId } from "./types";
+import { createStableEntityId } from "../ids/entityId";
 import type { GameSession, LocationState } from "../../world/state/types";
 import { createInitialFoodState } from "../../gameplay/food/foodSystem";
 import { createInitialHousing } from "../../gameplay/housing/housingSystem";
@@ -9,6 +10,8 @@ import { createPressureState } from "../../gameplay/pressure/pressureSystem";
 import type { PressureState } from "../../gameplay/pressure/types";
 import { createLocalEconomy } from "../../gameplay/economy/localEconomy";
 import type { LocalEconomyState } from "../../gameplay/economy/types";
+import { createPopulationState } from "../../simulation/population/populationSystem";
+import type { PopulationState } from "../../simulation/population/types";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -64,6 +67,122 @@ function hasEconomyState(value: unknown): value is LocalEconomyState {
     && Array.isArray(value.businesses)
     && typeof value.lastUpdatedAt === "number"
     && typeof value.cycle === "number";
+}
+
+
+function hasPopulationState(value: unknown): value is PopulationState {
+  return isObject(value)
+    && Array.isArray(value.residents)
+    && Array.isArray(value.households)
+    && Array.isArray(value.employments)
+    && Array.isArray(value.cohorts)
+    && typeof value.lastUpdatedAt === "number";
+}
+
+
+function normalizePopulationState(
+  value: unknown,
+  seed: string,
+  timestamp: number,
+  districts: GameSession["world"]["districts"],
+  locations: LocationState[],
+  organizations: GameSession["world"]["organizations"],
+  people: PersonState[]
+): PopulationState {
+  const fresh = createPopulationState(seed, timestamp, districts, locations, organizations, people);
+  if (!hasPopulationState(value)) return fresh;
+  return {
+    ...fresh,
+    ...value,
+    residents: value.residents,
+    households: value.households.map((household, index) => {
+      const raw = household as unknown as Record<string, unknown>;
+      const fallback = fresh.households[index % Math.max(1, fresh.households.length)];
+      const foodUnits = typeof raw.foodUnits === "number" ? raw.foodUnits : 0;
+      return {
+        ...fallback,
+        ...household,
+        pantry: Array.isArray(raw.pantry)
+          ? raw.pantry as PopulationState["households"][number]["pantry"]
+          : foodUnits > 0 ? [{ productId: "kernel-9-brick", units: foodUnits }] : [],
+        spendingMode: ["survival", "restricted", "standard", "comfortable"].includes(String(raw.spendingMode))
+          ? raw.spendingMode as PopulationState["households"][number]["spendingMode"]
+          : fallback.spendingMode,
+        consecutiveRentMisses: typeof raw.consecutiveRentMisses === "number" ? raw.consecutiveRentMisses : 0,
+        moveCount: typeof raw.moveCount === "number" ? raw.moveCount : 0,
+        lastLedger: isObject(raw.lastLedger) ? raw.lastLedger as unknown as PopulationState["households"][number]["lastLedger"] : null
+      };
+    }),
+    employments: value.employments.map((employment) => ({ ...employment, unpaidDays: typeof (employment as unknown as Record<string, unknown>).unpaidDays === "number" ? (employment as unknown as { unpaidDays: number }).unpaidDays : 0 })),
+    housing: Array.isArray((value as unknown as Record<string, unknown>).housing)
+      ? (value as unknown as { housing: PopulationState["housing"] }).housing
+      : fresh.housing,
+    totals: isObject((value as unknown as Record<string, unknown>).totals)
+      ? { ...fresh.totals, ...(value as unknown as { totals: Partial<PopulationState["totals"]> }).totals }
+      : fresh.totals
+  };
+}
+
+function normalizeEconomyState(
+  value: unknown,
+  seed: string,
+  timestamp: number,
+  locations: LocationState[],
+  people: PersonState[],
+  population: PopulationState,
+  foodState: GameSession["life"]["food"],
+  pulseState: GameSession["district"]
+): LocalEconomyState {
+  const fresh = createLocalEconomy(seed, timestamp, locations, people, population, foodState, pulseState);
+  if (!hasEconomyState(value)) return fresh;
+  return {
+    ...fresh,
+    ...value,
+    businesses: value.businesses.map((business, index) => {
+      const fallback = fresh.businesses.find((item) => item.id === business.id || item.locationId === business.locationId)
+        ?? fresh.businesses[index % Math.max(1, fresh.businesses.length)];
+      return { ...fallback, ...business };
+    })
+  };
+}
+
+
+function normalizeUrbanFoodState(food: GameSession["life"]["food"], schemaVersion: number): GameSession["life"]["food"] {
+  if (schemaVersion >= 10) return food;
+  const totalStock = Object.values(food.shopStocks).reduce((total, shop) => total + Object.values(shop).reduce((sum, units) => sum + units, 0), 0);
+  if (totalStock >= 500) return food;
+  return {
+    ...food,
+    shopStocks: Object.fromEntries(
+      Object.entries(food.shopStocks).map(([locationId, shop]) => [
+        locationId,
+        Object.fromEntries(Object.entries(shop).map(([productId, units]) => [productId, units * 24]))
+      ])
+    )
+  };
+}
+
+function ensureDistrictHousing(
+  seed: string,
+  districts: GameSession["world"]["districts"],
+  locations: LocationState[]
+): LocationState[] {
+  const next = [...locations];
+  for (const [index, district] of districts.entries()) {
+    if (next.some((location) => location.districtId === district.id && location.type === "housing")) continue;
+    next.push({
+      id: createStableEntityId("location", `${seed}:migration-housing:${district.id}`),
+      districtId: district.id,
+      name: index === 1 ? "WORKER DORM 12" : "CROWN RESIDENCES 03",
+      code: index === 1 ? "HAB/R12" : "HAB/T03",
+      type: "housing",
+      open: true,
+      security: district.securityLevel,
+      openHour: 0,
+      closeHour: 24
+    });
+  }
+  return next;
 }
 
 function migrateCourierOrder(order: unknown, people: PersonState[], index: number): CourierOrder | null {
@@ -141,7 +260,10 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
   const meta = world.meta as Record<string, unknown> | undefined;
   const district = payload.district as Record<string, unknown>;
   const timestamp = payload.timestamp as number;
-  const locations = migrateLocationSchedules((Array.isArray(world.locations) ? world.locations : []) as LocationState[]);
+  const rawLocations = migrateLocationSchedules((Array.isArray(world.locations) ? world.locations : []) as LocationState[]);
+  const districts = (Array.isArray(world.districts) ? world.districts : []) as GameSession["world"]["districts"];
+  const organizations = (Array.isArray(world.organizations) ? world.organizations : []) as GameSession["world"]["organizations"];
+  const locations = ensureDistrictHousing(String((world.meta as Record<string, unknown> | undefined)?.seed ?? "NEON-LIFE-MIGRATED"), districts, rawLocations);
   const housingLocation = locations.find((location) => location.type === "housing") ?? locations[0];
   const marketLocation = locations.find((location) => location.type === "market") ?? locations[0];
   const kitchenLocation = locations.find((location) => location.type === "food") ?? marketLocation;
@@ -177,7 +299,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
   const housingState = existingLife && isObject(existingLife.housing)
     ? existingLife.housing as unknown as GameSession["life"]["housing"]
     : createInitialHousing(housingLocation?.id ?? "location-missing", timestamp);
-  const foodState = existingLife && isObject(existingLife.food)
+  const rawFoodState = existingLife && isObject(existingLife.food)
     ? existingLife.food as unknown as GameSession["life"]["food"]
     : createInitialFoodState(
       seed,
@@ -186,19 +308,20 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
       kitchenLocation?.id ?? "kitchen-missing",
       clinicLocation?.id ?? "clinic-missing"
     );
+  const foodState = normalizeUrbanFoodState(rawFoodState, schemaVersion);
   const pulseState = isObject(payload.district)
     ? payload.district as unknown as GameSession["district"]
     : createInitialDistrictPulse(timestamp, seed);
-  const economy = hasEconomyState(payload.economy)
-    ? payload.economy
-    : createLocalEconomy(seed, timestamp, locations, people.people, foodState, pulseState);
+  const population = normalizePopulationState(payload.population, seed, timestamp, districts, locations, organizations, people.people);
+  const economy = normalizeEconomyState(payload.economy, seed, timestamp, locations, people.people, population, foodState, pulseState);
   const courier = migrateCourierState(existingJobs.courier, seed, timestamp, locations, people.people, economy.businesses);
   const pressure = hasPressureState(payload.pressure)
     ? payload.pressure
     : createPressureState(seed, timestamp, housingState, people.people, locations);
 
+  const { situations: _discardedSituations, ...payloadWithoutSituations } = payload;
   const migratedPayload = {
-    ...payload,
+    ...payloadWithoutSituations,
     schemaVersion: SAVE_SCHEMA_VERSION,
     events: migratedEvents,
     eventQueue: migratedQueue,
@@ -206,6 +329,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     people,
     pressure,
     economy,
+    population,
     currentActivity: `На месте: ${existingLocationName}`,
     world: {
       ...world,

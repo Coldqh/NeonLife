@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { Icon } from "./Icons";
 
 interface WindowFrameProps {
@@ -11,7 +11,7 @@ interface WindowFrameProps {
 export function WindowFrame({ title, code, children, onClose }: WindowFrameProps) {
   return (
     <div className="window-backdrop" onMouseDown={onClose}>
-      <section className="window-frame" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="window-frame" onMouseDown={(event: ReactMouseEvent<HTMLElement>) => event.stopPropagation()}>
         <header className="window-frame__header">
           <div>
             <span>{code}</span>

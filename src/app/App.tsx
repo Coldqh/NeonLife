@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { useVersionGuard, type VersionGuardController } from "./providers/useVersionGuard";
 import { useWorldSave, type WorldSaveController } from "./providers/useWorldSave";
 import type { GameSession } from "../world/state/types";
@@ -43,6 +43,7 @@ import {
 } from "../gameplay/life/lifeSimulation";
 import { Icon, type IconName } from "../ui/components/Icons";
 import { PressureWorkspace } from "./workspaces/PressureWorkspace";
+import { PopulationWorkspace } from "./workspaces/PopulationWorkspace";
 import { activeObligations, activeRequests, committedAmount } from "../gameplay/pressure/pressureSystem";
 import { getActiveCourierOrder, type CourierOrder } from "../gameplay/jobs/courier/courierSystem";
 import { getPerson, peopleAtLocation, toKnownNpc } from "../people/network/humanNetwork";
@@ -555,7 +556,7 @@ export default function App() {
       {openWindows.map((id) => (
         <button type="button" key={id} className={activeWindow === id ? "is-active" : ""} onClick={() => setActiveWindow(id)}>
           <span>{windowLabels[id]}</span>
-          <i onClick={(event) => { event.stopPropagation(); closeWindow(id); }}><Icon name="close" size={13} /></i>
+          <i onClick={(event: ReactMouseEvent<HTMLElement>) => { event.stopPropagation(); closeWindow(id); }}><Icon name="close" size={13} /></i>
         </button>
       ))}
     </div>
@@ -613,7 +614,7 @@ export default function App() {
 
       {actionSheetOpen ? (
         <div className="action-sheet-backdrop" onClick={() => setActionSheetOpen(false)}>
-          <section className="action-sheet" onClick={(event) => event.stopPropagation()}>
+          <section className="action-sheet" onClick={(event: ReactMouseEvent<HTMLElement>) => event.stopPropagation()}>
             <div className="sheet-grabber" />
             <header>
               <div>
@@ -798,7 +799,7 @@ function LifeWorkspace({
           code="WORLD/EVENT LOG"
           className="journal-panel"
           action={
-            <select value={journalFilter} onChange={(event) => setJournalFilter(event.target.value as EventCategory | "all")}>
+            <select value={journalFilter} onChange={(event: ChangeEvent<HTMLSelectElement>) => setJournalFilter(event.target.value as EventCategory | "all")}>
               <option value="all">ALL</option>
               <option value="personal">PERSONAL</option>
               <option value="contact">CONTACT</option>
@@ -1001,7 +1002,7 @@ function MobileLifeWorkspace({
         {activeTab === "log" ? (
           <div className="mobile-log">
             <div className="mobile-log__filter">
-              <select value={journalFilter} onChange={(event) => setJournalFilter(event.target.value as EventCategory | "all")}>
+              <select value={journalFilter} onChange={(event: ChangeEvent<HTMLSelectElement>) => setJournalFilter(event.target.value as EventCategory | "all")}>
                 <option value="all">ALL EVENTS</option>
                 <option value="personal">PERSONAL</option>
                 <option value="contact">CONTACT</option>
@@ -1077,7 +1078,7 @@ function ActionCard({ action, onAction, compact = false }: { action: ActionDefin
 
 
 function PlacesWorkspace({ session, onTravel, onOpenWindow }: { session: GameSession; onTravel: (locationId: string) => void; onOpenWindow: (id: WindowId) => void }) {
-  const [tab, setTab] = useState<"routes" | "economy">("routes");
+  const [tab, setTab] = useState<"routes" | "economy" | "population">("routes");
   const current = session.world.locations.find((location) => location.id === session.life.currentLocationId);
   const options = getTravelOptions(session);
   const strained = session.economy.businesses.filter((business) => business.status === "strained").length;
@@ -1099,7 +1100,8 @@ function PlacesWorkspace({ session, onTravel, onOpenWindow }: { session: GameSes
 
       <nav className="terminal-tabs city-tabs" aria-label="Разделы города">
         <button type="button" className={tab === "routes" ? "is-active" : ""} onClick={() => setTab("routes")}>МАРШРУТЫ</button>
-        <button type="button" className={tab === "economy" ? "is-active" : ""} onClick={() => setTab("economy")}>ЛОКАЛЬНАЯ ЭКОНОМИКА</button>
+        <button type="button" className={tab === "economy" ? "is-active" : ""} onClick={() => setTab("economy")}>ЭКОНОМИКА</button>
+        <button type="button" className={tab === "population" ? "is-active" : ""} onClick={() => setTab("population")}>НАСЕЛЕНИЕ</button>
         <button type="button" onClick={() => onOpenWindow("local")}>РАЙОН</button>
       </nav>
 
@@ -1134,7 +1136,7 @@ function PlacesWorkspace({ session, onTravel, onOpenWindow }: { session: GameSes
             })}
           </div>
         </>
-      ) : (
+      ) : tab === "economy" ? (
         <div className="economy-business-list">
           {session.economy.businesses
             .slice()
@@ -1150,6 +1152,8 @@ function PlacesWorkspace({ session, onTravel, onOpenWindow }: { session: GameSes
               />
             ))}
         </div>
+      ) : (
+        <PopulationWorkspace session={session} />
       )}
     </div>
   );
@@ -1705,7 +1709,7 @@ function WindowContent({
     const visible = session.events.filter((event) => journalFilter === "all" || event.category === journalFilter);
     return (
       <div className="journal-window">
-        <select value={journalFilter} onChange={(event) => setJournalFilter(event.target.value as EventCategory | "all")}>
+        <select value={journalFilter} onChange={(event: ChangeEvent<HTMLSelectElement>) => setJournalFilter(event.target.value as EventCategory | "all")}>
           <option value="all">ALL EVENTS</option>
           <option value="personal">PERSONAL</option>
           <option value="contact">CONTACT</option>
@@ -1806,7 +1810,7 @@ function SettingToggle({ label, detail, checked, onChange }: { label: string; de
   return (
     <label className="setting-toggle">
       <span><strong>{label}</strong><small>{detail}</small></span>
-      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <input type="checkbox" checked={checked} onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(event.target.checked)} />
       <i />
     </label>
   );

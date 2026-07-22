@@ -17,6 +17,16 @@ export interface BusinessState {
   priceIndex: number;
   status: BusinessStatus;
   shortage: boolean;
+  capacityLevel: number;
+  targetStaff: number;
+  revenueToday: number;
+  operatingCostsToday: number;
+  payrollToday: number;
+  supplierCostsToday: number;
+  rollingProfit: number;
+  profitableDays: number;
+  lossDays: number;
+  lastSettlementDay: number;
   lastStatusChangeAt: number;
   lastUpdatedAt: number;
 }

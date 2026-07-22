@@ -34,6 +34,12 @@ export interface FoodTransactionResult {
   quantity: number;
 }
 
+const URBAN_STOCK_SCALE = 24;
+
+function scaleUrbanStock(stock: Record<string, number>): Record<string, number> {
+  return Object.fromEntries(Object.entries(stock).map(([productId, units]) => [productId, units * URBAN_STOCK_SCALE]));
+}
+
 const MARKET_STOCK: Record<string, number> = {
   "kernel-9-brick": 18,
   "blueroot-noodles": 9,
@@ -65,9 +71,9 @@ export function createInitialFoodState(seed: string, timestamp: number, marketId
   return {
     storage: starter,
     shopStocks: {
-      [marketId]: { ...MARKET_STOCK },
-      [kitchenId]: { ...KITCHEN_STOCK },
-      [clinicId]: { ...CLINIC_STOCK }
+      [marketId]: scaleUrbanStock(MARKET_STOCK),
+      [kitchenId]: scaleUrbanStock(KITCHEN_STOCK),
+      [clinicId]: scaleUrbanStock(CLINIC_STOCK)
     },
     appliances: {
       heater: true,

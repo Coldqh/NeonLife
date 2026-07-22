@@ -10,6 +10,7 @@ import type { HousingState } from "../../gameplay/housing/housingSystem";
 import type { CourierState } from "../../gameplay/jobs/courier/courierSystem";
 import type { PressureState } from "../../gameplay/pressure/types";
 import type { LocalEconomyState } from "../../gameplay/economy/types";
+import type { PopulationState } from "../../simulation/population/types";
 
 export interface CityState {
   id: EntityId;
@@ -99,6 +100,7 @@ export interface GameSession {
   people: HumanNetworkState;
   pressure: PressureState;
   economy: LocalEconomyState;
+  population: PopulationState;
   events: WorldEvent[];
   eventQueue: ScheduledWorldEvent[];
   currentActivity: string;

@@ -4591,3 +4591,255 @@ button:disabled {
   border-color: rgba(255, 190, 75, .42);
   background: rgba(255, 190, 75, .08);
 }
+
+/* v0.12.0 — population and household economy */
+.population-workspace {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+}
+
+.population-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+
+.population-summary > div {
+  min-width: 0;
+  min-height: 62px;
+  padding: 9px 10px;
+  background: rgba(5, 15, 21, .96);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.population-summary span,
+.population-summary strong,
+.population-summary small,
+.population-district span,
+.population-district strong,
+.population-district small,
+.population-district em,
+.population-households span,
+.population-households strong,
+.population-households small,
+.population-households em {
+  font-family: var(--font-mono);
+}
+
+.population-summary span,
+.population-summary small,
+.population-district span,
+.population-district small,
+.population-households span,
+.population-households small { color: var(--muted-2); }
+.population-summary span { font-size: 6px; }
+.population-summary strong { color: var(--cyan); font-size: 17px; }
+.population-summary small { font-size: 7px; }
+
+.population-districts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.population-district {
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: rgba(5, 15, 21, .92);
+}
+
+.population-district > header {
+  min-height: 64px;
+  padding: 9px 10px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.population-district > header > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.population-district > header span,
+.population-district > header small { font-size: 6px; }
+.population-district > header strong { color: var(--text); font-size: 11px; }
+.population-district > header em {
+  flex: 0 0 auto;
+  color: var(--cyan);
+  font-size: 7px;
+  font-style: normal;
+}
+
+.population-district__metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+}
+
+.population-district__metrics > div {
+  padding: 7px 8px;
+  background: rgba(6, 17, 23, .98);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.population-district__metrics span { font-size: 6px; }
+.population-district__metrics strong { color: var(--text); font-size: 10px; }
+
+.population-district > footer {
+  padding: 7px 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+}
+.population-district > footer span { font-size: 6px; }
+
+.population-households {
+  min-height: 0;
+  border: 1px solid var(--line);
+  background: rgba(5, 15, 21, .92);
+}
+
+.population-households > header {
+  padding: 8px 10px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.population-households > header div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.population-households > header span,
+.population-households > header small { font-size: 6px; }
+.population-households > header strong { color: var(--text); font-size: 10px; }
+
+.population-household-list {
+  max-height: 280px;
+  overflow: auto;
+}
+
+.population-household {
+  min-height: 58px;
+  padding: 7px 9px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(90px, .7fr) minmax(100px, .8fr) 74px;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.population-household > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.population-household span,
+.population-household small { font-size: 6px; }
+.population-household strong { color: var(--text); font-size: 9px; }
+.population-household em {
+  color: var(--yellow);
+  font-size: 7px;
+  font-style: normal;
+  text-align: right;
+}
+.population-household--arrears em,
+.population-household--displaced em { color: var(--red); }
+.population-household--displaced { background: rgba(255, 83, 104, .04); }
+
+/* v0.12.0 — household economy and housing market */
+.population-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  background: var(--line);
+  gap: 1px;
+}
+.population-tabs button {
+  min-height: 34px;
+  border: 0;
+  background: rgba(5, 15, 21, .96);
+  color: var(--muted-2);
+  font: 700 7px var(--font-mono);
+  letter-spacing: .08em;
+}
+.population-tabs button.is-active { color: var(--cyan); background: rgba(45, 214, 255, .08); }
+
+.population-housing-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.population-housing {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  background: rgba(5, 15, 21, .92);
+}
+.population-housing > header {
+  grid-column: 1 / -1;
+  padding: 8px 9px;
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+}
+.population-housing > header > div,
+.population-housing > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.population-housing > div { padding: 7px; border-right: 1px solid var(--line); }
+.population-housing > div:last-child { border-right: 0; }
+.population-housing span,
+.population-housing small,
+.population-housing strong,
+.population-housing em {
+  font-family: var(--font-mono);
+}
+.population-housing span,
+.population-housing small { color: var(--muted-2); font-size: 6px; }
+.population-housing strong { color: var(--text); font-size: 9px; }
+.population-housing em { color: var(--cyan); font-size: 7px; font-style: normal; }
+.population-housing--degraded em { color: var(--yellow); }
+.population-housing--critical em { color: var(--red); }
+
+.population-flow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--line);
+  background: var(--line);
+}
+.population-flow > div {
+  min-height: 86px;
+  padding: 12px;
+  background: rgba(5, 15, 21, .96);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.population-flow span,
+.population-flow strong,
+.population-flow small { font-family: var(--font-mono); }
+.population-flow span,
+.population-flow small { color: var(--muted-2); font-size: 6px; }
+.population-flow strong { color: var(--cyan); font-size: 15px; }
