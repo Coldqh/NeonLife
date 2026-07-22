@@ -1,9 +1,9 @@
 CHANGELOG.md
-PATCH_0.9.0.md
+PATCH_0.10.0.md
 PATCH_FILES.txt
 README.md
 docs/ARCHITECTURE.md
-docs/LOCAL_ECONOMY.md
+docs/CITY_SITUATIONS.md
 package-lock.json
 package.json
 public/sw.js
@@ -12,9 +12,12 @@ src/app/App.tsx
 src/core/saves/migrations.ts
 src/core/saves/types.ts
 src/gameplay/economy/localEconomy.ts
-src/gameplay/economy/types.ts
 src/gameplay/jobs/courier/courierSystem.ts
 src/gameplay/life/lifeSimulation.ts
+src/gameplay/situations/situationSystem.ts
+src/gameplay/situations/types.ts
+src/people/network/humanNetwork.ts
+src/ui/components/SituationGate.tsx
 src/ui/theme/components.css
 src/ui/theme/responsive.css
 src/world/generation/createWorld.ts

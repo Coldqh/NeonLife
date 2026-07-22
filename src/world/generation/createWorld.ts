@@ -7,6 +7,7 @@ import { createInitialPlayer } from "../../gameplay/player/demoPlayer";
 import { createInitialFoodState } from "../../gameplay/food/foodSystem";
 import { createInitialHousing } from "../../gameplay/housing/housingSystem";
 import { createInitialCourierState } from "../../gameplay/jobs/courier/courierSystem";
+import { createSituationState } from "../../gameplay/situations/situationSystem";
 import { createLocalEconomy } from "../../gameplay/economy/localEconomy";
 import { createPressureState } from "../../gameplay/pressure/pressureSystem";
 import { createPrimaryContact } from "../../people/demoNpc";
@@ -243,6 +244,7 @@ export function createWorldSession(seed: string): GameSession {
     people,
     pressure,
     economy,
+    situations: createSituationState(INITIAL_GAME_TIMESTAMP),
     events: createInitialEvents({
       seed,
       districtName: lower.name,

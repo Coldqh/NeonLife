@@ -10,6 +10,8 @@ import type { PressureState } from "../../gameplay/pressure/types";
 import { createLocalEconomy } from "../../gameplay/economy/localEconomy";
 import type { LocalEconomyState } from "../../gameplay/economy/types";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
+import { createSituationState } from "../../gameplay/situations/situationSystem";
+import type { SituationState } from "../../gameplay/situations/types";
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -64,6 +66,16 @@ function hasEconomyState(value: unknown): value is LocalEconomyState {
     && Array.isArray(value.businesses)
     && typeof value.lastUpdatedAt === "number"
     && typeof value.cycle === "number";
+}
+
+
+function hasSituationState(value: unknown): value is SituationState {
+  return isObject(value)
+    && (value.pending === null || isObject(value.pending))
+    && Array.isArray(value.history)
+    && typeof value.generation === "number"
+    && typeof value.cooldownUntil === "number"
+    && typeof value.lastTriggeredAt === "number";
 }
 
 function migrateCourierOrder(order: unknown, people: PersonState[], index: number): CourierOrder | null {
@@ -196,6 +208,9 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
   const pressure = hasPressureState(payload.pressure)
     ? payload.pressure
     : createPressureState(seed, timestamp, housingState, people.people, locations);
+  const situations = hasSituationState(payload.situations)
+    ? payload.situations
+    : createSituationState(timestamp);
 
   const migratedPayload = {
     ...payload,
@@ -206,6 +221,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     people,
     pressure,
     economy,
+    situations,
     currentActivity: `На месте: ${existingLocationName}`,
     world: {
       ...world,

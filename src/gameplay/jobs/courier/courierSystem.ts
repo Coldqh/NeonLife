@@ -279,3 +279,22 @@ export function applyCourierTravelRisk(state: CourierState, seed: string, timest
     }
   };
 }
+
+
+export function failActiveCourierOrder(state: CourierState, timestamp: number, ratingLoss = 6): CourierState {
+  const active = getActiveCourierOrder(state);
+  if (!active) return state;
+  return {
+    ...state,
+    activeOrderId: null,
+    failedDeliveries: state.failedDeliveries + 1,
+    rating: Math.max(0, state.rating - ratingLoss),
+    orders: state.orders.map((item) => item.id === active.id
+      ? { ...item, status: "failed", completedAt: timestamp }
+      : item)
+  };
+}
+
+export function adjustCourierRating(state: CourierState, delta: number): CourierState {
+  return { ...state, rating: Math.max(0, Math.min(100, state.rating + delta)) };
+}
