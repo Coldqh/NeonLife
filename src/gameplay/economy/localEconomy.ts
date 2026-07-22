@@ -362,33 +362,3 @@ export function applyEconomyPressureToPeople(
     })
   };
 }
-
-
-export function applyBusinessIntervention(
-  state: LocalEconomyState,
-  businessId: string,
-  deltas: { staffing?: number; stock?: number; cash?: number; demand?: number },
-  transitDelayMinutes = 0
-): LocalEconomyState {
-  return {
-    ...state,
-    businesses: state.businesses.map((business) => {
-      if (business.id !== businessId) return business;
-      const staffing = clamp(business.staffing + (deltas.staffing ?? 0));
-      const stock = clamp(business.stock + (deltas.stock ?? 0));
-      const cash = business.cash + (deltas.cash ?? 0);
-      const demand = clamp(business.demand + (deltas.demand ?? 0));
-      const status = statusFor(stock, staffing, cash);
-      return {
-        ...business,
-        staffing,
-        stock,
-        cash,
-        demand,
-        status,
-        shortage: stock < 42,
-        priceIndex: priceIndexFor(stock, demand, status, transitDelayMinutes)
-      };
-    })
-  };
-}

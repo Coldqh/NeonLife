@@ -37,7 +37,6 @@ import {
   progressLife,
   requestEmergencyLoan,
   requestRentExtension,
-  resolveCitySituation,
   completePersonalRequest,
   sleepAtHome,
   travelToLocation
@@ -53,7 +52,6 @@ import { Portrait } from "../ui/components/Portrait";
 import { SystemPanel } from "../ui/components/SystemPanel";
 import { WindowFrame } from "../ui/components/WindowFrame";
 import { VersionGate } from "../ui/components/VersionGate";
-import { SituationGate } from "../ui/components/SituationGate";
 import {
   advanceDistrictPulse,
   createInitialDistrictPulse,
@@ -153,14 +151,6 @@ function createPlans(session: GameSession) {
   const obligations = activeObligations(session.pressure);
   const requests = activeRequests(session.pressure);
   const items: Array<{ time: string; title: string; status: string; detail: string }> = [];
-  if (session.situations.pending) {
-    items.push({
-      time: "NOW",
-      title: session.situations.pending.title,
-      status: "urgent",
-      detail: "Время остановлено до решения"
-    });
-  }
   if (active) {
     items.push({
       time: formatGameTime(active.deadlineAt),
@@ -341,10 +331,6 @@ export default function App() {
     setSession((current) => requestEmergencyLoan(current, personId));
   }
 
-  function resolveSituation(choiceId: string): void {
-    setSession((current) => resolveCitySituation(current, choiceId));
-  }
-
   function selectPerson(personId: string): void {
     setSession((current) => {
       const person = getPerson(current.people, personId);
@@ -425,14 +411,9 @@ export default function App() {
           <small>{session.world.city.code} / 84%</small>
         </span>
       </div>
-      <button
-        type="button"
-        className={`alert-button ${session.situations.pending ? "is-urgent" : ""}`}
-        onClick={() => session.situations.pending ? undefined : openWindow("messages")}
-        aria-label={session.situations.pending ? "Требуется решение" : "Сообщения"}
-      >
+      <button type="button" className="alert-button" onClick={() => openWindow("messages")}>
         <Icon name="alert" />
-        <span>{session.situations.pending ? 1 : 0}</span>
+        <span>0</span>
       </button>
       <button type="button" className="icon-button topbar__settings" onClick={() => openWindow("settings")} aria-label="Настройки">
         <Icon name="settings" />
@@ -660,13 +641,6 @@ export default function App() {
         </div>
       ) : null}
 
-      <SituationGate
-        situation={session.situations.pending}
-        personName={getPerson(session.people, session.situations.pending?.personId)?.name}
-        locationName={session.world.locations.find((location) => location.id === session.situations.pending?.locationId)?.name}
-        balance={session.player.balance}
-        onResolve={resolveSituation}
-      />
       <VersionGate guard={versionGuard} />
     </div>
   );
@@ -1819,9 +1793,8 @@ function WindowContent({
       <div className="diagnostic-row"><span>PWA CACHE</span><strong>NETWORK FIRST</strong><i>100%</i></div>
       <div className="diagnostic-row"><span>WORLD PULSE</span><strong>ACTIVE</strong><i>{session.district.pulseCount}</i></div>
       <div className="diagnostic-row"><span>LOCAL ECONOMY</span><strong>{session.economy.businesses.some((business) => business.status === "closed") ? "DISRUPTED" : "ACTIVE"}</strong><i>{session.economy.businesses.filter((business) => business.status !== "stable").length}</i></div>
-      <div className="diagnostic-row"><span>CITY SITUATIONS</span><strong>{session.situations.pending ? "PAUSED" : "READY"}</strong><i>{session.situations.history.length}</i></div>
       <div className="diagnostic-row"><span>INDEXED DB</span><strong>{saveController.status === "error" ? "ERROR" : "CONNECTED"}</strong><i>{saveController.summaries.filter((slot) => slot.exists).length}/3</i></div>
-      <pre>{`NEON/LINK DIAGNOSTIC\nBUILD: ${APP_VERSION}\nREMOTE: ${versionGuard.remoteVersion ?? "UNKNOWN"}\nWORLD: ${session.world.meta.worldId}\nDISTRICT PULSES: ${session.district.pulseCount}\nLOCAL EVENTS: ${session.events.filter((event) => event.category === "local").length}\nDECISIONS: ${session.situations.history.length}\nPENDING DECISION: ${session.situations.pending?.type ?? "NONE"}\nSAVE SLOT: ${saveController.activeSlotId}
+      <pre>{`NEON/LINK DIAGNOSTIC\nBUILD: ${APP_VERSION}\nREMOTE: ${versionGuard.remoteVersion ?? "UNKNOWN"}\nWORLD: ${session.world.meta.worldId}\nDISTRICT PULSES: ${session.district.pulseCount}\nLOCAL EVENTS: ${session.events.filter((event) => event.category === "local").length}\nSAVE SLOT: ${saveController.activeSlotId}
 SAVE STATUS: ${saveController.status.toUpperCase()}
 RECOVERY: ${saveController.recoveryCount}
 STATUS: ${versionGuard.status.toUpperCase()}`}</pre>

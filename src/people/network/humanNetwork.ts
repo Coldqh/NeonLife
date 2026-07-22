@@ -283,27 +283,3 @@ export function toKnownNpc(person: PersonState, locations: LocationState[], time
     profileCode: person.profileCode
   };
 }
-
-
-export function adjustPersonProblem(
-  state: HumanNetworkState,
-  personId: string,
-  severityDelta: number,
-  progressDelta = 0,
-  moneyDelta = 0
-): HumanNetworkState {
-  return {
-    ...state,
-    people: state.people.map((person) => person.id === personId
-      ? {
-        ...person,
-        money: Math.max(0, person.money + moneyDelta),
-        problem: {
-          ...person.problem,
-          severity: clamp(person.problem.severity + severityDelta),
-          progress: clamp(person.problem.progress + progressDelta)
-        }
-      }
-      : person)
-  };
-}

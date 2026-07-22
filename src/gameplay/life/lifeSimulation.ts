@@ -1,10 +1,9 @@
 import type { EventCategory, WorldEvent } from "../../core/events/types";
 import { createStableEntityId } from "../../core/ids/entityId";
-import { SeededRandom } from "../../core/random/seededRandom";
 import { processEventQueue } from "../../core/simulation/eventQueue";
 import { advanceGameTime } from "../../core/time/gameTime";
 import { getFoodProduct } from "../../data/products/foodCatalog";
-import { adjustPersonProblem, advanceHumanNetwork, getPerson, recordPlayerAction, toKnownNpc } from "../../people/network/humanNetwork";
+import { advanceHumanNetwork, getPerson, recordPlayerAction, toKnownNpc } from "../../people/network/humanNetwork";
 import { canPrepare, consumeFood, discardSpoiledFood, purchaseFood } from "../food/foodSystem";
 import { calculateSleepRecovery, getHousingDaysLeft } from "../housing/housingSystem";
 import { getTravelOptions, isLocationOpen } from "../travel/travelSystem";
@@ -12,10 +11,8 @@ import {
   acceptCourierOrder as acceptCourierOrderState,
   applyCourierTravelRisk,
   collectCourierCargo,
-  adjustCourierRating,
   completeCourierOrder,
   expireCourierOrders,
-  failActiveCourierOrder,
   getActiveCourierOrder,
   refreshCourierBoard
 } from "../jobs/courier/courierSystem";
@@ -32,14 +29,7 @@ import {
 } from "../pressure/pressureSystem";
 import type { GameSession } from "../../world/state/types";
 import {
-  closeSituation,
-  createCourierInspectionSituation,
-  createDeliveryDisputeSituation,
-  maybeOpenAmbientSituation
-} from "../situations/situationSystem";
-import {
   advanceLocalEconomy,
-  applyBusinessIntervention,
   applyCourierSupplyDelivery,
   applyEconomyPressureToPeople,
   applyRequestToEconomy,
@@ -86,12 +76,9 @@ interface ProgressOptions {
   relationChanges?: number;
   worldEvents?: number;
   trackBalance?: boolean;
-  suppressSituationGeneration?: boolean;
-  ignorePendingSituation?: boolean;
 }
 
 export function progressLife(session: GameSession, minutes: number, options: ProgressOptions = {}): GameSession {
-  if (session.situations.pending && !options.ignorePendingSituation) return session;
   const nextTimestamp = advanceGameTime(session.timestamp, minutes);
   const pulse = advanceDistrictPulse(session.district, nextTimestamp);
   const queued = processEventQueue(session, nextTimestamp);
@@ -182,7 +169,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     worldEvents: worldEventCount
   });
 
-  const nextSession: GameSession = {
+  return {
     ...session,
     timestamp: nextTimestamp,
     world: {
@@ -226,11 +213,9 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     },
     events: [...generated, ...queued.events.reverse(), ...pulse.events.reverse(), ...session.events].slice(0, 100)
   };
-  return options.suppressSituationGeneration ? nextSession : maybeOpenAmbientSituation(nextSession);
 }
 
 export function travelToLocation(session: GameSession, locationId: string): GameSession {
-  if (session.situations.pending) return session;
   const option = getTravelOptions(session).find((item) => item.location.id === locationId);
   if (!option || session.player.balance < option.cost) return session;
   const open = isLocationOpen(option.location, session.timestamp + option.durationMinutes * 60_000);
@@ -243,8 +228,7 @@ export function travelToLocation(session: GameSession, locationId: string): Game
     fatigueDelta: 2,
     stressDelta: option.sameDistrict ? 0 : 1,
     activity: `На месте: ${option.location.name}`,
-    targetLocationId: option.location.id,
-    suppressSituationGeneration: true
+    targetLocationId: option.location.id
   });
   const risk = applyCourierTravelRisk(
     progressed.jobs.courier,
@@ -252,49 +236,19 @@ export function travelToLocation(session: GameSession, locationId: string): Game
     progressed.timestamp,
     progressed.district.gangPressure + progressed.district.policePresence
   );
-  if (risk.incident === "none") return maybeOpenAmbientSituation(progressed);
-
+  if (risk.incident === "none") return progressed;
   const active = getActiveCourierOrder(risk.state);
-  const withRisk: GameSession = {
+  const incident = risk.incident === "inspection"
+    ? createEvent(progressed, progressed.timestamp, "work", "Курьерский груз попал под проверку.", `${active?.code ?? "DELIVERY"} · пломба сверена, данные рейса записаны.`, 3)
+    : createEvent(progressed, progressed.timestamp, "work", "Груз получил повреждение в пути.", `${active?.code ?? "DELIVERY"} · состояние −${risk.conditionLoss}%.`, 2);
+  return {
     ...progressed,
-    jobs: { ...progressed.jobs, courier: risk.state }
+    jobs: { ...progressed.jobs, courier: risk.state },
+    events: [incident, ...progressed.events].slice(0, 100)
   };
-
-  if (risk.incident === "inspection" && active) {
-    return {
-      ...withRisk,
-      currentActivity: "Решение требуется: проверка груза",
-      situations: createCourierInspectionSituation(withRisk, active),
-      events: [
-        createEvent(
-          withRisk,
-          withRisk.timestamp,
-          "work",
-          "Патруль остановил курьерский рейс.",
-          `${active.code} · требуется решение по проверке груза.`,
-          3
-        ),
-        ...withRisk.events
-      ].slice(0, 100)
-    };
-  }
-
-  const incident = createEvent(
-    withRisk,
-    withRisk.timestamp,
-    "work",
-    "Груз получил повреждение в пути.",
-    `${active?.code ?? "DELIVERY"} · состояние −${risk.conditionLoss}%.`,
-    2
-  );
-  return maybeOpenAmbientSituation({
-    ...withRisk,
-    events: [incident, ...withRisk.events].slice(0, 100)
-  });
 }
 
 export function acceptCourierOrder(session: GameSession, orderId: string): GameSession {
-  if (session.situations.pending) return session;
   const nextState = acceptCourierOrderState(session.jobs.courier, orderId, session.timestamp);
   if (nextState === session.jobs.courier) return session;
   const order = nextState.orders.find((item) => item.id === orderId);
@@ -327,7 +281,6 @@ export function acceptCourierOrder(session: GameSession, orderId: string): GameS
 }
 
 export function pickupCourierOrder(session: GameSession): GameSession {
-  if (session.situations.pending) return session;
   const active = getActiveCourierOrder(session.jobs.courier);
   const nextState = collectCourierCargo(session.jobs.courier, session.life.currentLocationId, session.timestamp + 6 * 60_000);
   if (!active || nextState === session.jobs.courier) return session;
@@ -356,7 +309,6 @@ export function pickupCourierOrder(session: GameSession): GameSession {
 }
 
 export function deliverCourierOrder(session: GameSession): GameSession {
-  if (session.situations.pending) return session;
   const active = getActiveCourierOrder(session.jobs.courier);
   if (!active) return session;
   const clientAtDelivery = getPerson(session.people, active.clientId);
@@ -399,8 +351,7 @@ export function deliverCourierOrder(session: GameSession): GameSession {
     stressDelta: -2,
     activity: "Свободен для нового заказа",
     deliveryCompleted: true,
-    relationChanges: 1,
-    suppressSituationGeneration: true
+    relationChanges: 1
   });
   const cleanDelivery = completion.lateMinutes === 0 && completion.condition >= 90;
   const badDelivery = completion.lateMinutes > 15 || completion.condition < 70;
@@ -426,7 +377,7 @@ export function deliverCourierOrder(session: GameSession): GameSession {
     ? `${active.client} подтвердил получение и сохранил твой контакт.`
     : badDelivery
       ? `${active.client} принял груз, но оставил претензию в MESHLINE.`
-      : `${active.client} подтвердил получение с замечаниями.`;
+      : `${active.client} подтвердил получение без дополнительных требований.`;
   const supply = applyCourierSupplyDelivery(
     progressed.economy,
     progressed.life.food,
@@ -445,8 +396,7 @@ export function deliverCourierOrder(session: GameSession): GameSession {
       cleanDelivery ? 2 : badDelivery ? 3 : 1
     )
     : null;
-
-  const result: GameSession = {
+  return {
     ...progressed,
     people,
     economy: supply.state,
@@ -460,366 +410,10 @@ export function deliverCourierOrder(session: GameSession): GameSession {
       ...progressed.events
     ].slice(0, 100)
   };
-
-  if (completion.lateMinutes > 5 || completion.condition < 88) {
-    return {
-      ...result,
-      currentActivity: "Решение требуется: спор с клиентом",
-      situations: createDeliveryDisputeSituation(
-        result,
-        active,
-        completion.lateMinutes,
-        completion.condition,
-        completion.payout
-      )
-    };
-  }
-
-  return maybeOpenAmbientSituation(result);
 }
 
-
-export function resolveCitySituation(session: GameSession, choiceId: string): GameSession {
-  const pending = session.situations.pending;
-  if (!pending) return session;
-  const selected = pending.choices.find((choice) => choice.id === choiceId);
-  if (!selected || (selected.requiredBalance ?? 0) > session.player.balance) return session;
-
-  let working: GameSession = {
-    ...session,
-    situations: { ...session.situations, pending: null }
-  };
-  let outcome = "";
-  let balanceDelta = 0;
-  let fatigueDelta = 0;
-  let stressDelta = 0;
-  let relationChanges = 0;
-  const category: EventCategory = pending.type === "courier-inspection" || pending.type === "delivery-dispute"
-    ? "work"
-    : "contact";
-
-  if (pending.type === "courier-inspection") {
-    const active = getActiveCourierOrder(working.jobs.courier);
-    const personId = pending.personId;
-    if (choiceId === "cooperate") {
-      const legality = String(pending.payload.legality ?? "legal");
-      const fine = legality === "restricted" ? 36 : legality === "unknown" ? 18 : 0;
-      balanceDelta = -fine;
-      stressDelta = fine ? 5 : 2;
-      outcome = fine
-        ? `Патруль оставил груз у курьера и списал штраф ₵ ${fine}.`
-        : "Запись рейса подтверждена. Груз возвращён курьеру.";
-    } else if (choiceId === "call-client") {
-      const person = getPerson(working.people, personId);
-      const rng = new SeededRandom(`${working.world.meta.seed}:inspection-call:${pending.id}`);
-      const score = (person?.trustToPlayer ?? 0) + Math.round((person?.respectToPlayer ?? 0) * 0.6)
-        - (person?.irritationToPlayer ?? 0) + rng.integer(-14, 18);
-      const confirmed = score >= 24;
-      balanceDelta = confirmed ? 0 : -20;
-      stressDelta = confirmed ? 1 : 5;
-      outcome = confirmed
-        ? `${person?.name ?? "Клиент"} прислал подтверждение. Патруль отпустил рейс.`
-        : `Подтверждение не принято. Патруль списал ₵ 20 и отметил рейс.`;
-      if (personId) {
-        working = {
-          ...working,
-          people: recordPlayerAction(
-            working.people,
-            working.world.meta.seed,
-            personId,
-            working.timestamp,
-            confirmed
-              ? "Игрок запросил подтверждение во время проверки и сохранил груз."
-              : "Игрок позвонил во время проверки, но документы клиента не прошли.",
-            confirmed
-              ? { trust: 2, respect: 2, importance: 62, emotionalValue: 12 }
-              : { trust: -1, irritation: 3, importance: 65, emotionalValue: -14 }
-          )
-        };
-        relationChanges = 1;
-      }
-    } else if (choiceId === "abandon") {
-      working = {
-        ...working,
-        jobs: {
-          ...working.jobs,
-          courier: failActiveCourierOrder(working.jobs.courier, working.timestamp + selected.timeMinutes * 60_000, 8)
-        }
-      };
-      outcome = `Груз ${active?.code ?? String(pending.payload.orderCode ?? "")} передан патрулю. Заказ закрыт как проваленный.`;
-      if (personId) {
-        working = {
-          ...working,
-          people: recordPlayerAction(
-            working.people,
-            working.world.meta.seed,
-            personId,
-            working.timestamp,
-            "Игрок отказался от груза во время проверки и сорвал доставку.",
-            { trust: -7, respect: -5, irritation: 10, importance: 88, emotionalValue: -46 }
-          )
-        };
-        relationChanges = 1;
-      }
-    }
-  }
-
-  if (pending.type === "delivery-dispute") {
-    const personId = pending.personId;
-    if (choiceId === "compensate") {
-      const compensation = Number(pending.payload.compensation ?? selected.cost ?? 0);
-      balanceDelta = -compensation;
-      outcome = `Игрок вернул клиенту ₵ ${compensation}. Претензия закрыта без эскалации.`;
-      if (personId) {
-        working = {
-          ...working,
-          people: recordPlayerAction(
-            working.people,
-            working.world.meta.seed,
-            personId,
-            working.timestamp,
-            `Игрок компенсировал проблему по заказу ${String(pending.payload.orderCode ?? "")}: ₵ ${compensation}.`,
-            { trust: 4, respect: 4, irritation: -6, importance: 76, emotionalValue: 24 }
-          )
-        };
-        relationChanges = 1;
-      }
-    } else if (choiceId === "explain") {
-      outcome = "Маршрут и состояние пломбы разобраны. Клиент сохранил претензию, но не стал усиливать конфликт.";
-      if (personId) {
-        working = {
-          ...working,
-          people: recordPlayerAction(
-            working.people,
-            working.world.meta.seed,
-            personId,
-            working.timestamp,
-            `Игрок объяснил отклонения по заказу ${String(pending.payload.orderCode ?? "")}.`,
-            { trust: -1, respect: 1, irritation: 2, importance: 52, emotionalValue: -4 }
-          )
-        };
-        relationChanges = 1;
-      }
-    } else if (choiceId === "blame-dispatch") {
-      working = {
-        ...working,
-        jobs: {
-          ...working.jobs,
-          courier: adjustCourierRating(working.jobs.courier, -4)
-        }
-      };
-      outcome = "Ответственность переложена на MESHLINE. В профиле курьера появилась служебная отметка.";
-      if (personId) {
-        working = {
-          ...working,
-          people: recordPlayerAction(
-            working.people,
-            working.world.meta.seed,
-            personId,
-            working.timestamp,
-            "Игрок отказался признавать свою часть проблемы и сослался на диспетчера.",
-            { trust: -3, respect: -2, irritation: 6, importance: 70, emotionalValue: -24 }
-          )
-        };
-        relationChanges = 1;
-      }
-    }
-  }
-
-  if (pending.type === "staff-shortage") {
-    const personId = pending.personId;
-    const businessId = pending.businessId;
-    if (choiceId === "help") {
-      balanceDelta = selected.payout ?? 36;
-      fatigueDelta = 5;
-      outcome = "Очередь разгружена. Рабочая точка получила короткое окно стабильной работы.";
-      if (businessId) {
-        working = {
-          ...working,
-          economy: applyBusinessIntervention(
-            working.economy,
-            businessId,
-            { staffing: 16, cash: -(selected.payout ?? 36), demand: -4 },
-            working.district.transitDelayMinutes
-          )
-        };
-      }
-      if (personId) {
-        working = {
-          ...working,
-          people: adjustPersonProblem(
-            recordPlayerAction(
-              working.people,
-              working.world.meta.seed,
-              personId,
-              working.timestamp,
-              "Игрок без спора встал в перегруженную смену и помог удержать обслуживание.",
-              { trust: 4, respect: 5, irritation: -2, importance: 72, emotionalValue: 28 }
-            ),
-            personId,
-            -5,
-            4
-          )
-        };
-        relationChanges = 1;
-      }
-    } else if (choiceId === "negotiate") {
-      balanceDelta = selected.payout ?? 58;
-      fatigueDelta = 3;
-      outcome = "Срочный тариф принят. Игрок закрыл только критическую часть смены.";
-      if (businessId) {
-        working = {
-          ...working,
-          economy: applyBusinessIntervention(
-            working.economy,
-            businessId,
-            { staffing: 10, cash: -(selected.payout ?? 58), demand: -2 },
-            working.district.transitDelayMinutes
-          )
-        };
-      }
-      if (personId) {
-        working = {
-          ...working,
-          people: adjustPersonProblem(
-            recordPlayerAction(
-              working.people,
-              working.world.meta.seed,
-              personId,
-              working.timestamp,
-              "Игрок помог перегруженной смене только после согласования повышенной оплаты.",
-              { trust: 1, respect: 2, irritation: 2, importance: 58, emotionalValue: 5 }
-            ),
-            personId,
-            -3,
-            2
-          )
-        };
-        relationChanges = 1;
-      }
-    } else if (choiceId === "refuse") {
-      outcome = "Игрок не вмешался. Рабочая точка продолжила смену без дополнительной помощи.";
-      if (personId) {
-        working = {
-          ...working,
-          people: recordPlayerAction(
-            working.people,
-            working.world.meta.seed,
-            personId,
-            working.timestamp,
-            "Игрок отказался помогать во время тяжёлой смены.",
-            { irritation: 3, respect: -1, importance: 40, emotionalValue: -10 }
-          )
-        };
-        relationChanges = 1;
-      }
-    }
-  }
-
-  if (pending.type === "personal-pressure") {
-    const personId = pending.personId;
-    if (choiceId === "listen") {
-      stressDelta = 1;
-      outcome = "Человек выговорился и точнее объяснил, что с ним происходит.";
-      if (personId) {
-        working = {
-          ...working,
-          people: adjustPersonProblem(
-            recordPlayerAction(
-              working.people,
-              working.world.meta.seed,
-              personId,
-              working.timestamp,
-              "Игрок остановился и выслушал личную проблему.",
-              { trust: 3, respect: 1, irritation: -1, importance: 46, emotionalValue: 14 }
-            ),
-            personId,
-            -2,
-            2
-          )
-        };
-        relationChanges = 1;
-      }
-    } else if (choiceId === "help") {
-      const helpCost = Number(pending.payload.helpCost ?? selected.cost ?? 0);
-      balanceDelta = -helpCost;
-      fatigueDelta = helpCost ? 0 : 4;
-      outcome = helpCost
-        ? `Игрок передал ₵ ${helpCost}. Срочное давление на человека снизилось.`
-        : "Игрок потратил время на конкретную помощь. Проблема временно ослабла.";
-      if (personId) {
-        working = {
-          ...working,
-          people: adjustPersonProblem(
-            recordPlayerAction(
-              working.people,
-              working.world.meta.seed,
-              personId,
-              working.timestamp,
-              helpCost
-                ? `Игрок передал ₵ ${helpCost} на срочный расход.`
-                : "Игрок лично помог с текущей бытовой проблемой.",
-              helpCost
-                ? { trust: 6, respect: 5, irritation: -3, debtToPlayer: helpCost, importance: 82, emotionalValue: 38 }
-                : { trust: 5, respect: 6, irritation: -2, importance: 76, emotionalValue: 32 }
-            ),
-            personId,
-            -10,
-            8,
-            helpCost
-          )
-        };
-        relationChanges = 1;
-      }
-    } else if (choiceId === "leave") {
-      outcome = "Разговор закончен. Проблема осталась на человеке.";
-      if (personId) {
-        working = {
-          ...working,
-          people: recordPlayerAction(
-            working.people,
-            working.world.meta.seed,
-            personId,
-            working.timestamp,
-            "Игрок прервал разговор и ушёл по своим делам.",
-            { trust: -1, irritation: 3, importance: 38, emotionalValue: -10 }
-          )
-        };
-        relationChanges = 1;
-      }
-    }
-  }
-
-  const progressed = progressLife(working, selected.timeMinutes, {
-    category,
-    title: `${pending.title}: решение принято.`,
-    detail: `${selected.label} · ${outcome}`,
-    importance: pending.type === "courier-inspection" ? 3 : 2,
-    balanceDelta,
-    fatigueDelta,
-    stressDelta,
-    relationChanges,
-    activity: `На месте: ${locationNameForSession(working, pending.locationId)}`,
-    suppressSituationGeneration: true,
-    ignorePendingSituation: true
-  });
-  const situations = closeSituation(session.situations, choiceId, progressed.timestamp, outcome);
-  const person = getPerson(progressed.people, pending.personId);
-  return {
-    ...progressed,
-    situations,
-    currentActivity: `На месте: ${locationNameForSession(progressed, pending.locationId)}`,
-    world: person
-      ? { ...progressed.world, primaryContactId: person.id }
-      : progressed.world,
-    primaryContact: person
-      ? toKnownNpc(person, progressed.world.locations, progressed.timestamp)
-      : progressed.primaryContact
-  };
-}
 
 export function acceptPersonalRequest(session: GameSession, requestId: string): GameSession {
-  if (session.situations.pending) return session;
   const request = session.pressure.requests.find((item) => item.id === requestId);
   if (!request || request.status !== "open" || request.dueAt <= session.timestamp) return session;
   const person = getPerson(session.people, request.personId);
@@ -852,7 +446,6 @@ export function acceptPersonalRequest(session: GameSession, requestId: string): 
 }
 
 export function declinePersonalRequest(session: GameSession, requestId: string): GameSession {
-  if (session.situations.pending) return session;
   const request = session.pressure.requests.find((item) => item.id === requestId);
   if (!request || (request.status !== "open" && request.status !== "accepted")) return session;
   const pressure = declineNpcRequestState(session.pressure, requestId);
@@ -878,7 +471,6 @@ export function declinePersonalRequest(session: GameSession, requestId: string):
 }
 
 export function completePersonalRequest(session: GameSession, requestId: string): GameSession {
-  if (session.situations.pending) return session;
   const request = session.pressure.requests.find((item) => item.id === requestId);
   if (!request || request.status !== "accepted") return session;
   const person = getPerson(session.people, request.personId);
@@ -948,7 +540,6 @@ export function completePersonalRequest(session: GameSession, requestId: string)
 }
 
 export function payPlayerObligation(session: GameSession, obligationId: string): GameSession {
-  if (session.situations.pending) return session;
   const originalObligation = session.pressure.obligations.find((item) => item.id === obligationId);
   const payment = payObligationState(session.pressure, obligationId, session.timestamp + 2 * 60_000, session.player.balance);
   if (!payment) return session;
@@ -990,7 +581,6 @@ export function payPlayerObligation(session: GameSession, obligationId: string):
 }
 
 export function requestRentExtension(session: GameSession): GameSession {
-  if (session.situations.pending) return session;
   const rent = session.pressure.obligations.find((item) => item.type === "rent" && item.status !== "paid");
   const manager = rent?.creditorPersonId ? getPerson(session.people, rent.creditorPersonId) : null;
   if (!rent || !manager) return session;
@@ -1031,7 +621,6 @@ export function requestRentExtension(session: GameSession): GameSession {
 }
 
 export function requestEmergencyLoan(session: GameSession, personId: string): GameSession {
-  if (session.situations.pending) return session;
   const person = getPerson(session.people, personId);
   if (!person) return session;
   const existing = session.pressure.obligations.some((item) => item.type === "personal" && item.creditorPersonId === personId && item.status !== "paid");
@@ -1094,7 +683,6 @@ export function requestEmergencyLoan(session: GameSession, personId: string): Ga
 }
 
 export function buyFoodAtCurrentLocation(session: GameSession, productId: string): GameSession {
-  if (session.situations.pending) return session;
   const location = session.world.locations.find((item) => item.id === session.life.currentLocationId);
   if (!location || !isLocationOpen(location, session.timestamp)) return session;
   const product = getFoodProduct(productId);
@@ -1121,7 +709,6 @@ export function buyFoodAtCurrentLocation(session: GameSession, productId: string
 }
 
 export function orderFoodToHome(session: GameSession, productId: string): GameSession {
-  if (session.situations.pending) return session;
   if (session.pressure.housingStatus !== "active") return session;
   const market = session.world.locations.find((location) => location.type === "market");
   if (!market) return session;
@@ -1153,7 +740,6 @@ export function orderFoodToHome(session: GameSession, productId: string): GameSe
 }
 
 export function eatFoodFromStorage(session: GameSession, productId: string): GameSession {
-  if (session.situations.pending) return session;
   const product = getFoodProduct(productId);
   const atHome = session.life.currentLocationId === session.life.housing.locationId;
   if (!canPrepare(product.requirement, session.life.food.appliances, atHome)) return session;
@@ -1182,7 +768,6 @@ export function eatFoodFromStorage(session: GameSession, productId: string): Gam
 }
 
 export function discardSpoiled(session: GameSession): GameSession {
-  if (session.situations.pending) return session;
   const result = discardSpoiledFood(session.life.food, session.timestamp);
   if (!result.discarded) return session;
   return {
@@ -1196,7 +781,6 @@ export function discardSpoiled(session: GameSession): GameSession {
 }
 
 export function sleepAtHome(session: GameSession, hours: number): GameSession {
-  if (session.situations.pending) return session;
   if (session.life.currentLocationId !== session.life.housing.locationId || session.pressure.housingStatus === "evicted") return session;
   const recovery = calculateSleepRecovery(session.life.housing, hours);
   const progressed = progressLife(session, hours * 60, {
