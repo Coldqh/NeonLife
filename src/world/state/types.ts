@@ -13,6 +13,7 @@ import type { LocalEconomyState } from "../../gameplay/economy/types";
 import type { PopulationState } from "../../simulation/population/types";
 import type { SimulationKernelState } from "../../simulation/kernel/types";
 import type { InfrastructureState } from "../../simulation/infrastructure/types";
+import type { ProductionState } from "../../simulation/production/types";
 
 export interface CityState {
   id: EntityId;
@@ -105,6 +106,7 @@ export interface GameSession {
   population: PopulationState;
   kernel: SimulationKernelState;
   infrastructure: InfrastructureState;
+  production: ProductionState;
   events: WorldEvent[];
   eventQueue: ScheduledWorldEvent[];
   currentActivity: string;

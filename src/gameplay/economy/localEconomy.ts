@@ -232,16 +232,9 @@ export function advanceLocalEconomy(
       const passiveRevenue = Math.round(demand * business.priceIndex / 58);
       const operatingCost = Math.max(8, Math.round(10 + business.capacityLevel * 4 + pulse.transitDelayMinutes * 0.35));
       let cash = Math.max(-500, business.cash + passiveRevenue - operatingCost);
-      const canRestock = stock < 48 && cash > 420 && pulse.transitDelayMinutes < 18;
-      const restockSucceeded = canRestock && rng.chance(0.62 - Math.min(0.3, pulse.transitDelayMinutes / 60));
-      let restockCost = 0;
-      if (restockSucceeded) {
-        const restock = rng.integer(80, 160);
-        stock = clamp(stock + restock);
-        restockCost = restock * 2;
-        cash -= restockCost;
-        food = restockFoodStock(food, business.locationId, restock);
-      }
+      // Wholesale inventory is replenished only by Production & Logistics.
+      // This cycle consumes stock and records demand, but never creates supplies from nowhere.
+      const restockCost = 0;
       let status = statusFor(stock, staffing, cash);
       if (infrastructureLevel < 20) status = "closed";
       else if (infrastructureLevel < 45 && status !== "closed") status = "restricted";

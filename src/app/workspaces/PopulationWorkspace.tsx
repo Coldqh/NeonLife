@@ -3,7 +3,7 @@ import { getFoodProduct } from "../../data/products/foodCatalog";
 import type { HouseholdStatus } from "../../simulation/population/types";
 import type { GameSession } from "../../world/state/types";
 
-type PopulationTab = "districts" | "households" | "housing" | "labor" | "infrastructure" | "flow";
+type PopulationTab = "districts" | "households" | "housing" | "labor" | "infrastructure" | "supply" | "flow";
 
 function statusRank(status: HouseholdStatus): number {
   if (status === "displaced") return 4;
@@ -32,6 +32,8 @@ function kernelEntityName(session: GameSession, entityId: string): string {
   if (organization) return organization.name;
   const business = session.economy.businesses.find((item) => item.id === entityId);
   if (business) return locationName(session, business.locationId);
+  const facility = session.production.facilities.find((item) => item.id === entityId);
+  if (facility) return facility.name;
   const household = session.population.households.find((item) => item.id === entityId);
   if (household) return `${household.kind.toUpperCase()} HOUSEHOLD`;
   const resident = session.population.residents.find((item) => item.id === entityId);
@@ -57,6 +59,21 @@ function skillLabel(skill: string): string {
   return labels[skill] ?? skill.toUpperCase();
 }
 
+
+function productionResourceLabel(resource: string): string {
+  return resource.replace(/-units$|-feedstock$/g, "").replace(/-/g, " ").toUpperCase();
+}
+
+function facilityInventoryLabel(session: GameSession, facilityId: string): string {
+  const facility = session.production.facilities.find((item) => item.id === facilityId);
+  if (!facility?.inventory.length) return "EMPTY";
+  return facility.inventory
+    .slice()
+    .sort((left, right) => right.amount - left.amount)
+    .slice(0, 3)
+    .map((item) => `${productionResourceLabel(item.resource)} ${Math.round(item.amount)}`)
+    .join(" · ");
+}
 function pantryLabel(session: GameSession, householdId: string): string {
   const household = session.population.households.find((item) => item.id === householdId);
   if (!household?.pantry.length) return "EMPTY";
@@ -104,6 +121,7 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
         <button type="button" className={tab === "housing" ? "is-active" : ""} onClick={() => setTab("housing")}>ЖИЛЬЁ</button>
         <button type="button" className={tab === "labor" ? "is-active" : ""} onClick={() => setTab("labor")}>ТРУД</button>
         <button type="button" className={tab === "infrastructure" ? "is-active" : ""} onClick={() => setTab("infrastructure")}>СЕТИ</button>
+        <button type="button" className={tab === "supply" ? "is-active" : ""} onClick={() => setTab("supply")}>СНАБЖЕНИЕ</button>
         <button type="button" className={tab === "flow" ? "is-active" : ""} onClick={() => setTab("flow")}>ПОТОКИ</button>
       </nav>
 
@@ -261,6 +279,57 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
               ))}
               {!session.infrastructure.incidents.some((item) => item.status === "active") ? <div className="empty-terminal">Активных аварий нет.</div> : null}
             </section>
+          </div>
+        </section>
+      ) : null}
+
+      {tab === "supply" ? (
+        <section className="production-workspace">
+          <div className="production-summary">
+            <div><span>FACILITIES</span><strong>{session.production.facilities.length}</strong><small>{session.production.facilities.filter((item) => item.status === "offline").length} offline</small></div>
+            <div><span>ACTIVE SHIPMENTS</span><strong>{session.production.shipments.filter((item) => item.status === "in-transit").length}</strong><small>{session.production.totals.shipmentsDelivered} delivered</small></div>
+            <div><span>CONTRACTS</span><strong>{session.production.contracts.length}</strong><small>{session.production.contracts.filter((item) => item.status === "breached").length} breached</small></div>
+            <div><span>PRODUCED</span><strong>{Math.round(session.production.totals.producedUnits).toLocaleString("ru-RU")}</strong><small>{Math.round(session.production.totals.importedUnits).toLocaleString("ru-RU")} imported</small></div>
+            <div><span>WHOLESALE</span><strong>₵ {Math.round(session.production.totals.legalWholesaleRevenue).toLocaleString("ru-RU")}</strong><small>legal chain</small></div>
+            <div><span>BACKCHANNEL</span><strong>₵ {Math.round(session.production.totals.blackMarketRevenue).toLocaleString("ru-RU")}</strong><small>unregistered supply</small></div>
+          </div>
+          <div className="production-columns">
+            <section className="production-list">
+              <header><span>PRODUCTION NODES</span><strong>PHYSICAL INVENTORY</strong></header>
+              {session.production.facilities.map((facility) => (
+                <article className={`production-facility production-facility--${facility.status}`} key={facility.id}>
+                  <div><span>{facility.kind.replace(/-/g, " ").toUpperCase()}</span><strong>{facility.name}</strong><small>{locationName(session, facility.locationId)}</small></div>
+                  <div><span>STATUS</span><strong>{facility.status.toUpperCase()}</strong><small>condition {Math.round(facility.condition)}%</small></div>
+                  <div><span>INPUT / OUTPUT</span><strong>{facilityInventoryLabel(session, facility.id)}</strong><small>staff {facility.staffing}% · infra {facility.infrastructureLevel}%</small></div>
+                  <div><span>CASH</span><strong>₵ {Math.round(facility.cash).toLocaleString("ru-RU")}</strong><small>backlog {facility.productionBacklog}</small></div>
+                </article>
+              ))}
+            </section>
+            <section className="production-list">
+              <header><span>SHIPMENTS</span><strong>WAREHOUSE → BUYER</strong></header>
+              {session.production.shipments.slice(-16).reverse().map((shipment) => (
+                <article className={`production-shipment production-shipment--${shipment.legality}`} key={shipment.id}>
+                  <div><span>{productionResourceLabel(shipment.resource)}</span><strong>{shipment.units} UNITS</strong><small>{shipment.legality.toUpperCase()}</small></div>
+                  <div><span>STATUS</span><strong>{shipment.status.toUpperCase()}</strong><small>condition {shipment.condition}%</small></div>
+                  <div><span>ROUTE</span><strong>{kernelEntityName(session, shipment.sourceFacilityId)}</strong><small>→ {kernelEntityName(session, shipment.targetFacilityId ?? shipment.targetBusinessId ?? "UNKNOWN")}</small></div>
+                  <div><span>VALUE</span><strong>₵ {Math.round(shipment.units * shipment.unitPrice).toLocaleString("ru-RU")}</strong><small>delay {shipment.delayHours}h</small></div>
+                </article>
+              ))}
+              {!session.production.shipments.length ? <div className="empty-terminal">Поставки появятся после первого шестичасового цикла.</div> : null}
+            </section>
+          </div>
+          <div className="production-contracts">
+            {session.production.contracts
+              .filter((item) => item.status !== "active" || item.breachCount > 0)
+              .slice(0, 12)
+              .map((contract) => (
+                <article key={contract.id}>
+                  <span>{productionResourceLabel(contract.resource)}</span>
+                  <strong>{contract.status.toUpperCase()} · {contract.breachCount} BREACH</strong>
+                  <small>{kernelEntityName(session, contract.sourceFacilityId)} → {kernelEntityName(session, contract.targetFacilityId ?? contract.targetBusinessId ?? "UNKNOWN")}</small>
+                </article>
+              ))}
+            {!session.production.contracts.some((item) => item.status !== "active" || item.breachCount > 0) ? <div className="empty-terminal">Все договоры снабжения исполняются.</div> : null}
           </div>
         </section>
       ) : null}

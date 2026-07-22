@@ -5120,3 +5120,94 @@ button:disabled {
 .infrastructure-bottom article span,
 .infrastructure-bottom article small { color: var(--muted-2); font: 600 6px/1.2 var(--font-mono); }
 .infrastructure-bottom article strong { color: var(--text); font: 700 7px/1.2 var(--font-mono); }
+
+/* v0.16.0 — production and logistics */
+.production-workspace {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  overflow: auto;
+}
+.production-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,.012);
+}
+.production-summary > div {
+  min-width: 0;
+  min-height: 56px;
+  padding: 8px;
+  display: grid;
+  gap: 3px;
+  border-right: 1px solid var(--line);
+}
+.production-summary > div:last-child { border-right: 0; }
+.production-summary span,
+.production-summary small,
+.production-list span,
+.production-list small,
+.production-contracts span,
+.production-contracts small { color: var(--muted-2); font: 600 6px/1.2 var(--font-mono); }
+.production-summary strong { color: var(--cyan); font: 700 12px/1.15 var(--font-mono); }
+.production-columns {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+.production-list {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: rgba(5,15,21,.9);
+}
+.production-list > header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  min-height: 38px;
+  padding: 7px 9px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(5,15,21,.98);
+}
+.production-list > header span,
+.production-list > header strong { font: 600 7px/1.2 var(--font-mono); }
+.production-list > header span { color: var(--muted-2); }
+.production-list > header strong { color: var(--cyan); }
+.production-list > article {
+  min-height: 60px;
+  padding: 7px 9px;
+  display: grid;
+  grid-template-columns: minmax(0,1.35fr) 76px minmax(100px,1fr) 80px;
+  gap: 7px;
+  align-items: center;
+  border-bottom: 1px solid rgba(95,230,255,.08);
+}
+.production-list > article > div { min-width: 0; display: grid; gap: 3px; }
+.production-list strong { overflow: hidden; color: var(--text); font: 700 8px/1.2 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.production-facility--strained strong:nth-child(2),
+.production-facility--restricted strong:nth-child(2) { color: var(--yellow); }
+.production-facility--offline strong:nth-child(2) { color: var(--red); }
+.production-shipment--unregistered { border-left: 2px solid var(--red); }
+.production-contracts {
+  min-height: 45px;
+  max-height: 112px;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0,1fr));
+  gap: 5px;
+}
+.production-contracts > article {
+  min-width: 0;
+  padding: 7px 8px;
+  display: grid;
+  gap: 3px;
+  border: 1px solid rgba(255,173,77,.24);
+  background: rgba(255,173,77,.025);
+}
+.production-contracts strong { overflow: hidden; color: var(--yellow); font: 700 8px/1.2 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }

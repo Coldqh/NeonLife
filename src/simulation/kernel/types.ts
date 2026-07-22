@@ -9,6 +9,7 @@ export type KernelEntityKind =
   | "location"
   | "district"
   | "city"
+  | "production-facility"
   | "system";
 
 export type KernelResource =
@@ -24,11 +25,17 @@ export type KernelResource =
   | "energy-units"
   | "water-units"
   | "waste-capacity"
-  | "data-capacity";
+  | "data-capacity"
+  | "biomass-units"
+  | "chemical-units"
+  | "alloy-units"
+  | "electronic-units"
+  | "data-substrate-units"
+  | "packaging-units";
 
-export type KernelAssetKind = "business-operation" | "housing-block" | "facility" | "district-land" | "infrastructure-node" | "infrastructure-link";
+export type KernelAssetKind = "business-operation" | "housing-block" | "facility" | "district-land" | "infrastructure-node" | "infrastructure-link" | "production-facility" | "warehouse";
 export type KernelAssetStatus = "active" | "strained" | "restricted" | "offline";
-export type KernelContractKind = "employment" | "lease" | "supply" | "service" | "loan" | "utility";
+export type KernelContractKind = "employment" | "lease" | "supply" | "service" | "loan" | "utility" | "procurement" | "logistics";
 export type KernelContractStatus = "active" | "suspended" | "breached" | "ended";
 export type KernelTransactionReason =
   | "wage"
@@ -44,6 +51,15 @@ export type KernelTransactionReason =
   | "player-action"
   | "utility-service"
   | "infrastructure-maintenance"
+  | "import-purchase"
+  | "production-consumption"
+  | "production-output"
+  | "production-operating-cost"
+  | "shipment-dispatch"
+  | "shipment-delivery"
+  | "shipment-loss"
+  | "wholesale-delivery"
+  | "black-market-delivery"
   | "domain-reconciliation";
 
 export interface KernelResourceBalance {

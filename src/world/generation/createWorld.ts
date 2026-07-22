@@ -14,6 +14,7 @@ import { createHumanNetwork, getPerson, toKnownNpc } from "../../people/network/
 import { createPopulationState } from "../../simulation/population/populationSystem";
 import { createSimulationKernel } from "../../simulation/kernel/simulationKernel";
 import { createInfrastructureState } from "../../simulation/infrastructure/infrastructureSystem";
+import { createProductionState } from "../../simulation/production/productionSystem";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
 import type {
@@ -222,6 +223,7 @@ export function createWorldSession(seed: string): GameSession {
   const pressure = createPressureState(seed, INITIAL_GAME_TIMESTAMP, housingState, people.people, locations);
 
   const infrastructure = createInfrastructureState(seed, INITIAL_GAME_TIMESTAMP, city, districts, locations, organizations, population, economy);
+  const production = createProductionState(seed, INITIAL_GAME_TIMESTAMP, districts, locations, organizations, economy);
 
   const world: WorldState = {
     meta,
@@ -243,7 +245,8 @@ export function createWorldSession(seed: string): GameSession {
     player,
     population,
     economy,
-    infrastructure
+    infrastructure,
+    production
   });
 
   return {
@@ -258,6 +261,7 @@ export function createWorldSession(seed: string): GameSession {
     population,
     kernel,
     infrastructure,
+    production,
     events: createInitialEvents({
       seed,
       districtName: lower.name,

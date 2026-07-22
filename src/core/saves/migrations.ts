@@ -15,6 +15,7 @@ import type { PopulationState } from "../../simulation/population/types";
 import { normalizeLaborMarketState } from "../../simulation/labor/laborMarket";
 import { normalizeSimulationKernel } from "../../simulation/kernel/simulationKernel";
 import { normalizeInfrastructureState } from "../../simulation/infrastructure/infrastructureSystem";
+import { normalizeProductionState } from "../../simulation/production/productionSystem";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -334,6 +335,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
   const playerState = payload.player as unknown as GameSession["player"];
   const cityState = world.city as unknown as GameSession["world"]["city"];
   const infrastructure = normalizeInfrastructureState(payload.infrastructure, seed, timestamp, cityState, districts, locations, organizations, population, economy);
+  const production = normalizeProductionState(payload.production, seed, timestamp, districts, locations, organizations, economy);
   const kernel = normalizeSimulationKernel(payload.kernel, {
     timestamp,
     seed,
@@ -344,7 +346,8 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     player: playerState,
     population,
     economy,
-    infrastructure
+    infrastructure,
+    production
   });
 
   const { situations: _discardedSituations, ...payloadWithoutSituations } = payload;
@@ -360,6 +363,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     population,
     kernel,
     infrastructure,
+    production,
     currentActivity: `На месте: ${existingLocationName}`,
     world: {
       ...world,
