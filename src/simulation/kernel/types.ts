@@ -60,6 +60,8 @@ export type KernelTransactionReason =
   | "shipment-loss"
   | "wholesale-delivery"
   | "black-market-delivery"
+  | "organization-investment"
+  | "interorganization-transfer"
   | "domain-reconciliation";
 
 export interface KernelResourceBalance {

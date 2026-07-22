@@ -15,6 +15,7 @@ import { createPopulationState } from "../../simulation/population/populationSys
 import { createSimulationKernel } from "../../simulation/kernel/simulationKernel";
 import { createInfrastructureState } from "../../simulation/infrastructure/infrastructureSystem";
 import { createProductionState } from "../../simulation/production/productionSystem";
+import { createOrganizationEcosystem } from "../../simulation/organizations/organizationSystem";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
 import type {
@@ -181,17 +182,20 @@ export function createWorldSession(seed: string): GameSession {
   const medical = createOrganization(seed, "medical", "CIVIC MEDICAL UNION", "CMU", "medical", 31_600_000, 57, 7_120);
   const police = createOrganization(seed, "police", "DISTRICT SECURITY BUREAU", "DSB", "police", 27_900_000, 32, 6_300);
   const gang = createOrganization(seed, "cutwire", "CUTWIRE", "CW", "gang", 410_000, 19, 86);
-  const organizations = [aurelian, vectra, meshline, transit, medical, police, gang];
+  const habstack = createOrganization(seed, "habstack-trust", "HABSTACK PROPERTY TRUST", "HAB/TRUST", "company", 780_000, 28, 54);
+  const marketCoop = createOrganization(seed, "underline-market", "UNDERLINE MARKET COOPERATIVE", "MKT/COOP", "independent", 620_000, 44, 96);
+  const kitchenCollective = createOrganization(seed, "night-kitchen", "NIGHT KITCHEN COLLECTIVE", "FOOD/COL", "independent", 240_000, 38, 34);
+  const organizations = [aurelian, vectra, meshline, transit, medical, police, gang, habstack, marketCoop, kitchenCollective];
 
-  const housing = createLocation(seed, "capsule", lower.id, "HAB-STACK 07", "HAB/U07", "housing", 31, undefined, 0, 24);
-  const canteen = createLocation(seed, "canteen", lower.id, "NIGHT KITCHEN 14", "FOOD/U14", "food", 24, undefined, 18, 5);
+  const housing = createLocation(seed, "capsule", lower.id, "HAB-STACK 07", "HAB/U07", "housing", 31, habstack.id, 0, 24);
+  const canteen = createLocation(seed, "canteen", lower.id, "NIGHT KITCHEN 14", "FOOD/U14", "food", 24, kitchenCollective.id, 18, 5);
   const transitNode = createLocation(seed, "transit-node", lower.id, "TRANSIT NODE U-07", "MOVE/U07", "transport", 46, transit.id, 0, 24);
   const workerDorm = createLocation(seed, "worker-dorm", industrial.id, "WORKER DORM 12", "HAB/R12", "housing", 47, vectra.id, 0, 24);
   const workshop = createLocation(seed, "workshop", industrial.id, "VECTRA SERVICE NODE", "VEC/SN-12", "workshop", 58, vectra.id, 6, 2);
   const clinic = createLocation(seed, "clinic", lower.id, "CMU WALK-IN CLINIC", "CMU/U03", "clinic", 52, medical.id, 0, 24);
   const crownHousing = createLocation(seed, "crown-housing", corporate.id, "CROWN RESIDENCES 03", "HAB/T03", "housing", 88, aurelian.id, 0, 24);
   const tower = createLocation(seed, "tower", corporate.id, "AURELIAN CROWN TOWER", "AUR/CT-01", "office", 94, aurelian.id, 7, 22);
-  const market = createLocation(seed, "market", lower.id, "UNDERLINE NIGHT MARKET", "MKT/U09", "market", 26, undefined, 16, 6);
+  const market = createLocation(seed, "market", lower.id, "UNDERLINE NIGHT MARKET", "MKT/U09", "market", 26, marketCoop.id, 16, 6);
   const courierHub = createLocation(seed, "courier-hub", lower.id, "MESHLINE DISPATCH HALL", "MSH/U11", "transport", 41, meshline.id, 0, 24);
   const locations = [housing, canteen, transitNode, workerDorm, workshop, clinic, crownHousing, tower, market, courierHub];
   attachLocations(districts, organizations, locations);
@@ -248,6 +252,18 @@ export function createWorldSession(seed: string): GameSession {
     infrastructure,
     production
   });
+  const organizationEcosystem = createOrganizationEcosystem({
+    timestamp: INITIAL_GAME_TIMESTAMP,
+    seed,
+    organizations,
+    population,
+    economy,
+    infrastructure,
+    production,
+    kernel,
+    districts,
+    locations
+  });
 
   return {
     schemaVersion: SAVE_SCHEMA_VERSION,
@@ -262,6 +278,7 @@ export function createWorldSession(seed: string): GameSession {
     kernel,
     infrastructure,
     production,
+    organizationEcosystem,
     events: createInitialEvents({
       seed,
       districtName: lower.name,

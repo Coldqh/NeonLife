@@ -13,9 +13,10 @@ import type { LocalEconomyState } from "../../gameplay/economy/types";
 import { createPopulationState } from "../../simulation/population/populationSystem";
 import type { PopulationState } from "../../simulation/population/types";
 import { normalizeLaborMarketState } from "../../simulation/labor/laborMarket";
-import { normalizeSimulationKernel } from "../../simulation/kernel/simulationKernel";
+import { advanceSimulationKernel, normalizeSimulationKernel } from "../../simulation/kernel/simulationKernel";
 import { normalizeInfrastructureState } from "../../simulation/infrastructure/infrastructureSystem";
 import { normalizeProductionState } from "../../simulation/production/productionSystem";
+import { normalizeOrganizationEcosystem } from "../../simulation/organizations/organizationSystem";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -117,9 +118,13 @@ function normalizePopulationState(
         lastLedger: isObject(raw.lastLedger) ? { ...(raw.lastLedger as unknown as NonNullable<PopulationState["households"][number]["lastLedger"]>), utilitySpent: typeof (raw.lastLedger as Record<string, unknown>).utilitySpent === "number" ? Number((raw.lastLedger as Record<string, unknown>).utilitySpent) : 0 } : null
       };
     }),
-    employments: value.employments.map((employment) => ({ ...employment, unpaidDays: typeof (employment as unknown as Record<string, unknown>).unpaidDays === "number" ? (employment as unknown as { unpaidDays: number }).unpaidDays : 0 })),
+    employments: value.employments.map((employment) => ({
+      ...employment,
+      organizationId: employment.organizationId ?? locations.find((location) => location.id === employment.locationId)?.organizationId,
+      unpaidDays: typeof (employment as unknown as Record<string, unknown>).unpaidDays === "number" ? (employment as unknown as { unpaidDays: number }).unpaidDays : 0
+    })),
     housing: Array.isArray((value as unknown as Record<string, unknown>).housing)
-      ? (value as unknown as { housing: PopulationState["housing"] }).housing
+      ? (value as unknown as { housing: PopulationState["housing"] }).housing.map((housing) => ({ ...housing, ownerOrganizationId: housing.ownerOrganizationId ?? locations.find((location) => location.id === housing.locationId)?.organizationId }))
       : fresh.housing,
     laborMarket: normalizeLaborMarketState(
       isObject((value as unknown as Record<string, unknown>).laborMarket)
@@ -154,6 +159,7 @@ function normalizeEconomyState(
       return {
         ...fallback,
         ...business,
+        organizationId: business.organizationId ?? fallback.organizationId,
         targetStaff: Math.max(fallback.targetStaff, business.targetStaff ?? 0)
       };
     })
@@ -197,6 +203,39 @@ function ensureDistrictHousing(
     });
   }
   return next;
+}
+
+
+function ensureLocalOperators(
+  seed: string,
+  sourceOrganizations: GameSession["world"]["organizations"],
+  sourceLocations: LocationState[]
+): { organizations: GameSession["world"]["organizations"]; locations: LocationState[] } {
+  const organizations = sourceOrganizations.map((organization) => ({ ...organization, locationIds: [...organization.locationIds] }));
+  const definitions: Array<{ scope: string; name: string; code: string; type: GameSession["world"]["organizations"][number]["type"]; budget: number; reputation: number; employeeCount: number; locationType: LocationState["type"]; locationName: string }> = [
+    { scope: "habstack-trust", name: "HABSTACK PROPERTY TRUST", code: "HAB/TRUST", type: "company", budget: 780_000, reputation: 28, employeeCount: 54, locationType: "housing", locationName: "HAB-STACK 07" },
+    { scope: "underline-market", name: "UNDERLINE MARKET COOPERATIVE", code: "MKT/COOP", type: "independent", budget: 620_000, reputation: 44, employeeCount: 96, locationType: "market", locationName: "UNDERLINE NIGHT MARKET" },
+    { scope: "night-kitchen", name: "NIGHT KITCHEN COLLECTIVE", code: "FOOD/COL", type: "independent", budget: 240_000, reputation: 38, employeeCount: 34, locationType: "food", locationName: "NIGHT KITCHEN 14" }
+  ];
+  let locations = sourceLocations.map((location) => ({ ...location }));
+  for (const definition of definitions) {
+    const id = createStableEntityId("org", `${seed}:${definition.scope}`);
+    let organization = organizations.find((entry) => entry.id === id);
+    if (!organization) {
+      organization = { id, name: definition.name, code: definition.code, type: definition.type, budget: definition.budget, reputation: definition.reputation, employeeCount: definition.employeeCount, locationIds: [] };
+      organizations.push(organization);
+    }
+    locations = locations.map((location) => {
+      const matches = location.name === definition.locationName || (location.type === definition.locationType && !location.organizationId && definition.locationType !== "housing");
+      if (!matches) return location;
+      if (!organization!.locationIds.includes(location.id)) organization!.locationIds.push(location.id);
+      return { ...location, organizationId: id };
+    });
+  }
+  for (const organization of organizations) {
+    organization.locationIds = locations.filter((location) => location.organizationId === organization.id).map((location) => location.id);
+  }
+  return { organizations, locations };
 }
 
 function migrateCourierOrder(order: unknown, people: PersonState[], index: number): CourierOrder | null {
@@ -276,13 +315,15 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
   const timestamp = payload.timestamp as number;
   const rawLocations = migrateLocationSchedules((Array.isArray(world.locations) ? world.locations : []) as LocationState[]);
   const districts = (Array.isArray(world.districts) ? world.districts : []) as GameSession["world"]["districts"];
-  const organizations = (Array.isArray(world.organizations) ? world.organizations : []) as GameSession["world"]["organizations"];
-  const locations = ensureDistrictHousing(String((world.meta as Record<string, unknown> | undefined)?.seed ?? "NEON-LIFE-MIGRATED"), districts, rawLocations);
+  const seed = String(meta?.seed ?? "NEON-LIFE-MIGRATED");
+  const districtHousingLocations = ensureDistrictHousing(seed, districts, rawLocations);
+  const localOperators = ensureLocalOperators(seed, (Array.isArray(world.organizations) ? world.organizations : []) as GameSession["world"]["organizations"], districtHousingLocations);
+  const organizations = localOperators.organizations;
+  const locations = localOperators.locations;
   const housingLocation = locations.find((location) => location.type === "housing") ?? locations[0];
   const marketLocation = locations.find((location) => location.type === "market") ?? locations[0];
   const kitchenLocation = locations.find((location) => location.type === "food") ?? marketLocation;
   const clinicLocation = locations.find((location) => location.type === "clinic") ?? marketLocation;
-  const seed = String(meta?.seed ?? "NEON-LIFE-MIGRATED");
   const existingLife = isObject(payload.life) ? payload.life : null;
   const migratedEvents = (Array.isArray(payload.events) ? payload.events : []).filter((event) => !isLegacyStoryEvent(event));
   const migratedQueue = (Array.isArray(payload.eventQueue) ? payload.eventQueue : []).filter((event) => !isObject(event) || (event.type !== "vacancy-expiry" && event.type !== "grid-restoration"));
@@ -336,7 +377,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
   const cityState = world.city as unknown as GameSession["world"]["city"];
   const infrastructure = normalizeInfrastructureState(payload.infrastructure, seed, timestamp, cityState, districts, locations, organizations, population, economy);
   const production = normalizeProductionState(payload.production, seed, timestamp, districts, locations, organizations, economy);
-  const kernel = normalizeSimulationKernel(payload.kernel, {
+  const baseKernel = normalizeSimulationKernel(payload.kernel, {
     timestamp,
     seed,
     city: cityState,
@@ -348,6 +389,32 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     economy,
     infrastructure,
     production
+  });
+  const organizationEcosystem = normalizeOrganizationEcosystem(payload.organizationEcosystem, {
+    timestamp,
+    seed,
+    organizations,
+    population,
+    economy,
+    infrastructure,
+    production,
+    kernel: baseKernel,
+    districts,
+    locations
+  });
+  const kernel = advanceSimulationKernel(baseKernel, {
+    timestamp,
+    seed,
+    city: cityState,
+    districts,
+    locations,
+    organizations,
+    player: playerState,
+    population,
+    economy,
+    infrastructure,
+    production,
+    organizationEcosystem
   });
 
   const { situations: _discardedSituations, ...payloadWithoutSituations } = payload;
@@ -364,11 +431,13 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     kernel,
     infrastructure,
     production,
+    organizationEcosystem,
     currentActivity: `На месте: ${existingLocationName}`,
     world: {
       ...world,
       primaryContactId: selectedPerson?.id ?? String(world.primaryContactId ?? "person-missing"),
-      locations
+      locations,
+      organizations
     },
     district: {
       ...district,

@@ -1701,3 +1701,29 @@
   .production-list > article { grid-template-columns: minmax(0,1fr) 52px 64px; }
   .production-list > article > div:nth-child(4) { display: none; }
 }
+
+/* v0.17.0 — organizations mobile density */
+@media (max-width: 760px) {
+  .population-tabs { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+  .organization-workspace { gap: 5px; }
+  .organization-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .organization-summary > div { min-height: 43px; padding: 5px 6px; border-bottom: 1px solid var(--line); }
+  .organization-summary strong { font-size: 9px; }
+  .organization-columns { grid-template-columns: 1fr; gap: 5px; }
+  .organization-list { max-height: 255px; }
+  .organization-list:nth-child(2) { display: none; }
+  .organization-card { min-height: 54px; padding: 5px 6px; grid-template-columns: minmax(0,1.35fr) minmax(78px,1fr) 62px 68px; gap: 4px; }
+  .organization-list span,
+  .organization-list small { font-size: 5px; }
+  .organization-list strong { font-size: 7px; }
+  .organization-relations { grid-template-columns: 1fr; max-height: 92px; }
+}
+@media (max-width: 430px) {
+  .population-tabs { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+  .population-tabs button { font-size: 3.45px; padding: 0; }
+  .organization-summary > div:nth-child(5),
+  .organization-summary > div:nth-child(6) { display: none; }
+  .organization-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .organization-card { grid-template-columns: minmax(0,1fr) 70px 60px; }
+  .organization-card > div:nth-child(4) { display: none; }
+}

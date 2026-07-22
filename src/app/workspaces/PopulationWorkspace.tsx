@@ -3,7 +3,7 @@ import { getFoodProduct } from "../../data/products/foodCatalog";
 import type { HouseholdStatus } from "../../simulation/population/types";
 import type { GameSession } from "../../world/state/types";
 
-type PopulationTab = "districts" | "households" | "housing" | "labor" | "infrastructure" | "supply" | "flow";
+type PopulationTab = "districts" | "households" | "housing" | "labor" | "infrastructure" | "supply" | "organizations" | "flow";
 
 function statusRank(status: HouseholdStatus): number {
   if (status === "displaced") return 4;
@@ -105,6 +105,9 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
   const kernel = session.kernel;
   const activeContracts = kernel.contracts.filter((contract) => contract.status === "active" || contract.status === "breached").length;
   const recentKernelTransactions = kernel.transactions.slice(-8).reverse();
+  const organizationState = session.organizationEcosystem;
+  const recentOrganizationDecisions = organizationState.decisions.slice(-14).reverse();
+  const strainedOrganizations = organizationState.actors.filter((actor) => actor.health === "strained" || actor.health === "distressed").length;
 
   return (
     <div className="population-workspace">
@@ -122,6 +125,7 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
         <button type="button" className={tab === "labor" ? "is-active" : ""} onClick={() => setTab("labor")}>ТРУД</button>
         <button type="button" className={tab === "infrastructure" ? "is-active" : ""} onClick={() => setTab("infrastructure")}>СЕТИ</button>
         <button type="button" className={tab === "supply" ? "is-active" : ""} onClick={() => setTab("supply")}>СНАБЖЕНИЕ</button>
+        <button type="button" className={tab === "organizations" ? "is-active" : ""} onClick={() => setTab("organizations")}>ОРГАНИЗАЦИИ</button>
         <button type="button" className={tab === "flow" ? "is-active" : ""} onClick={() => setTab("flow")}>ПОТОКИ</button>
       </nav>
 
@@ -330,6 +334,61 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
                 </article>
               ))}
             {!session.production.contracts.some((item) => item.status !== "active" || item.breachCount > 0) ? <div className="empty-terminal">Все договоры снабжения исполняются.</div> : null}
+          </div>
+        </section>
+      ) : null}
+
+
+      {tab === "organizations" ? (
+        <section className="organization-workspace">
+          <div className="organization-summary">
+            <div><span>ORGANIZATIONS</span><strong>{organizationState.actors.length}</strong><small>{strainedOrganizations} strained or distressed</small></div>
+            <div><span>AGREEMENTS</span><strong>{organizationState.agreements.filter((item) => item.status !== "ended").length}</strong><small>{organizationState.agreements.filter((item) => item.status === "breached").length} breached</small></div>
+            <div><span>DECISIONS</span><strong>{organizationState.totals.decisions}</strong><small>{organizationState.totals.blockedDecisions} blocked</small></div>
+            <div><span>CAPITAL COMMITTED</span><strong>₵ {Math.round(organizationState.totals.creditsCommitted).toLocaleString("ru-RU")}</strong><small>{organizationState.totals.investments} investments</small></div>
+            <div><span>EXPANSION / CUTS</span><strong>{organizationState.totals.expansions} / {organizationState.totals.contractions}</strong><small>capacity decisions</small></div>
+            <div><span>LEADERSHIP</span><strong>{organizationState.totals.leadershipChanges}</strong><small>autonomous changes</small></div>
+          </div>
+          <div className="organization-columns">
+            <section className="organization-list">
+              <header><span>ACTIVE INSTITUTIONS</span><strong>STRATEGY FROM REAL CONDITIONS</strong></header>
+              {organizationState.actors.map((actor) => {
+                const organization = session.world.organizations.find((item) => item.id === actor.organizationId);
+                const leader = actor.leadership.leaderResidentId ? residentName(session, actor.leadership.leaderResidentId) : "NO SIMULATED LEADER";
+                return (
+                  <article className={`organization-card organization-card--${actor.health}`} key={actor.organizationId}>
+                    <header><div><span>{actor.governance.toUpperCase()}</span><strong>{organization?.name ?? actor.organizationId}</strong><small>{leader} · continuity {actor.leadership.continuity}%</small></div><em>{actor.health.toUpperCase()}</em></header>
+                    <div><span>STRATEGY</span><strong>{actor.strategy.replace(/-/g, " ").toUpperCase()}</strong><small>risk {actor.riskTolerance}% · legal preference {actor.legalPreference}%</small></div>
+                    <div><span>TREASURY</span><strong>₵ {Math.round(actor.metrics.treasury).toLocaleString("ru-RU")}</strong><small>assets ₵ {Math.round(actor.metrics.assetValue).toLocaleString("ru-RU")}</small></div>
+                    <div><span>OPERATIONS</span><strong>{actor.metrics.ownedBusinesses + actor.metrics.ownedFacilities + actor.metrics.ownedNetworks + actor.metrics.ownedHousing}</strong><small>{actor.metrics.activeWorkers}/{actor.metrics.simulatedWorkers} active staff</small></div>
+                    <div><span>RELIABILITY</span><strong>{Math.round((actor.metrics.serviceReliability + actor.metrics.productionReliability) / 2)}%</strong><small>{actor.metrics.supplyBreaches} supply breaches · gap {actor.metrics.staffGap}</small></div>
+                  </article>
+                );
+              })}
+            </section>
+            <section className="organization-list">
+              <header><span>RECENT GOVERNANCE</span><strong>WEEKLY CAPITAL ALLOCATION</strong></header>
+              {recentOrganizationDecisions.map((decision) => (
+                <article className={`organization-decision organization-decision--${decision.status}`} key={decision.id}>
+                  <div><span>{decision.strategy.replace(/-/g, " ").toUpperCase()}</span><strong>{decision.type.replace(/-/g, " ").toUpperCase()}</strong><small>{kernelEntityName(session, decision.organizationId)}</small></div>
+                  <div><span>{decision.status.toUpperCase()}</span><strong>{decision.creditsCommitted ? `₵ ${decision.creditsCommitted.toLocaleString("ru-RU")}` : "NO CAPITAL"}</strong><small>{decision.description}</small></div>
+                </article>
+              ))}
+              {!recentOrganizationDecisions.length ? <div className="empty-terminal">Стратегические решения появятся после первого недельного расчёта.</div> : null}
+            </section>
+          </div>
+          <div className="organization-relations">
+            {organizationState.relations
+              .slice()
+              .sort((left, right) => Math.max(right.rivalry, right.dependency) - Math.max(left.rivalry, left.dependency))
+              .slice(0, 12)
+              .map((relation) => (
+                <article className={`organization-relation organization-relation--${relation.status}`} key={relation.id}>
+                  <span>{relation.status.toUpperCase()}</span>
+                  <strong>{kernelEntityName(session, relation.sourceOrganizationId)} ↔ {kernelEntityName(session, relation.targetOrganizationId)}</strong>
+                  <small>trust {relation.trust} · rivalry {relation.rivalry} · dependency {relation.dependency}</small>
+                </article>
+              ))}
           </div>
         </section>
       ) : null}

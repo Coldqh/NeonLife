@@ -1,16 +1,7 @@
 {
-  "version": "0.16.0",
-  "releasedAt": "2026-07-22T14:25:00Z",
+  "version": "0.17.0",
+  "releasedAt": "2026-07-22T14:30:00Z",
   "forceUpdate": true,
-  "title": "PRODUCTION & LOGISTICS",
-  "notes": [
-    "Добавлены физические производственные узлы, склады, импортный терминал и распределительный центр.",
-    "Сырьё превращается в еду, медицинские материалы, детали, документы и смешанные грузы по реальным рецептам.",
-    "Магазины больше не пополняются автоматически: товар должен быть произведён, перевезён и оплачен.",
-    "Поставки зависят от транспорта, данных, персонала, состояния объектов и доступного оборотного капитала.",
-    "При длительном срыве легального договора часть спроса перехватывает подпольный канал.",
-    "Производственные активы, закупочные договоры и грузовые операции зарегистрированы в Simulation Kernel.",
-    "Сохранения автоматически мигрируют на схему 14."
-  ],
-  "message": "Raw materials, factories, warehouses and physical shipments now form the city supply chain; stores can no longer restock from nowhere."
+  "title": "AUTONOMOUS ORGANIZATIONS",
+  "summary": "Organizations now own assets, appoint leadership, form agreements and allocate capital without player input."
 }

@@ -5,6 +5,7 @@ import type { BackgroundResident, EmploymentRecord, HouseholdState, HousingMarke
 import type { CityState, DistrictState, LocationState, OrganizationState } from "../../world/state/types";
 import type { InfrastructureKind, InfrastructureState } from "../infrastructure/types";
 import type { ProductionResource, ProductionState, ProductionSupplyContract } from "../production/types";
+import type { OrganizationAgreementState, OrganizationEcosystemState } from "../organizations/types";
 import type {
   KernelAccountState,
   KernelAssetState,
@@ -41,6 +42,7 @@ export interface KernelSyncInput {
   economy: LocalEconomyState;
   infrastructure: InfrastructureState;
   production: ProductionState;
+  organizationEcosystem?: OrganizationEcosystemState;
   drafts?: KernelTransactionDraft[];
 }
 
@@ -476,12 +478,36 @@ function productionContract(input: KernelSyncInput, contractState: ProductionSup
   };
 }
 
+
+function organizationAgreementContract(input: KernelSyncInput, agreement: OrganizationAgreementState): KernelContractState {
+  const kind = agreement.kind === "supply-framework" ? "procurement"
+    : agreement.kind === "service-concession" ? "service"
+      : agreement.kind === "labor-compact" ? "employment"
+        : agreement.kind === "joint-operation" ? "service"
+          : "service";
+  return {
+    id: createStableEntityId("contract", `organization:${agreement.id}`),
+    kind,
+    sourceEntityId: agreement.sourceOrganizationId,
+    targetEntityId: agreement.targetOrganizationId,
+    beneficiaryEntityId: agreement.targetOrganizationId,
+    status: agreement.status === "ended" ? "ended" : agreement.status === "breached" ? "breached" : agreement.status === "strained" ? "suspended" : "active",
+    startedAt: agreement.startedAt,
+    endedAt: agreement.endedAt,
+    nextSettlementAt: agreement.reviewAt,
+    breachCount: agreement.breachCount,
+    terms: agreement.weeklyValue > 0 ? [{ resource: "credits", amount: agreement.weeklyValue, unitValue: 1, intervalMinutes: 7 * 24 * 60 }] : [],
+    metadata: { kind: agreement.kind, linkedContracts: agreement.linkedContractIds.length, ...agreement.metadata }
+  };
+}
+
 function buildContracts(input: KernelSyncInput, previous: KernelContractState[]): KernelContractState[] {
   const generated = [
     ...input.population.employments.map((item) => activeEmploymentContract(input, item)).filter((item): item is KernelContractState => Boolean(item)),
     ...input.population.households.map((item) => leaseContract(input, item)).filter((item): item is KernelContractState => Boolean(item)),
     ...input.production.contracts.map((item) => productionContract(input, item)),
-    ...utilityContracts(input)
+    ...utilityContracts(input),
+    ...(input.organizationEcosystem?.agreements ?? []).map((item) => organizationAgreementContract(input, item))
   ];
   const generatedIds = new Set(generated.map((item) => item.id));
   const ended = previous
