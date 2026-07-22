@@ -26,7 +26,7 @@ export type KernelResource =
   | "waste-capacity"
   | "data-capacity";
 
-export type KernelAssetKind = "business-operation" | "housing-block" | "facility" | "district-land";
+export type KernelAssetKind = "business-operation" | "housing-block" | "facility" | "district-land" | "infrastructure-node" | "infrastructure-link";
 export type KernelAssetStatus = "active" | "strained" | "restricted" | "offline";
 export type KernelContractKind = "employment" | "lease" | "supply" | "service" | "loan" | "utility";
 export type KernelContractStatus = "active" | "suspended" | "breached" | "ended";
@@ -42,6 +42,8 @@ export type KernelTransactionReason =
   | "inventory-transfer"
   | "operating-settlement"
   | "player-action"
+  | "utility-service"
+  | "infrastructure-maintenance"
   | "domain-reconciliation";
 
 export interface KernelResourceBalance {

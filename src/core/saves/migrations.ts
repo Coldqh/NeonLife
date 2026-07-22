@@ -14,6 +14,7 @@ import { createPopulationState } from "../../simulation/population/populationSys
 import type { PopulationState } from "../../simulation/population/types";
 import { normalizeLaborMarketState } from "../../simulation/labor/laborMarket";
 import { normalizeSimulationKernel } from "../../simulation/kernel/simulationKernel";
+import { normalizeInfrastructureState } from "../../simulation/infrastructure/infrastructureSystem";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -96,7 +97,7 @@ function normalizePopulationState(
   return {
     ...fresh,
     ...value,
-    residents: value.residents,
+    residents: value.residents.map((resident) => ({ ...resident, transportAccess: typeof (resident as unknown as Record<string, unknown>).transportAccess === "number" ? (resident as unknown as { transportAccess: number }).transportAccess : 100 })),
     households: value.households.map((household, index) => {
       const raw = household as unknown as Record<string, unknown>;
       const fallback = fresh.households[index % Math.max(1, fresh.households.length)];
@@ -112,7 +113,7 @@ function normalizePopulationState(
           : fallback.spendingMode,
         consecutiveRentMisses: typeof raw.consecutiveRentMisses === "number" ? raw.consecutiveRentMisses : 0,
         moveCount: typeof raw.moveCount === "number" ? raw.moveCount : 0,
-        lastLedger: isObject(raw.lastLedger) ? raw.lastLedger as unknown as PopulationState["households"][number]["lastLedger"] : null
+        lastLedger: isObject(raw.lastLedger) ? { ...(raw.lastLedger as unknown as NonNullable<PopulationState["households"][number]["lastLedger"]>), utilitySpent: typeof (raw.lastLedger as Record<string, unknown>).utilitySpent === "number" ? Number((raw.lastLedger as Record<string, unknown>).utilitySpent) : 0 } : null
       };
     }),
     employments: value.employments.map((employment) => ({ ...employment, unpaidDays: typeof (employment as unknown as Record<string, unknown>).unpaidDays === "number" ? (employment as unknown as { unpaidDays: number }).unpaidDays : 0 })),
@@ -283,7 +284,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
   const seed = String(meta?.seed ?? "NEON-LIFE-MIGRATED");
   const existingLife = isObject(payload.life) ? payload.life : null;
   const migratedEvents = (Array.isArray(payload.events) ? payload.events : []).filter((event) => !isLegacyStoryEvent(event));
-  const migratedQueue = (Array.isArray(payload.eventQueue) ? payload.eventQueue : []).filter((event) => !isObject(event) || event.type !== "vacancy-expiry");
+  const migratedQueue = (Array.isArray(payload.eventQueue) ? payload.eventQueue : []).filter((event) => !isObject(event) || (event.type !== "vacancy-expiry" && event.type !== "grid-restoration"));
   const people = hasHumanNetwork(payload.people)
     ? payload.people
     : createHumanNetwork(seed, timestamp, locations);
@@ -332,6 +333,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     : createPressureState(seed, timestamp, housingState, people.people, locations);
   const playerState = payload.player as unknown as GameSession["player"];
   const cityState = world.city as unknown as GameSession["world"]["city"];
+  const infrastructure = normalizeInfrastructureState(payload.infrastructure, seed, timestamp, cityState, districts, locations, organizations, population, economy);
   const kernel = normalizeSimulationKernel(payload.kernel, {
     timestamp,
     seed,
@@ -341,7 +343,8 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     organizations,
     player: playerState,
     population,
-    economy
+    economy,
+    infrastructure
   });
 
   const { situations: _discardedSituations, ...payloadWithoutSituations } = payload;
@@ -356,6 +359,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     economy,
     population,
     kernel,
+    infrastructure,
     currentActivity: `На месте: ${existingLocationName}`,
     world: {
       ...world,

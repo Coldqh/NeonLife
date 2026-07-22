@@ -118,6 +118,7 @@ function businessAt(economy: LocalEconomyState, locationId: string): BusinessSta
 function employmentAvailable(record: EmploymentRecord, resident: BackgroundResident, economy: LocalEconomyState): boolean {
   const business = businessAt(economy, record.locationId);
   if (resident.healthScore <= 32) return false;
+  if ((resident.transportAccess ?? 100) < 20) return false;
   if (business && business.status === "closed" && business.cash <= -200) return false;
   return true;
 }
@@ -180,6 +181,7 @@ function createActiveResident(
     healthScore: score,
     skillLevel: 48,
     savings: person.money,
+    transportAccess: 100,
     activePersonId: person.id
   };
 }
@@ -258,7 +260,8 @@ export function createPopulationState(
           health: healthFor(healthScore),
           healthScore,
           skillLevel: skill,
-          savings: rng.integer(0, 260)
+          savings: rng.integer(0, 260),
+          transportAccess: 100
         });
         memberIds.push(residentId);
         residentIndex += 1;
@@ -357,7 +360,7 @@ export function createPopulationState(
       };
     });
 
-  const totals: PopulationTransactionTotals = { wagesPaid: 0, unpaidWages: 0, rentPaid: 0, foodSales: 0, medicalSales: 0, transportSales: 0, discretionarySales: 0, debtRepaid: 0, maintenanceSpent: 0, moves: 0 };
+  const totals: PopulationTransactionTotals = { wagesPaid: 0, unpaidWages: 0, rentPaid: 0, foodSales: 0, medicalSales: 0, transportSales: 0, discretionarySales: 0, utilitySales: 0, debtRepaid: 0, maintenanceSpent: 0, moves: 0 };
   const cohorts = districts.map((district) => cohortFor(district, residents, households, employments));
   return {
     residents,
@@ -381,7 +384,7 @@ function pushBudgetDelta(deltas: OrganizationBudgetDelta[], organizationId: stri
 }
 
 function emptyTotals(): PopulationTransactionTotals {
-  return { wagesPaid: 0, unpaidWages: 0, rentPaid: 0, foodSales: 0, medicalSales: 0, transportSales: 0, discretionarySales: 0, debtRepaid: 0, maintenanceSpent: 0, moves: 0 };
+  return { wagesPaid: 0, unpaidWages: 0, rentPaid: 0, foodSales: 0, medicalSales: 0, transportSales: 0, discretionarySales: 0, utilitySales: 0, debtRepaid: 0, maintenanceSpent: 0, moves: 0 };
 }
 
 function addTotals(target: PopulationTransactionTotals, delta: Partial<PopulationTransactionTotals>): void {
@@ -559,7 +562,7 @@ function chooseHousing(
 function settleBusinessesDaily(businesses: BusinessState[], employments: EmploymentRecord[], dayIndex: number, notices: PopulationNotice[], locations: LocationState[]): { businesses: BusinessState[]; employments: EmploymentRecord[] } {
   let nextEmployments = employments;
   const nextBusinesses = businesses.map((business) => {
-    const profit = business.revenueToday - business.operatingCostsToday - business.payrollToday - business.supplierCostsToday;
+    const profit = business.revenueToday - business.operatingCostsToday - business.payrollToday - business.supplierCostsToday - (business.utilityCostsToday ?? 0);
     const rollingProfit = Math.round(business.rollingProfit * 0.72 + profit * 0.28);
     let profitableDays = profit > 80 ? business.profitableDays + 1 : Math.max(0, business.profitableDays - 1);
     let lossDays = profit < -80 ? business.lossDays + 1 : Math.max(0, business.lossDays - 1);
@@ -595,6 +598,7 @@ function settleBusinessesDaily(businesses: BusinessState[], employments: Employm
       operatingCostsToday: 0,
       payrollToday: 0,
       supplierCostsToday: 0,
+      utilityCostsToday: 0,
       lastSettlementDay: dayIndex
     };
   });
@@ -873,7 +877,7 @@ export function advancePopulation(
         dailyExpenses: expenses,
         status: nextStatus,
         consecutiveDeficitDays: deficitDays,
-        lastLedger: { dayIndex, income, rentPaid, foodSpent, transportSpent, medicalSpent, discretionarySpent, debtPaid, unmetFoodUnits: unmet, purchases }
+        lastLedger: { dayIndex, income, rentPaid, foodSpent, transportSpent, medicalSpent, discretionarySpent, utilitySpent: 0, debtPaid, unmetFoodUnits: unmet, purchases }
       };
     });
 
@@ -907,7 +911,7 @@ export function advancePopulation(
       const medicalRecovery = household?.lastLedger?.medicalSpent ? Math.min(4, Math.round(household.lastLedger.medicalSpent / 8)) : 0;
       const recovery = household?.status === "stable" && household.foodUnits > household.memberIds.length ? 2 : 0;
       const healthScore = clamp(resident.healthScore - foodPenalty - housingPenalty - pollutionPenalty + medicalRecovery + recovery);
-      return { ...resident, homeLocationId: household?.homeLocationId ?? null, healthScore, health: healthFor(healthScore), savings: Math.max(0, resident.savings + dayRng.integer(-3, 2)) };
+      return { ...resident, homeLocationId: household?.homeLocationId ?? null, healthScore, health: healthFor(healthScore), savings: Math.max(0, resident.savings + dayRng.integer(-3, 2)), transportAccess: resident.transportAccess ?? 100 };
     });
 
     housing = housing.map((unit) => {

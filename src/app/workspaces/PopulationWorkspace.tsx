@@ -3,7 +3,7 @@ import { getFoodProduct } from "../../data/products/foodCatalog";
 import type { HouseholdStatus } from "../../simulation/population/types";
 import type { GameSession } from "../../world/state/types";
 
-type PopulationTab = "districts" | "households" | "housing" | "labor" | "flow";
+type PopulationTab = "districts" | "households" | "housing" | "labor" | "infrastructure" | "flow";
 
 function statusRank(status: HouseholdStatus): number {
   if (status === "displaced") return 4;
@@ -103,6 +103,7 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
         <button type="button" className={tab === "households" ? "is-active" : ""} onClick={() => setTab("households")}>СЕМЬИ</button>
         <button type="button" className={tab === "housing" ? "is-active" : ""} onClick={() => setTab("housing")}>ЖИЛЬЁ</button>
         <button type="button" className={tab === "labor" ? "is-active" : ""} onClick={() => setTab("labor")}>ТРУД</button>
+        <button type="button" className={tab === "infrastructure" ? "is-active" : ""} onClick={() => setTab("infrastructure")}>СЕТИ</button>
         <button type="button" className={tab === "flow" ? "is-active" : ""} onClick={() => setTab("flow")}>ПОТОКИ</button>
       </nav>
 
@@ -210,6 +211,56 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
             {session.world.districts.map((district) => (
               <div key={district.id}><span>{district.name}</span><strong>{labor.wagePressureByDistrict[district.id] ?? 100}%</strong><small>wage pressure</small></div>
             ))}
+          </div>
+        </section>
+      ) : null}
+
+
+      {tab === "infrastructure" ? (
+        <section className="infrastructure-workspace">
+          <div className="infrastructure-networks">
+            {session.infrastructure.networks.map((network) => {
+              const provider = session.world.organizations.find((item) => item.id === network.providerEntityId)?.name ?? session.world.city.name;
+              const openMaintenance = session.infrastructure.maintenance.filter((item) => item.networkId === network.id && item.status !== "completed").length;
+              return (
+                <article className={`infrastructure-network infrastructure-network--${network.status}`} key={network.id}>
+                  <header><div><span>{network.kind.toUpperCase()} NETWORK</span><strong>{provider}</strong></div><em>{network.status.toUpperCase()}</em></header>
+                  <div><span>SERVICE</span><strong>{network.averageServiceLevel}%</strong><small>{Math.round(network.totalDelivered)}/{Math.round(network.totalDemand)} units</small></div>
+                  <div><span>RESERVE</span><strong>₵ {Math.round(network.reserveFund).toLocaleString("ru-RU")}</strong><small>{openMaintenance} maintenance orders</small></div>
+                  <div><span>UNMET</span><strong>{Math.round(network.unmetDemand)}</strong><small>{network.outageHours} outage hours</small></div>
+                </article>
+              );
+            })}
+          </div>
+          <div className="infrastructure-districts">
+            {session.world.districts.map((district) => (
+              <article key={district.id}>
+                <header><span>DISTRICT SERVICE</span><strong>{district.name}</strong></header>
+                <div className="infrastructure-districts__grid">
+                  {(["power", "water", "data", "transport", "waste"] as const).map((kind) => {
+                    const services = session.infrastructure.services.filter((item) => item.districtId === district.id && item.kind === kind);
+                    const level = services.length ? Math.round(services.reduce((sum, item) => sum + item.serviceLevel, 0) / services.length) : 100;
+                    return <div key={kind}><span>{kind.toUpperCase()}</span><strong>{level}%</strong><small>{level < 45 ? "RESTRICTED" : level < 70 ? "STRAINED" : "STABLE"}</small></div>;
+                  })}
+                </div>
+              </article>
+            ))}
+          </div>
+          <div className="infrastructure-bottom">
+            <section>
+              <header><span>MAINTENANCE</span><strong>{session.infrastructure.maintenance.filter((item) => item.status !== "completed").length} ACTIVE</strong></header>
+              {session.infrastructure.maintenance.filter((item) => item.status !== "completed").slice(-8).reverse().map((order) => (
+                <article key={order.id}><div><span>{order.kind.toUpperCase()} · {order.targetKind.toUpperCase()}</span><strong>{order.status.toUpperCase()}</strong></div><small>₵ {order.creditsCost} · {order.partsCost} parts · {order.completedLaborHours}/{order.laborHours} labor</small></article>
+              ))}
+              {!session.infrastructure.maintenance.some((item) => item.status !== "completed") ? <div className="empty-terminal">Открытых работ нет.</div> : null}
+            </section>
+            <section>
+              <header><span>ACTIVE INCIDENTS</span><strong>{session.infrastructure.incidents.filter((item) => item.status === "active").length}</strong></header>
+              {session.infrastructure.incidents.filter((item) => item.status === "active").slice(-8).reverse().map((incident) => (
+                <article key={incident.id}><div><span>{incident.kind.toUpperCase()}</span><strong>SEVERITY {incident.severity}</strong></div><small>{incident.cause.replace(/-/g, " ")} · service loss {Math.round(incident.serviceLoss)}%</small></article>
+              ))}
+              {!session.infrastructure.incidents.some((item) => item.status === "active") ? <div className="empty-terminal">Активных аварий нет.</div> : null}
+            </section>
           </div>
         </section>
       ) : null}

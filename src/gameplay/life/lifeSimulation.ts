@@ -6,6 +6,7 @@ import { getFoodProduct } from "../../data/products/foodCatalog";
 import { advanceHumanNetwork, getPerson, recordPlayerAction, toKnownNpc } from "../../people/network/humanNetwork";
 import { advancePopulation, synchronizeActivePeopleFromPopulation } from "../../simulation/population/populationSystem";
 import { advanceSimulationKernel, kernelSystemEntityId } from "../../simulation/kernel/simulationKernel";
+import { advanceInfrastructure, applyInfrastructureToDistrictPulse } from "../../simulation/infrastructure/infrastructureSystem";
 import { canPrepare, consumeFood, discardSpoiledFood, purchaseFood } from "../food/foodSystem";
 import { calculateSleepRecovery, getHousingDaysLeft } from "../housing/housingSystem";
 import { getTravelOptions, isLocationOpen } from "../travel/travelSystem";
@@ -106,7 +107,20 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     populationAdvance.food,
     pulse.state
   );
-  let peopleState = applyEconomyPressureToPeople(populationSyncedPeople, economyAdvance.state, economyAdvance.notices);
+  const infrastructureAdvance = advanceInfrastructure(
+    session.infrastructure,
+    nextTimestamp,
+    session.world.meta.seed,
+    session.world.city,
+    session.world.districts,
+    session.world.locations,
+    session.world.organizations,
+    populationAdvance.state,
+    economyAdvance.state
+  );
+  const infrastructurePulse = applyInfrastructureToDistrictPulse(pulse.state, infrastructureAdvance.state, session.world.activeDistrictId);
+  const infrastructureSyncedPeople = synchronizeActivePeopleFromPopulation(populationSyncedPeople, infrastructureAdvance.population);
+  let peopleState = applyEconomyPressureToPeople(infrastructureSyncedPeople, infrastructureAdvance.economy, economyAdvance.notices);
   const pressureAdvance = advancePressureState(session.pressure, nextTimestamp, session.world.meta.seed, peopleState.people);
   for (const notice of pressureAdvance.notices) {
     if (!notice.personId || !notice.memorySummary) continue;
@@ -160,6 +174,9 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   for (const notice of populationAdvance.notices) {
     generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
   }
+  for (const notice of infrastructureAdvance.notices) {
+    generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
+  }
   for (const notice of pressureAdvance.notices) {
     generated.push(createEvent(session, nextTimestamp, notice.category, notice.title, notice.detail, notice.importance));
   }
@@ -173,11 +190,11 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     nextTimestamp,
     session.world.locations,
     peopleState.people,
-    economyAdvance.state.businesses
+    infrastructureAdvance.economy.businesses
   );
   const selectedPerson = getPerson(peopleState, session.world.primaryContactId)
     ?? getPerson(peopleState, peopleState.selectedPersonId);
-  const worldEventCount = options.worldEvents ?? (queued.events.length + pulse.events.length + network.notices.length + economyAdvance.notices.length + populationAdvance.notices.length + pressureAdvance.notices.length);
+  const worldEventCount = options.worldEvents ?? (queued.events.length + pulse.events.length + network.notices.length + economyAdvance.notices.length + populationAdvance.notices.length + infrastructureAdvance.notices.length + pressureAdvance.notices.length);
   const pressure = trackPressureMetrics(pressureAdvance.state, {
     balanceDelta: options.trackBalance === false ? 0 : options.balanceDelta,
     deliveries: options.deliveryCompleted ? 1 : 0,
@@ -186,7 +203,9 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     worldEvents: worldEventCount
   });
   const nextOrganizations = session.world.organizations.map((organization) => {
-    const budgetChange = populationAdvance.organizationBudgetDeltas.find((item) => item.organizationId === organization.id)?.delta ?? 0;
+    const populationDelta = populationAdvance.organizationBudgetDeltas.find((item) => item.organizationId === organization.id)?.delta ?? 0;
+    const infrastructureDelta = infrastructureAdvance.organizationBudgetDeltas.find((item) => item.organizationId === organization.id)?.delta ?? 0;
+    const budgetChange = populationDelta + infrastructureDelta;
     return budgetChange ? { ...organization, budget: Math.max(0, organization.budget + budgetChange) } : organization;
   });
   const nextPlayer = {
@@ -202,7 +221,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
       hunger: clamp(session.player.condition.hunger + baselineHunger + (options.hungerDelta ?? 0))
     }
   };
-  const kernelDrafts = [...populationAdvance.transactions];
+  const kernelDrafts = [...populationAdvance.transactions, ...infrastructureAdvance.transactions];
   if ((options.balanceDelta ?? 0) !== 0) {
     const amount = Math.abs(options.balanceDelta ?? 0);
     kernelDrafts.push({
@@ -224,8 +243,9 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     locations: session.world.locations,
     organizations: nextOrganizations,
     player: nextPlayer,
-    population: populationAdvance.state,
-    economy: economyAdvance.state,
+    population: infrastructureAdvance.population,
+    economy: infrastructureAdvance.economy,
+    infrastructure: infrastructureAdvance.state,
     drafts: kernelDrafts
   });
 
@@ -235,6 +255,12 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     world: {
       ...session.world,
       meta: { ...session.world.meta, currentTimestamp: nextTimestamp },
+      city: {
+        ...session.world.city,
+        networkStatus: infrastructureAdvance.state.networks.find((item) => item.kind === "data")?.status === "offline"
+          ? "offline"
+          : infrastructureAdvance.state.networks.some((item) => item.status === "restricted" || item.status === "offline") ? "degraded" : "stable"
+      },
       organizations: nextOrganizations,
       activeDistrictId: targetDistrict?.id ?? session.world.activeDistrictId,
       primaryContactId: selectedPerson?.id ?? session.world.primaryContactId
@@ -244,10 +270,11 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
       : session.primaryContact,
     people: peopleState,
     pressure,
-    economy: economyAdvance.state,
-    population: populationAdvance.state,
+    economy: infrastructureAdvance.economy,
+    population: infrastructureAdvance.population,
     kernel,
-    district: pulse.state,
+    infrastructure: infrastructureAdvance.state,
+    district: infrastructurePulse,
     eventQueue: queued.queue,
     currentActivity: pressureAdvance.evicted
       ? `Без постоянного жилья · ${targetLocation?.name ?? "TRANSIT NODE"}`

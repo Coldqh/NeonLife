@@ -13,6 +13,7 @@ import { createPrimaryContact } from "../../people/demoNpc";
 import { createHumanNetwork, getPerson, toKnownNpc } from "../../people/network/humanNetwork";
 import { createPopulationState } from "../../simulation/population/populationSystem";
 import { createSimulationKernel } from "../../simulation/kernel/simulationKernel";
+import { createInfrastructureState } from "../../simulation/infrastructure/infrastructureSystem";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
 import type {
@@ -114,14 +115,6 @@ function attachLocations(
 function createQueue(seed: string, start: number, world: WorldState): ScheduledWorldEvent[] {
   const lower = world.districts[0];
   return [
-    {
-      id: createStableEntityId("scheduled", `${seed}:grid-restoration`),
-      dueAt: start + 99 * 60_000,
-      type: "grid-restoration",
-      status: "queued",
-      entityIds: [lower.id],
-      payload: { district: lower.name }
-    },
     {
       id: createStableEntityId("scheduled", `${seed}:rent-warning`),
       dueAt: start + 5 * 24 * 60 * 60_000,
@@ -228,6 +221,8 @@ export function createWorldSession(seed: string): GameSession {
   const economy = createLocalEconomy(seed, INITIAL_GAME_TIMESTAMP, locations, people.people, population, foodState, districtPulse);
   const pressure = createPressureState(seed, INITIAL_GAME_TIMESTAMP, housingState, people.people, locations);
 
+  const infrastructure = createInfrastructureState(seed, INITIAL_GAME_TIMESTAMP, city, districts, locations, organizations, population, economy);
+
   const world: WorldState = {
     meta,
     city,
@@ -247,7 +242,8 @@ export function createWorldSession(seed: string): GameSession {
     organizations,
     player,
     population,
-    economy
+    economy,
+    infrastructure
   });
 
   return {
@@ -261,6 +257,7 @@ export function createWorldSession(seed: string): GameSession {
     economy,
     population,
     kernel,
+    infrastructure,
     events: createInitialEvents({
       seed,
       districtName: lower.name,

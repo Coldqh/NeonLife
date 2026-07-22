@@ -23,6 +23,8 @@ export interface BusinessState {
   operatingCostsToday: number;
   payrollToday: number;
   supplierCostsToday: number;
+  utilityCostsToday: number;
+  infrastructureServiceLevel: number;
   rollingProfit: number;
   profitableDays: number;
   lossDays: number;

@@ -26,6 +26,7 @@ export interface BackgroundResident {
   healthScore: number;
   skillLevel: number;
   savings: number;
+  transportAccess: number;
   activePersonId?: EntityId;
   skills?: ResidentSkillProfile;
   careerPreference?: CareerPreference;
@@ -54,6 +55,7 @@ export interface HouseholdDailyLedger {
   transportSpent: number;
   medicalSpent: number;
   discretionarySpent: number;
+  utilitySpent: number;
   debtPaid: number;
   unmetFoodUnits: number;
   purchases: HouseholdPurchase[];
@@ -146,6 +148,7 @@ export interface PopulationTransactionTotals {
   medicalSales: number;
   transportSales: number;
   discretionarySales: number;
+  utilitySales: number;
   debtRepaid: number;
   maintenanceSpent: number;
   moves: number;

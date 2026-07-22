@@ -3,6 +3,7 @@ import type { PlayerState } from "../../gameplay/player/demoPlayer";
 import type { BusinessState, LocalEconomyState, SupplyClass } from "../../gameplay/economy/types";
 import type { BackgroundResident, EmploymentRecord, HouseholdState, HousingMarketState, PopulationState } from "../population/types";
 import type { CityState, DistrictState, LocationState, OrganizationState } from "../../world/state/types";
+import type { InfrastructureKind, InfrastructureState } from "../infrastructure/types";
 import type {
   KernelAccountState,
   KernelAssetState,
@@ -25,7 +26,7 @@ const DAY_MS = 24 * HOUR_MS;
 const WEEK_MS = 7 * DAY_MS;
 const MAX_TRANSACTIONS = 2_000;
 
-export type KernelSystemAccount = "clearing" | "wholesale" | "maintenance" | "credit-bureau" | "housing-authority" | "city-services" | "consumption";
+export type KernelSystemAccount = "clearing" | "wholesale" | "maintenance" | "credit-bureau" | "housing-authority" | "city-services" | "consumption" | "power-grid" | "water-grid" | "data-grid" | "transport-grid" | "waste-grid";
 
 export interface KernelSyncInput {
   timestamp: number;
@@ -37,6 +38,7 @@ export interface KernelSyncInput {
   player: PlayerState;
   population: PopulationState;
   economy: LocalEconomyState;
+  infrastructure: InfrastructureState;
   drafts?: KernelTransactionDraft[];
 }
 
@@ -54,6 +56,10 @@ export function leaseContractId(householdId: string): string {
 
 export function supplyContractId(businessId: string): string {
   return createStableEntityId("contract", `supply:${businessId}`);
+}
+
+export function utilityContractId(networkId: string, districtId: string): string {
+  return createStableEntityId("contract", `utility:${networkId}:${districtId}`);
 }
 
 function accountId(entityId: string): string {
@@ -111,6 +117,8 @@ function snapshotAccounts(input: KernelSyncInput): KernelAccountState[] {
   for (const organization of input.organizations) {
     accounts.push(account(organization.id, "organization", [balance("credits", organization.budget)], input.timestamp));
   }
+  for (const district of input.districts) accounts.push(account(district.id, "district", [], input.timestamp));
+  for (const location of input.locations) accounts.push(account(location.id, "location", [], input.timestamp));
   for (const business of input.economy.businesses) {
     accounts.push(account(business.id, "business", [
       balance("credits", business.cash),
@@ -133,7 +141,7 @@ function snapshotAccounts(input: KernelSyncInput): KernelAccountState[] {
       balance("housing-beds", Math.max(0, housing.capacity - housing.occupied))
     ], input.timestamp));
   }
-  for (const kind of ["clearing", "wholesale", "maintenance", "credit-bureau", "housing-authority", "city-services", "consumption"] as const) {
+  for (const kind of ["clearing", "wholesale", "maintenance", "credit-bureau", "housing-authority", "city-services", "consumption", "power-grid", "water-grid", "data-grid", "transport-grid", "waste-grid"] as const) {
     accounts.push(account(kernelSystemEntityId(input.seed, kind), "system", [], input.timestamp));
   }
   return dedupeAccounts(accounts);
@@ -221,6 +229,41 @@ function buildAssets(input: KernelSyncInput): KernelAssetState[] {
       condition: Math.max(20, location.security),
       capacity: 1,
       valuation: Math.round(20_000 + location.security * 1_200),
+      resources: [],
+      updatedAt: input.timestamp
+    });
+  }
+
+  for (const node of input.infrastructure.nodes) {
+    assets.push({
+      id: assetId("infrastructure-node", node.id),
+      kind: "infrastructure-node",
+      name: node.name,
+      ownerEntityId: node.providerEntityId,
+      controllerEntityId: node.providerEntityId,
+      districtId: node.districtId,
+      status: node.status === "offline" ? "offline" : node.status === "restricted" ? "restricted" : node.status === "strained" ? "strained" : "active",
+      condition: node.condition,
+      capacity: node.capacity,
+      valuation: Math.round(node.capacity * Math.max(1, node.condition) * 1_200),
+      resources: [balance(node.kind === "power" ? "energy-units" : node.kind === "water" ? "water-units" : node.kind === "data" ? "data-capacity" : node.kind === "transport" ? "transport-capacity" : "waste-capacity", node.throughput)],
+      updatedAt: input.timestamp
+    });
+  }
+
+  for (const link of input.infrastructure.links) {
+    const provider = input.infrastructure.networks.find((item) => item.id === link.networkId)?.providerEntityId ?? input.city.id;
+    assets.push({
+      id: assetId("infrastructure-link", link.id),
+      kind: "infrastructure-link",
+      name: `${link.kind.toUpperCase()} LINK ${link.districtId}`,
+      ownerEntityId: provider,
+      controllerEntityId: provider,
+      districtId: link.districtId,
+      status: link.status === "offline" ? "offline" : link.status === "restricted" ? "restricted" : link.status === "strained" ? "strained" : "active",
+      condition: link.condition,
+      capacity: link.capacity,
+      valuation: Math.round(link.capacity * Math.max(1, link.condition) * 420),
       resources: [],
       updatedAt: input.timestamp
     });
@@ -327,11 +370,46 @@ function supplyContract(input: KernelSyncInput, business: BusinessState): Kernel
   };
 }
 
+function utilityResource(kind: InfrastructureKind): KernelResource {
+  if (kind === "power") return "energy-units";
+  if (kind === "water") return "water-units";
+  if (kind === "data") return "data-capacity";
+  if (kind === "transport") return "transport-capacity";
+  return "waste-capacity";
+}
+
+function utilityContracts(input: KernelSyncInput): KernelContractState[] {
+  const result: KernelContractState[] = [];
+  for (const network of input.infrastructure.networks) {
+    for (const district of input.districts) {
+      const services = input.infrastructure.services.filter((item) => item.networkId === network.id && item.districtId === district.id);
+      const amount = services.reduce((sum, item) => sum + item.currentDemand, 0);
+      const sourceNode = input.infrastructure.nodes.find((item) => item.networkId === network.id && item.role === "source");
+      result.push({
+        id: utilityContractId(network.id, district.id),
+        kind: "utility",
+        sourceEntityId: network.providerEntityId,
+        targetEntityId: district.id,
+        beneficiaryEntityId: district.id,
+        assetId: sourceNode ? assetId("infrastructure-node", sourceNode.id) : undefined,
+        status: network.status === "offline" ? "breached" : network.status === "restricted" ? "suspended" : "active",
+        startedAt: input.timestamp,
+        nextSettlementAt: input.timestamp + 24 * 60 * 60_000,
+        breachCount: network.outageHours,
+        terms: [{ resource: utilityResource(network.kind), amount, unitValue: network.tariffPerUnit, intervalMinutes: 24 * 60 }],
+        metadata: { kind: network.kind, serviceLevel: network.averageServiceLevel, district: district.name }
+      });
+    }
+  }
+  return result;
+}
+
 function buildContracts(input: KernelSyncInput, previous: KernelContractState[]): KernelContractState[] {
   const generated = [
     ...input.population.employments.map((item) => activeEmploymentContract(input, item)).filter((item): item is KernelContractState => Boolean(item)),
     ...input.population.households.map((item) => leaseContract(input, item)).filter((item): item is KernelContractState => Boolean(item)),
-    ...input.economy.businesses.map((item) => supplyContract(input, item))
+    ...input.economy.businesses.map((item) => supplyContract(input, item)),
+    ...utilityContracts(input)
   ];
   const generatedIds = new Set(generated.map((item) => item.id));
   const ended = previous
@@ -377,7 +455,7 @@ function reconcileAccounts(
   let nextAccounts = [...accounts];
   const transactions: KernelTransactionState[] = [];
   const clearing = kernelSystemEntityId(input.seed, "clearing");
-  const protectedSystems = new Set([clearing, kernelSystemEntityId(input.seed, "wholesale"), kernelSystemEntityId(input.seed, "maintenance"), kernelSystemEntityId(input.seed, "credit-bureau"), kernelSystemEntityId(input.seed, "housing-authority"), kernelSystemEntityId(input.seed, "city-services"), kernelSystemEntityId(input.seed, "consumption")]);
+  const protectedSystems = new Set([clearing, kernelSystemEntityId(input.seed, "wholesale"), kernelSystemEntityId(input.seed, "maintenance"), kernelSystemEntityId(input.seed, "credit-bureau"), kernelSystemEntityId(input.seed, "housing-authority"), kernelSystemEntityId(input.seed, "city-services"), kernelSystemEntityId(input.seed, "consumption"), kernelSystemEntityId(input.seed, "power-grid"), kernelSystemEntityId(input.seed, "water-grid"), kernelSystemEntityId(input.seed, "data-grid"), kernelSystemEntityId(input.seed, "transport-grid"), kernelSystemEntityId(input.seed, "waste-grid")]);
 
   for (const target of snapshot) {
     if (protectedSystems.has(target.entityId)) continue;

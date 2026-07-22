@@ -1653,3 +1653,25 @@
   .population-kernel > header em { white-space: nowrap; }
   .population-kernel__ledger article { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 }
+
+/* v0.15.0 — infrastructure mobile density */
+@media (max-width: 760px) {
+  .population-tabs { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .infrastructure-workspace { gap: 5px; }
+  .infrastructure-networks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .infrastructure-network:last-child { grid-column: 1 / -1; }
+  .infrastructure-network > header,
+  .infrastructure-network > div { padding: 5px; }
+  .infrastructure-districts { grid-template-columns: 1fr; }
+  .infrastructure-districts > article:nth-child(n+3) { display: none; }
+  .infrastructure-bottom { grid-template-columns: 1fr; }
+  .infrastructure-bottom > section { max-height: 190px; }
+  .infrastructure-bottom > section:nth-child(2) { display: none; }
+}
+@media (max-width: 430px) {
+  .population-tabs { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .population-tabs button { font-size: 4.2px; }
+  .infrastructure-networks { grid-template-columns: 1fr; }
+  .infrastructure-network:nth-child(n+4) { display: none; }
+  .infrastructure-network:last-child { grid-column: auto; }
+}

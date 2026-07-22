@@ -172,6 +172,8 @@ export function createLocalEconomy(
       operatingCostsToday: 0,
       payrollToday: 0,
       supplierCostsToday: 0,
+      utilityCostsToday: 0,
+      infrastructureServiceLevel: 100,
       rollingProfit: 0,
       profitableDays: 0,
       lossDays: 0,
@@ -212,7 +214,9 @@ export function advanceLocalEconomy(
       const location = locations.find((item) => item.id === business.locationId);
       if (!location) return business;
       const rng = new SeededRandom(`${seed}:economy:${cycle}:${business.id}`);
-      const staffing = staffingFor(people, population, business.locationId, business.staffing);
+      const baseStaffing = staffingFor(people, population, business.locationId, business.staffing);
+      const infrastructureLevel = business.infrastructureServiceLevel ?? 100;
+      const staffing = clamp(Math.round(baseStaffing * (0.55 + infrastructureLevel / 225)), 4, 100);
       const demand = clamp(Math.round(
         business.demand * 0.55
         + pulse.marketActivity * 0.28
@@ -238,7 +242,10 @@ export function advanceLocalEconomy(
         cash -= restockCost;
         food = restockFoodStock(food, business.locationId, restock);
       }
-      const status = statusFor(stock, staffing, cash);
+      let status = statusFor(stock, staffing, cash);
+      if (infrastructureLevel < 20) status = "closed";
+      else if (infrastructureLevel < 45 && status !== "closed") status = "restricted";
+      else if (infrastructureLevel < 70 && status === "stable") status = "strained";
       const priceIndex = priceIndexFor(stock, demand, status, pulse.transitDelayMinutes);
       if (status !== business.status && notices.length < 5) {
         notices.push({
