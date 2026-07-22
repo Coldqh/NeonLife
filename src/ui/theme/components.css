@@ -4843,3 +4843,113 @@ button:disabled {
 .population-flow span,
 .population-flow small { color: var(--muted-2); font-size: 6px; }
 .population-flow strong { color: var(--cyan); font-size: 15px; }
+
+/* v0.13.0 — autonomous labor market */
+.population-labor {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.population-labor__summary,
+.population-labor__pressure {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--line);
+  background: var(--line);
+}
+
+.population-labor__summary > div,
+.population-labor__pressure > div {
+  min-width: 0;
+  min-height: 58px;
+  padding: 8px 9px;
+  background: rgba(5, 15, 21, .96);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.population-labor span,
+.population-labor strong,
+.population-labor small {
+  font-family: var(--font-mono);
+}
+
+.population-labor span,
+.population-labor small {
+  color: var(--muted-2);
+  font-size: 6px;
+}
+
+.population-labor strong {
+  color: var(--text);
+  font-size: 10px;
+}
+
+.population-labor__summary strong,
+.population-labor__pressure strong {
+  color: var(--cyan);
+  font-size: 14px;
+}
+
+.population-labor__columns {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.population-labor__list {
+  min-height: 0;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: rgba(5, 15, 21, .92);
+}
+
+.population-labor__list > header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  min-height: 42px;
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(5, 15, 21, .98);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.population-labor__list > article {
+  min-height: 58px;
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) 82px 90px;
+  gap: 8px;
+  align-items: center;
+}
+
+.population-labor__list > article > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.population-labor__list > article strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.population-labor__pressure {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.population-labor__pressure > div {
+  min-height: 48px;
+}

@@ -5,6 +5,7 @@ import type { FoodState } from "../../gameplay/food/foodSystem";
 import { FOOD_CATALOG, getFoodProduct } from "../../data/products/foodCatalog";
 import type { HumanNetworkState, PersonState } from "../../people/network/types";
 import type { DistrictState, LocationState, OrganizationState } from "../../world/state/types";
+import { advanceLaborMarketDay, createLaborMarketState } from "../labor/laborMarket";
 import type {
   BackgroundResident,
   DistrictPopulationCohort,
@@ -362,6 +363,7 @@ export function createPopulationState(
     employments,
     housing,
     cohorts,
+    laborMarket: createLaborMarketState(Math.floor(timestamp / DAY_MS)),
     totals,
     lastUpdatedAt: timestamp,
     dayIndex: Math.floor(timestamp / DAY_MS),
@@ -573,7 +575,7 @@ function settleBusinessesDaily(businesses: BusinessState[], employments: Employm
       lossDays = 0;
       const activeJobs = nextEmployments.filter((job) => job.locationId === business.locationId && job.status !== "unemployed");
       const jobToCut = activeJobs.sort((a, b) => a.wagePerDay - b.wagePerDay)[0];
-      if (jobToCut) nextEmployments = nextEmployments.map((job) => job.id === jobToCut.id ? { ...job, status: "unemployed", absenceDays: 0 } : job);
+      if (jobToCut) nextEmployments = nextEmployments.map((job) => job.id === jobToCut.id ? { ...job, status: "unemployed", absenceDays: 0, separationReason: "layoff" as const, endedDay: dayIndex } : job);
       const location = locations.find((item) => item.id === business.locationId);
       if (location) notices.push({ districtId: location.districtId, title: `${location.name} сокращает штат.`, detail: `Убыточная работа не удержала прежнее число смен.`, importance: 2 });
     }
@@ -613,6 +615,7 @@ export function advancePopulation(
   let residents = state.residents.map((resident) => ({ ...resident }));
   let households = state.households.map((household) => ({ ...household, pantry: household.pantry?.map((item) => ({ ...item })) ?? [{ productId: "kernel-9-brick", units: Math.max(0, household.foodUnits) }] }));
   let employments = state.employments.map((employment) => ({ ...employment, unpaidDays: employment.unpaidDays ?? 0 }));
+  let laborMarket = state.laborMarket ?? createLaborMarketState(dayIndex);
   let housing = state.housing.map((item) => ({ ...item }));
   let businesses = economy.businesses.map((business) => ({ ...business }));
   let food = foodState;
@@ -630,13 +633,14 @@ export function advancePopulation(
     employments = employments.map((employment) => {
       const resident = residents.find((item) => item.id === employment.residentId);
       if (!resident || resident.lifeStage !== "working-age") return { ...employment, status: "unemployed" as const };
+      if (employment.status === "unemployed") return employment;
       const available = employmentAvailable(employment, resident, { ...economy, businesses });
       if (!available) {
         const nextAbsence = employment.absenceDays + 1;
         const employer = businessForLocation(businesses, employment.locationId);
         const lost = Boolean(employer && employer.status === "closed" && employer.cash <= -200 && nextAbsence >= 5);
-        if (lost && employment.status !== "unemployed") notices.push({ districtId: resident.districtId, title: `${resident.name} потерял рабочую смену.`, detail: `${employment.title} · рабочая точка не удержала место.`, importance: 2 });
-        return { ...employment, status: lost ? "unemployed" as const : "absent" as const, absenceDays: nextAbsence };
+        if (lost) notices.push({ districtId: resident.districtId, title: `${resident.name} потерял рабочую смену.`, detail: `${employment.title} · рабочая точка не удержала место.`, importance: 2 });
+        return { ...employment, status: lost ? "unemployed" as const : "absent" as const, absenceDays: nextAbsence, separationReason: lost ? "closure" as const : employment.separationReason, endedDay: lost ? dayIndex : employment.endedDay };
       }
 
       const business = businessForLocation(businesses, employment.locationId);
@@ -657,25 +661,8 @@ export function advancePopulation(
       const unpaidDays = unpaid > 0 ? employment.unpaidDays + 1 : 0;
       const lostForNonPayment = unpaidDays >= 3;
       if (lostForNonPayment) notices.push({ districtId: resident.districtId, title: `${resident.name} покинул неоплачиваемую смену.`, detail: `${employment.title} · зарплата не выплачивалась ${unpaidDays} дня.`, importance: 2 });
-      return { ...employment, status: lostForNonPayment ? "unemployed" as const : "active" as const, absenceDays: 0, unpaidDays };
+      return { ...employment, status: lostForNonPayment ? "unemployed" as const : "active" as const, absenceDays: 0, unpaidDays, separationReason: lostForNonPayment ? "nonpayment" as const : undefined, endedDay: lostForNonPayment ? dayIndex : undefined };
     });
-
-    const unemployed = residents.filter((resident) => resident.lifeStage === "working-age" && !employments.some((employment) => employment.residentId === resident.id && employment.status !== "unemployed"));
-    for (const resident of unemployed) {
-      if (!dayRng.chance(0.025 + resident.skillLevel / 2400)) continue;
-      const candidates = businesses.filter((business) => (business.status === "stable" || business.status === "strained") && employments.filter((job) => job.locationId === business.locationId && job.status !== "unemployed").length < business.targetStaff);
-      if (!candidates.length) break;
-      const business = dayRng.pick(candidates);
-      const employment = employments.find((item) => item.residentId === resident.id);
-      const wage = Math.round(44 + resident.skillLevel * 0.38 + dayRng.integer(-5, 8));
-      if (employment) Object.assign(employment, { locationId: business.locationId, organizationId: business.organizationId, title: "GENERAL STAFF", wagePerDay: wage, status: "active", absenceDays: 0, unpaidDays: 0 });
-      else {
-        const id = createStableEntityId("employment", `${seed}:rehire:${resident.id}:${dayIndex}`);
-        employments.push({ id, residentId: resident.id, organizationId: business.organizationId, locationId: business.locationId, title: "GENERAL STAFF", wagePerDay: wage, shift: "rotating", status: "active", absenceDays: 0, unpaidDays: 0 });
-        resident.employmentId = id;
-      }
-      notices.push({ districtId: resident.districtId, title: `${resident.name} нашёл новую смену.`, detail: `Доход домохозяйства снова начал восстанавливаться.`, importance: 1 });
-    }
 
     housing = housing.map((item) => ({ ...item, rentCollectedToday: 0, arrearsHouseholds: 0 }));
 
@@ -805,10 +792,26 @@ export function advancePopulation(
     const settled = settleBusinessesDaily(businesses, employments, dayIndex, notices, locations);
     businesses = settled.businesses;
     employments = settled.employments;
+
+    const laborAdvance = advanceLaborMarketDay(
+      laborMarket,
+      dayIndex,
+      seed,
+      residents,
+      employments,
+      households,
+      businesses,
+      locations
+    );
+    laborMarket = laborAdvance.state;
+    residents = laborAdvance.residents;
+    employments = laborAdvance.employments;
+    businesses = laborAdvance.businesses;
+    notices.push(...laborAdvance.notices);
     addTotals(totals, dayTotals);
   }
 
-  const nextState: PopulationState = { ...state, residents, households, employments, housing, totals, lastUpdatedAt: timestamp, dayIndex, simulatedDays: state.simulatedDays + Math.max(0, targetDay - state.dayIndex), cohorts: [] };
+  const nextState: PopulationState = { ...state, residents, households, employments, housing, laborMarket, totals, lastUpdatedAt: timestamp, dayIndex, simulatedDays: state.simulatedDays + Math.max(0, targetDay - state.dayIndex), cohorts: [] };
   nextState.cohorts = recomputeCohorts(nextState, districts);
   return { state: nextState, economy: { ...economy, businesses }, food, notices: notices.slice(0, 10), organizationBudgetDeltas };
 }

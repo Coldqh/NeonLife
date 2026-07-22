@@ -167,7 +167,7 @@ export function createLocalEconomy(
       status,
       shortage: stock < 42,
       capacityLevel: 1,
-      targetStaff: Math.max(3, Math.round(staffing / 12)),
+      targetStaff: Math.max(3, getPopulationWorkerAvailability(population, location.id).total || Math.round(staffing / 12)),
       revenueToday: 0,
       operatingCostsToday: 0,
       payrollToday: 0,

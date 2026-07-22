@@ -1,6 +1,7 @@
 import type { EntityId } from "../../core/ids/entityId";
 import type { FoodState } from "../../gameplay/food/foodSystem";
 import type { LocalEconomyState } from "../../gameplay/economy/types";
+import type { CareerPreference, JobSearchStatus, LaborMarketState, ResidentSkillProfile, SkillDomain } from "../labor/types";
 
 export type HouseholdKind = "single" | "couple" | "family" | "shared" | "dormitory" | "temporary" | "unhoused";
 export type HouseholdStatus = "stable" | "strained" | "arrears" | "displaced";
@@ -25,6 +26,11 @@ export interface BackgroundResident {
   skillLevel: number;
   savings: number;
   activePersonId?: EntityId;
+  skills?: ResidentSkillProfile;
+  careerPreference?: CareerPreference;
+  jobSearchStatus?: JobSearchStatus;
+  experienceDays?: number;
+  lastJobChangeDay?: number | null;
 }
 
 export interface HouseholdPantryItem {
@@ -85,6 +91,15 @@ export interface EmploymentRecord {
   status: EmploymentStatus;
   absenceDays: number;
   unpaidDays: number;
+  roleId?: string;
+  skillDomain?: SkillDomain;
+  minimumSkill?: number;
+  startedDay?: number;
+  satisfaction?: number;
+  performance?: number;
+  quitPressure?: number;
+  separationReason?: "quit" | "layoff" | "nonpayment" | "closure";
+  endedDay?: number;
 }
 
 export interface HousingMarketState {
@@ -141,6 +156,7 @@ export interface PopulationState {
   employments: EmploymentRecord[];
   housing: HousingMarketState[];
   cohorts: DistrictPopulationCohort[];
+  laborMarket: LaborMarketState;
   totals: PopulationTransactionTotals;
   lastUpdatedAt: number;
   dayIndex: number;

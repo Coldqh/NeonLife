@@ -12,6 +12,7 @@ import { createLocalEconomy } from "../../gameplay/economy/localEconomy";
 import type { LocalEconomyState } from "../../gameplay/economy/types";
 import { createPopulationState } from "../../simulation/population/populationSystem";
 import type { PopulationState } from "../../simulation/population/types";
+import { normalizeLaborMarketState } from "../../simulation/labor/laborMarket";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -117,6 +118,12 @@ function normalizePopulationState(
     housing: Array.isArray((value as unknown as Record<string, unknown>).housing)
       ? (value as unknown as { housing: PopulationState["housing"] }).housing
       : fresh.housing,
+    laborMarket: normalizeLaborMarketState(
+      isObject((value as unknown as Record<string, unknown>).laborMarket)
+        ? (value as unknown as { laborMarket: PopulationState["laborMarket"] }).laborMarket
+        : undefined,
+      Math.floor(timestamp / (24 * 60 * 60_000))
+    ),
     totals: isObject((value as unknown as Record<string, unknown>).totals)
       ? { ...fresh.totals, ...(value as unknown as { totals: Partial<PopulationState["totals"]> }).totals }
       : fresh.totals
@@ -141,7 +148,11 @@ function normalizeEconomyState(
     businesses: value.businesses.map((business, index) => {
       const fallback = fresh.businesses.find((item) => item.id === business.id || item.locationId === business.locationId)
         ?? fresh.businesses[index % Math.max(1, fresh.businesses.length)];
-      return { ...fallback, ...business };
+      return {
+        ...fallback,
+        ...business,
+        targetStaff: Math.max(fallback.targetStaff, business.targetStaff ?? 0)
+      };
     })
   };
 }

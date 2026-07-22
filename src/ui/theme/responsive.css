@@ -1613,3 +1613,35 @@
   .population-housing > div:nth-of-type(3),
   .population-housing > div:nth-of-type(4) { display: none; }
 }
+
+/* v0.13.0 — labor market mobile density */
+@media (max-width: 760px) {
+  .population-tabs { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .population-labor { gap: 5px; }
+  .population-labor__summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .population-labor__summary > div { min-height: 43px; padding: 6px 7px; }
+  .population-labor__summary strong { font-size: 10px; }
+  .population-labor__columns { grid-template-columns: 1fr; gap: 5px; }
+  .population-labor__list { max-height: 245px; }
+  .population-labor__list:nth-child(2) { display: none; }
+  .population-labor__list > header { min-height: 34px; padding: 5px 7px; }
+  .population-labor__list > article {
+    min-height: 48px;
+    padding: 5px 7px;
+    grid-template-columns: minmax(0, 1fr) 57px 66px;
+    gap: 5px;
+  }
+  .population-labor span,
+  .population-labor small { font-size: 5px; }
+  .population-labor strong { font-size: 7px; }
+  .population-labor__pressure > div { min-height: 38px; padding: 5px 6px; }
+  .population-labor__pressure strong { font-size: 9px; }
+}
+
+@media (max-width: 430px) {
+  .population-tabs { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .population-tabs button { padding: 0 2px; font-size: 4.7px; }
+  .population-labor__summary > div:nth-child(4) { display: none; }
+  .population-labor__summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .population-labor__pressure { display: none; }
+}
