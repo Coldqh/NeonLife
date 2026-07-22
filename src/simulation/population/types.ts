@@ -3,6 +3,7 @@ import type { FoodState } from "../../gameplay/food/foodSystem";
 import type { LocalEconomyState } from "../../gameplay/economy/types";
 import type { CareerPreference, JobSearchStatus, LaborMarketState, ResidentSkillProfile, SkillDomain } from "../labor/types";
 import type { KernelTransactionDraft } from "../kernel/types";
+import type { EducationLevel, PopulationLifecycleState, ResidentSex } from "../lifecycle/types";
 
 export type HouseholdKind = "single" | "couple" | "family" | "shared" | "dormitory" | "temporary" | "unhoused";
 export type HouseholdStatus = "stable" | "strained" | "arrears" | "displaced";
@@ -33,6 +34,16 @@ export interface BackgroundResident {
   jobSearchStatus?: JobSearchStatus;
   experienceDays?: number;
   lastJobChangeDay?: number | null;
+  birthDay?: number;
+  sex?: ResidentSex;
+  educationLevel?: EducationLevel;
+  educationProgressDays?: number;
+  enrolledInstitutionId?: EntityId | null;
+  partnerId?: EntityId | null;
+  parentIds?: EntityId[];
+  childIds?: EntityId[];
+  generation?: number;
+  retired?: boolean;
 }
 
 export interface HouseholdPantryItem {
@@ -81,6 +92,8 @@ export interface HouseholdState {
   consecutiveRentMisses: number;
   moveCount: number;
   lastLedger: HouseholdDailyLedger | null;
+  foundedDay?: number;
+  originHouseholdIds?: EntityId[];
 }
 
 export interface EmploymentRecord {
@@ -101,7 +114,7 @@ export interface EmploymentRecord {
   satisfaction?: number;
   performance?: number;
   quitPressure?: number;
-  separationReason?: "quit" | "layoff" | "nonpayment" | "closure";
+  separationReason?: "quit" | "layoff" | "nonpayment" | "closure" | "retirement" | "death" | "migration";
   endedDay?: number;
 }
 
@@ -161,6 +174,7 @@ export interface PopulationState {
   housing: HousingMarketState[];
   cohorts: DistrictPopulationCohort[];
   laborMarket: LaborMarketState;
+  lifecycle: PopulationLifecycleState;
   totals: PopulationTransactionTotals;
   lastUpdatedAt: number;
   dayIndex: number;

@@ -66,6 +66,8 @@ export interface PersonState {
   workLocationId: EntityId;
   currentLocationId: EntityId;
   status: string;
+  lifeStatus?: "alive" | "deceased" | "migrated";
+  lifecycleNote?: string;
   money: number;
   fatigue: number;
   stress: number;

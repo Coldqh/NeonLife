@@ -13,6 +13,8 @@ import type { LocalEconomyState } from "../../gameplay/economy/types";
 import { createPopulationState } from "../../simulation/population/populationSystem";
 import type { PopulationState } from "../../simulation/population/types";
 import { normalizeLaborMarketState } from "../../simulation/labor/laborMarket";
+import { normalizePopulationLifecycleState } from "../../simulation/lifecycle/lifecycleSystem";
+import type { PopulationLifecycleState } from "../../simulation/lifecycle/types";
 import { advanceSimulationKernel, normalizeSimulationKernel } from "../../simulation/kernel/simulationKernel";
 import { normalizeInfrastructureState } from "../../simulation/infrastructure/infrastructureSystem";
 import { normalizeProductionState } from "../../simulation/production/productionSystem";
@@ -47,6 +49,7 @@ function migrateLocationSchedules(locations: LocationState[]): LocationState[] {
     if (location.type === "market") return { ...location, openHour: 16, closeHour: 6 };
     if (location.type === "workshop") return { ...location, openHour: 6, closeHour: 2 };
     if (location.type === "office") return { ...location, openHour: 7, closeHour: 22 };
+    if (location.type === "education") return { ...location, openHour: 7, closeHour: 20 };
     return { ...location, openHour: 0, closeHour: 24 };
   });
 }
@@ -97,44 +100,59 @@ function normalizePopulationState(
 ): PopulationState {
   const fresh = createPopulationState(seed, timestamp, districts, locations, organizations, people);
   if (!hasPopulationState(value)) return fresh;
+  const rawValue = value as PopulationState & { lifecycle?: PopulationLifecycleState };
+  const residents = rawValue.residents.map((resident) => ({
+    ...resident,
+    transportAccess: typeof (resident as unknown as Record<string, unknown>).transportAccess === "number"
+      ? (resident as unknown as { transportAccess: number }).transportAccess
+      : 100
+  }));
+  const households = rawValue.households.map((household, index) => {
+    const raw = household as unknown as Record<string, unknown>;
+    const fallback = fresh.households[index % Math.max(1, fresh.households.length)];
+    const foodUnits = typeof raw.foodUnits === "number" ? raw.foodUnits : 0;
+    return {
+      ...fallback,
+      ...household,
+      pantry: Array.isArray(raw.pantry)
+        ? raw.pantry as PopulationState["households"][number]["pantry"]
+        : foodUnits > 0 ? [{ productId: "kernel-9-brick", units: foodUnits }] : [],
+      spendingMode: ["survival", "restricted", "standard", "comfortable"].includes(String(raw.spendingMode))
+        ? raw.spendingMode as PopulationState["households"][number]["spendingMode"]
+        : fallback.spendingMode,
+      consecutiveRentMisses: typeof raw.consecutiveRentMisses === "number" ? raw.consecutiveRentMisses : 0,
+      moveCount: typeof raw.moveCount === "number" ? raw.moveCount : 0,
+      foundedDay: typeof raw.foundedDay === "number" ? raw.foundedDay : fallback.foundedDay,
+      originHouseholdIds: Array.isArray(raw.originHouseholdIds) ? raw.originHouseholdIds as string[] : [],
+      lastLedger: isObject(raw.lastLedger)
+        ? { ...(raw.lastLedger as unknown as NonNullable<PopulationState["households"][number]["lastLedger"]>), utilitySpent: typeof (raw.lastLedger as Record<string, unknown>).utilitySpent === "number" ? Number((raw.lastLedger as Record<string, unknown>).utilitySpent) : 0 }
+        : null
+    };
+  });
+  const currentEmployments = rawValue.employments.map((employment) => ({
+    ...employment,
+    organizationId: employment.organizationId ?? locations.find((location) => location.id === employment.locationId)?.organizationId,
+    unpaidDays: typeof (employment as unknown as Record<string, unknown>).unpaidDays === "number" ? (employment as unknown as { unpaidDays: number }).unpaidDays : 0
+  }));
+  const existingEmploymentIds = new Set(currentEmployments.map((employment) => employment.id));
+  const educationEmployment = fresh.employments.filter((employment) => locations.find((location) => location.id === employment.locationId)?.type === "education" && !existingEmploymentIds.has(employment.id));
+  const employments = [...currentEmployments, ...educationEmployment];
+  const housing = Array.isArray((rawValue as unknown as Record<string, unknown>).housing)
+    ? (rawValue as unknown as { housing: PopulationState["housing"] }).housing.map((item) => ({ ...item, ownerOrganizationId: item.ownerOrganizationId ?? locations.find((location) => location.id === item.locationId)?.organizationId }))
+    : fresh.housing;
+  const dayIndex = Math.floor(timestamp / (24 * 60 * 60_000));
+  const lifecycle = normalizePopulationLifecycleState(rawValue.lifecycle, seed, dayIndex, residents, households, districts, locations);
   return {
     ...fresh,
-    ...value,
-    residents: value.residents.map((resident) => ({ ...resident, transportAccess: typeof (resident as unknown as Record<string, unknown>).transportAccess === "number" ? (resident as unknown as { transportAccess: number }).transportAccess : 100 })),
-    households: value.households.map((household, index) => {
-      const raw = household as unknown as Record<string, unknown>;
-      const fallback = fresh.households[index % Math.max(1, fresh.households.length)];
-      const foodUnits = typeof raw.foodUnits === "number" ? raw.foodUnits : 0;
-      return {
-        ...fallback,
-        ...household,
-        pantry: Array.isArray(raw.pantry)
-          ? raw.pantry as PopulationState["households"][number]["pantry"]
-          : foodUnits > 0 ? [{ productId: "kernel-9-brick", units: foodUnits }] : [],
-        spendingMode: ["survival", "restricted", "standard", "comfortable"].includes(String(raw.spendingMode))
-          ? raw.spendingMode as PopulationState["households"][number]["spendingMode"]
-          : fallback.spendingMode,
-        consecutiveRentMisses: typeof raw.consecutiveRentMisses === "number" ? raw.consecutiveRentMisses : 0,
-        moveCount: typeof raw.moveCount === "number" ? raw.moveCount : 0,
-        lastLedger: isObject(raw.lastLedger) ? { ...(raw.lastLedger as unknown as NonNullable<PopulationState["households"][number]["lastLedger"]>), utilitySpent: typeof (raw.lastLedger as Record<string, unknown>).utilitySpent === "number" ? Number((raw.lastLedger as Record<string, unknown>).utilitySpent) : 0 } : null
-      };
-    }),
-    employments: value.employments.map((employment) => ({
-      ...employment,
-      organizationId: employment.organizationId ?? locations.find((location) => location.id === employment.locationId)?.organizationId,
-      unpaidDays: typeof (employment as unknown as Record<string, unknown>).unpaidDays === "number" ? (employment as unknown as { unpaidDays: number }).unpaidDays : 0
-    })),
-    housing: Array.isArray((value as unknown as Record<string, unknown>).housing)
-      ? (value as unknown as { housing: PopulationState["housing"] }).housing.map((housing) => ({ ...housing, ownerOrganizationId: housing.ownerOrganizationId ?? locations.find((location) => location.id === housing.locationId)?.organizationId }))
-      : fresh.housing,
-    laborMarket: normalizeLaborMarketState(
-      isObject((value as unknown as Record<string, unknown>).laborMarket)
-        ? (value as unknown as { laborMarket: PopulationState["laborMarket"] }).laborMarket
-        : undefined,
-      Math.floor(timestamp / (24 * 60 * 60_000))
-    ),
-    totals: isObject((value as unknown as Record<string, unknown>).totals)
-      ? { ...fresh.totals, ...(value as unknown as { totals: Partial<PopulationState["totals"]> }).totals }
+    ...rawValue,
+    residents: lifecycle.residents,
+    households: lifecycle.households,
+    employments,
+    housing,
+    lifecycle: lifecycle.state,
+    laborMarket: normalizeLaborMarketState(rawValue.laborMarket, dayIndex),
+    totals: isObject((rawValue as unknown as Record<string, unknown>).totals)
+      ? { ...fresh.totals, ...(rawValue as unknown as { totals: Partial<PopulationState["totals"]> }).totals }
       : fresh.totals
   };
 }
@@ -256,6 +274,32 @@ function ensureLocalOperators(
         closeHour: 21
       });
     }
+  }
+
+  const vectra = organizations.find((organization) => organization.code === "VEC/WRK" || organization.name.includes("VECTRA"));
+  const aurelian = organizations.find((organization) => organization.code === "AUR/SYS" || organization.name.includes("AURELIAN"));
+  const lowerDistrictId = locations.find((location) => location.type === "market")?.districtId ?? locations[0]?.districtId;
+  const industrialDistrictId = locations.find((location) => location.type === "workshop")?.districtId ?? lowerDistrictId;
+  const corporateDistrictId = locations.find((location) => location.type === "office")?.districtId ?? industrialDistrictId;
+  const educationDefinitions = [
+    { scope: "lower-learning-hub", name: "CIVIC LEARNING HUB U-04", code: "EDU/U04", districtId: lowerDistrictId, organizationId: civic.id, security: 44 },
+    { scope: "technical-institute", name: "VECTRA TECHNICAL INSTITUTE", code: "EDU/R12", districtId: industrialDistrictId, organizationId: vectra?.id ?? civic.id, security: 63 },
+    { scope: "corporate-academy", name: "AURELIAN ACADEMY", code: "EDU/T03", districtId: corporateDistrictId, organizationId: aurelian?.id ?? civic.id, security: 91 }
+  ];
+  for (const definition of educationDefinitions) {
+    if (!definition.districtId || locations.some((location) => location.code === definition.code || location.name === definition.name)) continue;
+    locations.push({
+      id: createStableEntityId("location", `${seed}:${definition.scope}`),
+      districtId: definition.districtId,
+      organizationId: definition.organizationId,
+      name: definition.name,
+      code: definition.code,
+      type: "education",
+      open: true,
+      security: definition.security,
+      openHour: 7,
+      closeHour: 22
+    });
   }
 
   for (const organization of organizations) {

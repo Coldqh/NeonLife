@@ -5418,3 +5418,43 @@ button:disabled {
 .government-case strong { overflow: hidden; color: var(--yellow); font: 700 8px/1.2 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .government-case--charged { border-color: rgba(255,88,105,.35); }
 .government-case--investigating { border-color: rgba(95,230,255,.25); }
+
+/* v0.19.0 — autonomous population lifecycle */
+.population-lifecycle {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.population-lifecycle .population-labor__summary { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.population-lifecycle__grid {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.population-lifecycle .population-labor__list { max-height: 300px; }
+.population-lifecycle .population-labor__list > article { grid-template-columns: minmax(0, 1.5fr) 90px 110px; }
+.population-lifecycle span,
+.population-lifecycle strong,
+.population-lifecycle small { font-family: var(--font-mono); }
+.population-lifecycle span,
+.population-lifecycle small { color: var(--muted-2); font-size: 6px; }
+.population-lifecycle strong { color: var(--text); font-size: 9px; }
+.population-lifecycle__districts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--line);
+  background: var(--line);
+}
+.population-lifecycle__districts > div {
+  min-width: 0;
+  min-height: 46px;
+  padding: 7px 9px;
+  background: rgba(5, 15, 21, .96);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.population-lifecycle__districts strong { color: var(--cyan); font-size: 13px; }

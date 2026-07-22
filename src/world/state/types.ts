@@ -49,7 +49,7 @@ export interface LocationState {
   organizationId?: EntityId;
   name: string;
   code: string;
-  type: "housing" | "food" | "workshop" | "transport" | "clinic" | "office" | "market" | "government";
+  type: "housing" | "food" | "workshop" | "transport" | "clinic" | "office" | "market" | "government" | "education";
   open: boolean;
   security: number;
   openHour?: number;

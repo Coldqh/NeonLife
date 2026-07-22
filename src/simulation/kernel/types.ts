@@ -67,6 +67,7 @@ export type KernelTransactionReason =
   | "fine"
   | "social-transfer"
   | "public-grant"
+  | "education-service"
   | "extortion"
   | "bribe"
   | "seizure"

@@ -210,17 +210,22 @@ export function advanceHumanNetwork(
   const targetCycle = Math.floor(timestamp / cycleLength);
   const notices: HumanNetworkNotice[] = [];
   let people = state.people.map((person) => {
-    const moved = { ...person, currentLocationId: locationAt(person, timestamp), lastAdvancedAt: timestamp };
+    if ((person.lifeStatus ?? "alive") !== "alive") {
+      return { ...person, lastAdvancedAt: timestamp, status: person.lifeStatus === "deceased" ? "DECEASED" : "LEFT CITY" };
+    }
+    const moved = { ...person, lifeStatus: "alive" as const, currentLocationId: locationAt(person, timestamp), lastAdvancedAt: timestamp };
     return { ...moved, status: statusFor(moved, locations, timestamp) };
   });
   let cycle = Math.max(state.cycle, Math.floor(state.lastUpdatedAt / cycleLength));
 
   while (cycle < targetCycle && notices.length < 3) {
     cycle += 1;
-    if (!people.length) break;
+    const livingIndexes = people.map((person, index) => ({ person, index })).filter(({ person }) => (person.lifeStatus ?? "alive") === "alive");
+    if (!livingIndexes.length) break;
     const rng = new SeededRandom(`${seed}:human-network-cycle:${cycle}`);
-    const index = rng.integer(0, people.length - 1);
-    const person = people[index];
+    const selected = rng.pick(livingIndexes);
+    const index = selected.index;
+    const person = selected.person;
     const severityDelta = rng.integer(-2, 8);
     const moneyDelta = -rng.integer(3, 26);
     const nextSeverity = clamp(person.problem.severity + severityDelta);
@@ -252,11 +257,11 @@ export function advanceHumanNetwork(
 
 export function getPerson(state: HumanNetworkState, personId: string | null | undefined): PersonState | null {
   if (!personId) return null;
-  return state.people.find((person) => person.id === personId) ?? null;
+  return state.people.find((person) => person.id === personId && (person.lifeStatus ?? "alive") === "alive") ?? null;
 }
 
 export function peopleAtLocation(state: HumanNetworkState, locationId: string): PersonState[] {
-  return state.people.filter((person) => person.currentLocationId === locationId);
+  return state.people.filter((person) => person.currentLocationId === locationId && (person.lifeStatus ?? "alive") === "alive");
 }
 
 export function toKnownNpc(person: PersonState, locations: LocationState[], timestamp: number): KnownNpc {

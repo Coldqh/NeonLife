@@ -101,6 +101,7 @@ function dependency(kind: InfrastructureKind, location: LocationState): number {
 function priorityFor(location: LocationState): number {
   if (location.type === "clinic") return 100;
   if (location.type === "transport") return 92;
+  if (location.type === "education") return 88;
   if (location.type === "housing") return 82;
   if (location.type === "food") return 76;
   if (location.type === "market") return 68;
@@ -117,7 +118,7 @@ function demandScale(
   const households = population.households.filter((item) => item.homeLocationId === location.id);
   const residents = households.reduce((sum, item) => sum + item.memberIds.length, 0);
   const business = economy.businesses.find((item) => item.locationId === location.id);
-  const householdScale = location.type === "housing" ? 1 + residents / 18 : 1;
+  const householdScale = location.type === "housing" ? 1 + residents / 18 : location.type === "education" ? 1.18 : 1;
   const businessScale = business ? 0.8 + business.capacityLevel * 0.15 + business.demand / 180 : 1;
   const kindScale = kind === "transport" ? 1.1 : kind === "data" && location.type === "office" ? 1.2 : 1;
   return dependency(kind, location) * householdScale * businessScale * kindScale;
@@ -399,7 +400,7 @@ function applyInfrastructureToPopulation(
       const water = home ? getLocationServiceLevel(state, home, "water") : 15;
       const waste = home ? getLocationServiceLevel(state, home, "waste") : 20;
       const deficit = [power, water, waste].reduce((sum, level) => sum + Math.max(0, 55 - level), 0) / 55;
-      const penalty = Math.min(8, Math.round(deficit * daysAdvanced * 1.4));
+      const penalty = Math.min(2, Math.round(deficit * Math.sqrt(daysAdvanced) * 0.25));
       const score = clamp(resident.healthScore - penalty);
       return {
         ...resident,

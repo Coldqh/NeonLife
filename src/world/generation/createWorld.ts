@@ -191,7 +191,10 @@ export function createWorldSession(seed: string): GameSession {
   const market = createLocation(seed, "market", lower.id, "UNDERLINE NIGHT MARKET", "MKT/U09", "market", 26, marketCoop.id, 16, 6);
   const courierHub = createLocation(seed, "courier-hub", lower.id, "MESHLINE DISPATCH HALL", "MSH/U11", "transport", 41, meshline.id, 0, 24);
   const civicHall = createLocation(seed, "civic-hall", corporate.id, `${cityName} CIVIC ADMINISTRATION`, "CIV/T01", "government", 82, civic.id, 7, 21);
-  const locations = [housing, canteen, transitNode, workerDorm, workshop, clinic, crownHousing, tower, market, courierHub, civicHall];
+  const lowerLearningHub = createLocation(seed, "lower-learning-hub", lower.id, "CIVIC LEARNING HUB U-04", "EDU/U04", "education", 44, civic.id, 7, 20);
+  const technicalInstitute = createLocation(seed, "technical-institute", industrial.id, "VECTRA TECHNICAL INSTITUTE", "EDU/R12", "education", 63, vectra.id, 6, 22);
+  const corporateAcademy = createLocation(seed, "corporate-academy", corporate.id, "AURELIAN ACADEMY", "EDU/T03", "education", 91, aurelian.id, 7, 22);
+  const locations = [housing, canteen, transitNode, workerDorm, workshop, clinic, crownHousing, tower, market, courierHub, civicHall, lowerLearningHub, technicalInstitute, corporateAcademy];
   attachLocations(districts, organizations, locations);
 
   const player = createInitialPlayer(seed, lower.name, lower.code);

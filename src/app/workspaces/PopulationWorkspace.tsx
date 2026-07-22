@@ -3,7 +3,7 @@ import { getFoodProduct } from "../../data/products/foodCatalog";
 import type { HouseholdStatus } from "../../simulation/population/types";
 import type { GameSession } from "../../world/state/types";
 
-type PopulationTab = "districts" | "households" | "housing" | "labor" | "infrastructure" | "supply" | "organizations" | "government" | "flow";
+type PopulationTab = "districts" | "lifecycle" | "households" | "housing" | "labor" | "infrastructure" | "supply" | "organizations" | "government" | "flow";
 
 function statusRank(status: HouseholdStatus): number {
   if (status === "displaced") return 4;
@@ -93,6 +93,12 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
   const [tab, setTab] = useState<PopulationTab>("districts");
   const state = session.population;
   const labor = state.laborMarket;
+  const lifecycle = state.lifecycle;
+  const recentLifecycleEvents = lifecycle.events.slice(-18).reverse();
+  const deceased = lifecycle.archive.filter((record) => record.status === "deceased").length;
+  const emigrated = lifecycle.archive.filter((record) => record.status === "emigrated").length;
+  const enrolled = lifecycle.institutions.reduce((sum, institution) => sum + institution.enrolled, 0);
+  const waitlisted = lifecycle.institutions.reduce((sum, institution) => sum + institution.waitlist, 0);
   const atRisk = state.households
     .filter((household) => household.status !== "stable")
     .slice()
@@ -130,6 +136,7 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
 
       <nav className="population-tabs" aria-label="Population systems">
         <button type="button" className={tab === "districts" ? "is-active" : ""} onClick={() => setTab("districts")}>РАЙОНЫ</button>
+        <button type="button" className={tab === "lifecycle" ? "is-active" : ""} onClick={() => setTab("lifecycle")}>ЖИЗНЬ</button>
         <button type="button" className={tab === "households" ? "is-active" : ""} onClick={() => setTab("households")}>СЕМЬИ</button>
         <button type="button" className={tab === "housing" ? "is-active" : ""} onClick={() => setTab("housing")}>ЖИЛЬЁ</button>
         <button type="button" className={tab === "labor" ? "is-active" : ""} onClick={() => setTab("labor")}>ТРУД</button>
@@ -162,6 +169,44 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
               </article>
             );
           })}
+        </section>
+      ) : null}
+
+      {tab === "lifecycle" ? (
+        <section className="population-lifecycle">
+          <div className="population-labor__summary">
+            <div><span>BIRTHS / DEATHS</span><strong>{lifecycle.totals.births} / {lifecycle.totals.deaths}</strong><small>{deceased} archived deaths</small></div>
+            <div><span>MIGRATION</span><strong>+{lifecycle.totals.immigrants} / −{lifecycle.totals.emigrants}</strong><small>{emigrated} archived departures</small></div>
+            <div><span>HOUSEHOLDS</span><strong>{lifecycle.totals.householdsFormed}</strong><small>{lifecycle.totals.partnerships} partnerships · {lifecycle.totals.separations} separations</small></div>
+            <div><span>EDUCATION</span><strong>{enrolled}</strong><small>{waitlisted} waitlisted · {lifecycle.totals.graduates} graduates</small></div>
+            <div><span>RETIREMENTS</span><strong>{lifecycle.totals.retirements}</strong><small>exact age progression</small></div>
+          </div>
+          <div className="population-lifecycle__grid">
+            <section className="population-labor__list">
+              <header><span>EDUCATION NETWORK</span><strong>PHYSICAL CAPACITY</strong></header>
+              {lifecycle.institutions.map((institution) => (
+                <article key={institution.id}>
+                  <div><span>{institution.track.toUpperCase()}</span><strong>{locationName(session, institution.locationId)}</strong><small>{districtName(session, institution.districtId)}</small></div>
+                  <div><span>LOAD</span><strong>{institution.enrolled}/{institution.capacity}</strong><small>{institution.waitlist} waitlisted</small></div>
+                  <div><span>QUALITY</span><strong>{institution.quality}%</strong><small>{institution.status.toUpperCase()} · tuition ₵{institution.tuitionPerDay}</small></div>
+                </article>
+              ))}
+            </section>
+            <section className="population-labor__list">
+              <header><span>DEMOGRAPHIC HISTORY</span><strong>AUTONOMOUS EVENTS</strong></header>
+              {recentLifecycleEvents.map((item) => (
+                <article key={item.id}>
+                  <div><span>{item.type.replace(/-/g, " ").toUpperCase()}</span><strong>{item.summary}</strong><small>{districtName(session, item.districtId)} · day {item.dayIndex}</small></div>
+                </article>
+              ))}
+              {!recentLifecycleEvents.length ? <div className="empty-terminal">Жизненный цикл ещё не создал изменений.</div> : null}
+            </section>
+          </div>
+          <div className="population-lifecycle__districts">
+            {session.world.districts.map((district) => (
+              <div key={district.id}><span>{district.name}</span><strong>{Math.round(lifecycle.representedPopulationByDistrict[district.id] ?? district.population).toLocaleString("ru-RU")}</strong><small>represented residents</small></div>
+            ))}
+          </div>
         </section>
       ) : null}
 

@@ -85,7 +85,7 @@ function cargoForSupplyClass(supplyClass: BusinessState["supplyClass"]) {
 }
 
 function businessClient(people: PersonState[], business: BusinessState): PersonState | null {
-  const workers = people.filter((person) => person.workLocationId === business.locationId);
+  const workers = people.filter((person) => person.workLocationId === business.locationId && (person.lifeStatus ?? "alive") === "alive");
   return workers.sort((left, right) => right.problem.severity - left.problem.severity)[0] ?? null;
 }
 
@@ -98,7 +98,8 @@ function createBoard(
   generation: number
 ): CourierOrder[] {
   const candidates = eligibleLocations(locations);
-  if (candidates.length < 2 || !people.length) return [];
+  const livingPeople = people.filter((person) => (person.lifeStatus ?? "alive") === "alive");
+  if (candidates.length < 2 || !livingPeople.length) return [];
   const rng = new SeededRandom(`${seed}:courier-board:${generation}`);
   const orders: CourierOrder[] = [];
 
@@ -108,8 +109,8 @@ function createBoard(
 
   for (let index = 0; index < 6; index += 1) {
     const business = index < Math.min(3, urgentBusinesses.length) ? urgentBusinesses[index] : null;
-    const businessPerson = business ? businessClient(people, business) : null;
-    const client = businessPerson ?? people[(index + rng.integer(0, people.length - 1)) % people.length];
+    const businessPerson = business ? businessClient(livingPeople, business) : null;
+    const client = businessPerson ?? livingPeople[(index + rng.integer(0, livingPeople.length - 1)) % livingPeople.length];
     const businessLocation = business ? locations.find((location) => location.id === business.locationId) : null;
     const dropoff = businessLocation ?? chooseDropoff(client, candidates, rng.pick(candidates));
     const pickupCandidates = candidates.filter((location) => location.id !== dropoff.id);

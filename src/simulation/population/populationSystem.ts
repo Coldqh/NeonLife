@@ -6,6 +6,7 @@ import { FOOD_CATALOG, getFoodProduct } from "../../data/products/foodCatalog";
 import type { HumanNetworkState, PersonState } from "../../people/network/types";
 import type { DistrictState, LocationState, OrganizationState } from "../../world/state/types";
 import { advanceLaborMarketDay, createLaborMarketState } from "../labor/laborMarket";
+import { advancePopulationLifecycleDay, createPopulationLifecycleState, normalizePopulationLifecycleState } from "../lifecycle/lifecycleSystem";
 import { employmentContractId, kernelSystemEntityId, leaseContractId } from "../kernel/simulationKernel";
 import type { KernelTransactionDraft } from "../kernel/types";
 import type {
@@ -51,8 +52,8 @@ function healthFor(score: number): ResidentHealth {
 }
 
 function householdStatus(balance: number, debt: number, deficitDays: number, rentMisses: number, kind: HouseholdKind): HouseholdStatus {
-  if (kind === "unhoused" || (rentMisses >= 10 && debt >= 600)) return "displaced";
-  if (rentMisses >= 3 || debt >= 500) return "arrears";
+  if (kind === "unhoused" || (rentMisses >= 60 && debt >= 1_000)) return "displaced";
+  if (rentMisses >= 14 || debt >= 700) return "arrears";
   if (deficitDays >= 3 || balance < 120 || debt > 0) return "strained";
   return "stable";
 }
@@ -98,6 +99,7 @@ function roleForLocation(location: LocationState): string {
   if (location.type === "workshop") return "SERVICE WORKER";
   if (location.type === "office") return "OFFICE STAFF";
   if (location.type === "transport") return "TRANSIT WORKER";
+  if (location.type === "education") return "EDUCATION STAFF";
   return "GENERAL WORKER";
 }
 
@@ -107,7 +109,7 @@ function shiftForLocation(location: LocationState, rng: SeededRandom): ShiftType
 }
 
 function wageFor(location: LocationState, skill: number, rng: SeededRandom): number {
-  const base = location.type === "office" ? 82 : location.type === "clinic" ? 68 : location.type === "workshop" ? 64 : 48;
+  const base = location.type === "office" ? 82 : location.type === "clinic" ? 68 : location.type === "education" ? 66 : location.type === "workshop" ? 64 : 48;
   return Math.round(base + skill * 0.42 + rng.integer(-8, 10));
 }
 
@@ -127,17 +129,18 @@ function cohortFor(
   district: DistrictState,
   residents: BackgroundResident[],
   households: HouseholdState[],
-  employments: EmploymentRecord[]
+  employments: EmploymentRecord[],
+  representedPopulation = district.population
 ): DistrictPopulationCohort {
   const localResidents = residents.filter((resident) => resident.districtId === district.id);
   const localHouseholds = households.filter((household) => household.districtId === district.id);
   const employedIds = new Set(employments.filter((job) => job.status === "active").map((job) => job.residentId));
   const workingAge = localResidents.filter((resident) => resident.lifeStage === "working-age");
-  const scale = localResidents.length ? district.population / localResidents.length : 0;
+  const scale = localResidents.length ? representedPopulation / localResidents.length : 0;
   return {
     districtId: district.id,
     sampleSize: localResidents.length,
-    representedPopulation: district.population,
+    representedPopulation: Math.round(representedPopulation),
     children: Math.round(localResidents.filter((resident) => resident.lifeStage === "child").length * scale),
     workingAge: Math.round(workingAge.length * scale),
     elderly: Math.round(localResidents.filter((resident) => resident.lifeStage === "elderly").length * scale),
@@ -194,8 +197,8 @@ export function createPopulationState(
   organizations: OrganizationState[],
   people: PersonState[]
 ): PopulationState {
-  const residents: BackgroundResident[] = [];
-  const households: HouseholdState[] = [];
+  let residents: BackgroundResident[] = [];
+  let households: HouseholdState[] = [];
   const employments: EmploymentRecord[] = [];
   const workNodes = workLocations(locations);
   const organizationByLocation = new Map<string, OrganizationState>();
@@ -360,6 +363,10 @@ export function createPopulationState(
       };
     });
 
+  const initialDay = Math.floor(timestamp / DAY_MS);
+  const lifecycleCreated = createPopulationLifecycleState(seed, initialDay, residents, households, districts, locations);
+  residents = lifecycleCreated.residents;
+  households = lifecycleCreated.households;
   const totals: PopulationTransactionTotals = { wagesPaid: 0, unpaidWages: 0, rentPaid: 0, foodSales: 0, medicalSales: 0, transportSales: 0, discretionarySales: 0, utilitySales: 0, debtRepaid: 0, maintenanceSpent: 0, moves: 0 };
   const cohorts = districts.map((district) => cohortFor(district, residents, households, employments));
   return {
@@ -368,10 +375,11 @@ export function createPopulationState(
     employments,
     housing,
     cohorts,
-    laborMarket: createLaborMarketState(Math.floor(timestamp / DAY_MS)),
+    laborMarket: createLaborMarketState(initialDay),
+    lifecycle: lifecycleCreated.state,
     totals,
     lastUpdatedAt: timestamp,
-    dayIndex: Math.floor(timestamp / DAY_MS),
+    dayIndex: initialDay,
     simulatedDays: 0
   };
 }
@@ -394,7 +402,13 @@ function addTotals(target: PopulationTransactionTotals, delta: Partial<Populatio
 }
 
 function recomputeCohorts(state: PopulationState, districts: DistrictState[]): DistrictPopulationCohort[] {
-  return districts.map((district) => cohortFor(district, state.residents, state.households, state.employments));
+  return districts.map((district) => cohortFor(
+    district,
+    state.residents,
+    state.households,
+    state.employments,
+    state.lifecycle.representedPopulationByDistrict[district.id] ?? district.population
+  ));
 }
 
 function businessStatus(stock: number, staffing: number, cash: number): BusinessStatus {
@@ -618,10 +632,12 @@ export function advancePopulation(
   if (timestamp <= state.lastUpdatedAt) return { state, economy, food: foodState, notices: [], organizationBudgetDeltas: [], transactions: [] };
   const targetDay = Math.floor(timestamp / DAY_MS);
   let dayIndex = Math.max(state.dayIndex, Math.floor(state.lastUpdatedAt / DAY_MS));
-  let residents = state.residents.map((resident) => ({ ...resident }));
-  let households = state.households.map((household) => ({ ...household, pantry: household.pantry?.map((item) => ({ ...item })) ?? [{ productId: "kernel-9-brick", units: Math.max(0, household.foodUnits) }] }));
+  const normalizedLifecycle = normalizePopulationLifecycleState(state.lifecycle, seed, dayIndex, state.residents, state.households, districts, locations);
+  let residents = normalizedLifecycle.residents.map((resident) => ({ ...resident }));
+  let households = normalizedLifecycle.households.map((household) => ({ ...household, pantry: household.pantry?.map((item) => ({ ...item })) ?? [{ productId: "kernel-9-brick", units: Math.max(0, household.foodUnits) }] }));
   let employments = state.employments.map((employment) => ({ ...employment, unpaidDays: employment.unpaidDays ?? 0 }));
   let laborMarket = state.laborMarket ?? createLaborMarketState(dayIndex);
+  let lifecycle = normalizedLifecycle.state;
   let housing = state.housing.map((item) => ({ ...item }));
   let businesses = economy.businesses.map((business) => ({ ...business }));
   let food = foodState;
@@ -884,12 +900,12 @@ export function advancePopulation(
     const occupied = new Map<string, number>();
     for (const household of households) if (household.homeLocationId) occupied.set(household.homeLocationId, (occupied.get(household.homeLocationId) ?? 0) + household.memberIds.length);
     households = households.map((household) => {
-      const shouldMove = household.status === "displaced" || household.consecutiveRentMisses >= 6;
+      const shouldMove = household.status === "displaced" || household.consecutiveRentMisses >= 28;
       const canUpgrade = !shouldMove && household.status === "stable" && household.balance > 1_000 && dayRng.chance(0.015);
       if (!shouldMove && !canUpgrade) return household;
       const target = chooseHousing(household, housing, occupied, canUpgrade);
       if (!target) {
-        if (household.homeLocationId && household.consecutiveRentMisses < 10) return household;
+        if (household.homeLocationId && household.consecutiveRentMisses < 60) return household;
         if (household.homeLocationId) occupied.set(household.homeLocationId, Math.max(0, (occupied.get(household.homeLocationId) ?? 0) - household.memberIds.length));
         addTotals(dayTotals, { moves: household.homeLocationId ? 1 : 0 });
         return { ...household, homeLocationId: null, kind: "unhoused" as const, status: "displaced" as const, housingSecurity: 0, moveCount: household.moveCount + (household.homeLocationId ? 1 : 0) };
@@ -905,11 +921,23 @@ export function advancePopulation(
       const household = households.find((item) => item.id === resident.householdId);
       const district = districts.find((item) => item.id === resident.districtId);
       const unmetFood = household?.lastLedger?.unmetFoodUnits ?? 0;
-      const foodPenalty = unmetFood > 0 ? Math.min(9, 3 + unmetFood) : 0;
-      const housingPenalty = household?.status === "displaced" ? 8 : household?.status === "arrears" ? 3 : 0;
-      const pollutionPenalty = district ? Math.round(district.pollution / 32) : 1;
-      const medicalRecovery = household?.lastLedger?.medicalSpent ? Math.min(4, Math.round(household.lastLedger.medicalSpent / 8)) : 0;
-      const recovery = household?.status === "stable" && household.foodUnits > household.memberIds.length ? 2 : 0;
+      const chronicFoodStress = unmetFood > 0 && (household?.consecutiveDeficitDays ?? 0) >= 3;
+      const foodPenalty = chronicFoodStress
+        ? ((household?.consecutiveDeficitDays ?? 0) >= 12 ? 2 : 1)
+        : 0;
+      const housingPenalty = household?.status === "displaced"
+        ? (dayRng.chance(0.10) ? 1 : 0)
+        : household?.status === "arrears" && dayRng.chance(0.025) ? 1 : 0;
+      const environmentalRisk = district
+        ? Math.min(0.18, (district.pollution + Math.max(0, 55 - district.infrastructure)) / 1_800)
+        : 0.03;
+      const pollutionPenalty = dayRng.chance(environmentalRisk) ? 1 : 0;
+      const medicalRecovery = household?.lastLedger?.medicalSpent
+        ? Math.min(3, Math.max(1, Math.round(household.lastLedger.medicalSpent / 12)))
+        : 0;
+      const recovery = household?.status === "stable" && household.foodUnits > household.memberIds.length && resident.healthScore < 82
+        ? 1
+        : 0;
       const healthScore = clamp(resident.healthScore - foodPenalty - housingPenalty - pollutionPenalty + medicalRecovery + recovery);
       return { ...resident, homeLocationId: household?.homeLocationId ?? null, healthScore, health: healthFor(healthScore), savings: Math.max(0, resident.savings + dayRng.integer(-3, 2)), transportAccess: resident.transportAccess ?? 100 };
     });
@@ -955,10 +983,37 @@ export function advancePopulation(
     employments = laborAdvance.employments;
     businesses = laborAdvance.businesses;
     notices.push(...laborAdvance.notices);
+
+    const lifecycleAdvance = advancePopulationLifecycleDay({
+      state: lifecycle,
+      dayIndex,
+      seed,
+      residents,
+      households,
+      employments,
+      housing,
+      districts,
+      locations,
+      organizations
+    });
+    lifecycle = lifecycleAdvance.state;
+    residents = lifecycleAdvance.residents;
+    households = lifecycleAdvance.households;
+    employments = lifecycleAdvance.employments;
+    housing = lifecycleAdvance.housing;
+    notices.push(...lifecycleAdvance.notices);
+    transactions.push(...lifecycleAdvance.transactions);
+    for (const delta of lifecycleAdvance.organizationBudgetDeltas) pushBudgetDelta(organizationBudgetDeltas, delta.organizationId, delta.delta);
+    const existingResidentIds = new Set(residents.map((resident) => resident.id));
+    laborMarket = {
+      ...laborMarket,
+      applications: laborMarket.applications.filter((application) => existingResidentIds.has(application.residentId)),
+      vacancies: laborMarket.vacancies.map((vacancy) => ({ ...vacancy, applicationIds: vacancy.applicationIds.filter((id) => laborMarket.applications.some((application) => application.id === id && existingResidentIds.has(application.residentId))) }))
+    };
     addTotals(totals, dayTotals);
   }
 
-  const nextState: PopulationState = { ...state, residents, households, employments, housing, laborMarket, totals, lastUpdatedAt: timestamp, dayIndex, simulatedDays: state.simulatedDays + Math.max(0, targetDay - state.dayIndex), cohorts: [] };
+  const nextState: PopulationState = { ...state, residents, households, employments, housing, laborMarket, lifecycle, totals, lastUpdatedAt: timestamp, dayIndex, simulatedDays: state.simulatedDays + Math.max(0, targetDay - state.dayIndex), cohorts: [] };
   nextState.cohorts = recomputeCohorts(nextState, districts);
   return { state: nextState, economy: { ...economy, businesses }, food, notices: notices.slice(0, 10), organizationBudgetDeltas, transactions };
 }
@@ -968,12 +1023,27 @@ export function synchronizeActivePeopleFromPopulation(network: HumanNetworkState
     ...network,
     people: network.people.map((person) => {
       const resident = population.residents.find((item) => item.activePersonId === person.id);
-      if (!resident) return person;
+      if (!resident) {
+        const archived = population.lifecycle.archive.slice().reverse().find((item) => item.activePersonId === person.id);
+        if (!archived) return person;
+        return {
+          ...person,
+          age: archived.age,
+          lifeStatus: archived.status === "deceased" ? "deceased" as const : "migrated" as const,
+          status: archived.status === "deceased" ? "DECEASED" : "LEFT CITY",
+          lifecycleNote: archived.status === "deceased" ? archived.cause : `Destination: ${archived.destination ?? "EXTERNAL REGION"}`,
+          fatigue: 0,
+          stress: 0
+        };
+      }
       const household = population.households.find((item) => item.id === resident.householdId);
       const stressDelta = household?.status === "displaced" ? 18 : household?.status === "arrears" ? 9 : household?.status === "strained" ? 3 : -1;
       const problemSeverity = clamp(person.problem.severity + stressDelta);
       return {
         ...person,
+        age: resident.age,
+        lifeStatus: "alive" as const,
+        lifecycleNote: resident.educationLevel ? `Education: ${resident.educationLevel}` : person.lifecycleNote,
         money: Math.max(0, resident.savings + Math.round((household?.balance ?? 0) / Math.max(1, household?.memberIds.length ?? 1))),
         stress: clamp(person.stress + stressDelta),
         fatigue: clamp(person.fatigue + (resident.health === "ill" || resident.health === "disabled" ? 5 : -1)),

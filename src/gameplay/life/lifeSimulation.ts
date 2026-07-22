@@ -259,6 +259,18 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     worldEvents: worldEventCount
   });
   const nextOrganizations = governmentAdvance.organizations;
+  const representedPopulation = governmentAdvance.population.lifecycle.representedPopulationByDistrict;
+  const nextDistricts = session.world.districts.map((district) => ({
+    ...district,
+    population: Math.round(representedPopulation[district.id] ?? district.population)
+  }));
+  const nextCity = {
+    ...session.world.city,
+    population: nextDistricts.reduce((sum, district) => sum + district.population, 0),
+    networkStatus: governmentAdvance.infrastructure.networks.find((item) => item.kind === "data")?.status === "offline"
+      ? "offline" as const
+      : governmentAdvance.infrastructure.networks.some((item) => item.status === "restricted" || item.status === "offline") ? "degraded" as const : "stable" as const
+  };
   const nextPlayer = {
     ...session.player,
     balance: Math.max(0, session.player.balance + (options.balanceDelta ?? 0)),
@@ -289,8 +301,8 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   const kernel = advanceSimulationKernel(session.kernel, {
     timestamp: nextTimestamp,
     seed: session.world.meta.seed,
-    city: session.world.city,
-    districts: session.world.districts,
+    city: nextCity,
+    districts: nextDistricts,
     locations: session.world.locations,
     organizations: nextOrganizations,
     player: nextPlayer,
@@ -309,12 +321,8 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     world: {
       ...session.world,
       meta: { ...session.world.meta, currentTimestamp: nextTimestamp },
-      city: {
-        ...session.world.city,
-        networkStatus: governmentAdvance.infrastructure.networks.find((item) => item.kind === "data")?.status === "offline"
-          ? "offline"
-          : governmentAdvance.infrastructure.networks.some((item) => item.status === "restricted" || item.status === "offline") ? "degraded" : "stable"
-      },
+      city: nextCity,
+      districts: nextDistricts,
       organizations: nextOrganizations,
       activeDistrictId: targetDistrict?.id ?? session.world.activeDistrictId,
       primaryContactId: selectedPerson?.id ?? session.world.primaryContactId

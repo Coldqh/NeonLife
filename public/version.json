@@ -1,7 +1,7 @@
 {
-  "version": "0.18.0",
-  "releasedAt": "2026-07-22T16:30:00Z",
+  "version": "0.19.0",
+  "releasedAt": "2026-07-22T18:30:00Z",
   "forceUpdate": true,
-  "title": "CIVIC ORDER / CRIMINAL ECONOMY",
-  "summary": "Government budgets, taxes, licenses, policing, corruption and criminal markets now evolve without player input."
+  "title": "POPULATION LIFECYCLE / DEMOGRAPHIC CONTINUITY",
+  "summary": "Education, aging, family formation, births, deaths, retirement and migration now change the city without player input."
 }
