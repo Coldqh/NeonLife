@@ -5458,3 +5458,85 @@ button:disabled {
   gap: 3px;
 }
 .population-lifecycle__districts strong { color: var(--cyan); font-size: 13px; }
+
+/* v0.20.0 — clinical economy and cyberware */
+.health-workspace {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.health-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  background: var(--line);
+  gap: 1px;
+}
+.health-summary > div {
+  min-width: 0;
+  min-height: 54px;
+  padding: 7px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(5, 15, 21, .96);
+}
+.health-summary span,
+.health-summary small,
+.health-list span,
+.health-list small { color: var(--muted-2); font: 600 6px/1.2 var(--font-mono); }
+.health-summary strong { overflow: hidden; color: var(--cyan); font: 700 11px/1.15 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.health-columns,
+.health-lower {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.health-list {
+  min-height: 0;
+  max-height: 285px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: rgba(5, 15, 21, .9);
+}
+.health-list--compact { max-height: 145px; }
+.health-list > header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  min-height: 36px;
+  padding: 7px 9px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(5, 15, 21, .98);
+}
+.health-list > header strong { color: var(--cyan); font: 700 7px/1.2 var(--font-mono); }
+.health-facility,
+.health-case,
+.health-list--compact > article {
+  min-height: 58px;
+  padding: 7px 9px;
+  display: grid;
+  gap: 7px;
+  align-items: center;
+  border-bottom: 1px solid rgba(95, 230, 255, .08);
+}
+.health-facility { grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(76px, .8fr)); }
+.health-case { grid-template-columns: minmax(0, 1.4fr) minmax(80px, .8fr) minmax(105px, 1fr); }
+.health-list--compact > article { grid-template-columns: minmax(0, 1.45fr) minmax(105px, 1fr); }
+.health-facility > div,
+.health-case > div,
+.health-list--compact > article > div { min-width: 0; display: grid; gap: 3px; }
+.health-facility strong,
+.health-case strong,
+.health-list--compact strong { overflow: hidden; color: var(--text); font: 700 8px/1.2 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.health-facility--restricted,
+.health-facility--strained { border-left: 2px solid var(--yellow); }
+.health-facility--closed { border-left: 2px solid var(--red); background: rgba(255, 88, 105, .025); }
+.health-case--waiting { border-left: 2px solid var(--yellow); }
+.health-case--admitted { border-left: 2px solid var(--cyan); }
+.health-case--abandoned { border-left: 2px solid var(--red); }

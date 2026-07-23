@@ -3,7 +3,7 @@ import { getFoodProduct } from "../../data/products/foodCatalog";
 import type { HouseholdStatus } from "../../simulation/population/types";
 import type { GameSession } from "../../world/state/types";
 
-type PopulationTab = "districts" | "lifecycle" | "households" | "housing" | "labor" | "infrastructure" | "supply" | "organizations" | "government" | "flow";
+type PopulationTab = "districts" | "lifecycle" | "households" | "housing" | "labor" | "infrastructure" | "supply" | "organizations" | "government" | "health" | "flow";
 
 function statusRank(status: HouseholdStatus): number {
   if (status === "displaced") return 4;
@@ -34,6 +34,8 @@ function kernelEntityName(session: GameSession, entityId: string): string {
   if (business) return locationName(session, business.locationId);
   const facility = session.production.facilities.find((item) => item.id === entityId);
   if (facility) return facility.name;
+  const healthFacility = session.health.facilities.find((item) => item.id === entityId);
+  if (healthFacility) return locationName(session, healthFacility.locationId);
   const household = session.population.households.find((item) => item.id === entityId);
   if (household) return `${household.kind.toUpperCase()} HOUSEHOLD`;
   const resident = session.population.residents.find((item) => item.id === entityId);
@@ -124,6 +126,15 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
   const openCases = government.cases.filter((item) => item.status === "open" || item.status === "investigating" || item.status === "charged");
   const suspendedLicenses = government.licenses.filter((item) => item.status === "suspended" || item.status === "revoked");
   const activeOperations = government.crimeNetworks.flatMap((network) => network.operations).filter((item) => item.status !== "dormant");
+  const health = session.health;
+  const activeConditions = health.conditions.filter((item) => item.stage !== "resolved");
+  const waitingCases = health.cases.filter((item) => item.status === "waiting" || item.status === "admitted");
+  const activeMedicalDebts = health.debts.filter((item) => item.status === "current" || item.status === "delinquent");
+  const activeInstallations = health.installations.filter((item) => item.status !== "removed");
+  const failedInstallations = activeInstallations.filter((item) => item.status === "failed");
+  const recentHealthSnapshot = health.history[health.history.length - 1];
+  const recentCases = health.cases.slice().sort((left, right) => right.requestedDay - left.requestedDay).slice(0, 12);
+  const highRiskConditions = activeConditions.slice().sort((left, right) => right.severity - left.severity).slice(0, 12);
 
   return (
     <div className="population-workspace">
@@ -144,6 +155,7 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
         <button type="button" className={tab === "supply" ? "is-active" : ""} onClick={() => setTab("supply")}>СНАБЖЕНИЕ</button>
         <button type="button" className={tab === "organizations" ? "is-active" : ""} onClick={() => setTab("organizations")}>ОРГАНИЗАЦИИ</button>
         <button type="button" className={tab === "government" ? "is-active" : ""} onClick={() => setTab("government")}>ВЛАСТЬ</button>
+        <button type="button" className={tab === "health" ? "is-active" : ""} onClick={() => setTab("health")}>МЕДИЦИНА</button>
         <button type="button" className={tab === "flow" ? "is-active" : ""} onClick={() => setTab("flow")}>ПОТОКИ</button>
       </nav>
 
@@ -491,6 +503,70 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
               </article>
             ))}
             {!openCases.length ? <div className="empty-terminal">Открытых расследований нет.</div> : null}
+          </div>
+        </section>
+      ) : null}
+
+      {tab === "health" ? (
+        <section className="health-workspace">
+          <div className="health-summary">
+            <div><span>ACTIVE CONDITIONS</span><strong>{activeConditions.length}</strong><small>{highRiskConditions.filter((item) => item.severity >= 70).length} severe</small></div>
+            <div><span>CLINICAL QUEUE</span><strong>{waitingCases.length}</strong><small>{health.facilities.reduce((sum, item) => sum + item.occupiedBeds, 0)} occupied beds</small></div>
+            <div><span>TREATED</span><strong>{health.totals.casesTreated}</strong><small>{health.totals.procedures} procedures</small></div>
+            <div><span>MEDICAL DEBT</span><strong>₵ {Math.round(activeMedicalDebts.reduce((sum, item) => sum + item.principal, 0)).toLocaleString("ru-RU")}</strong><small>{activeMedicalDebts.filter((item) => item.status === "delinquent").length} delinquent</small></div>
+            <div><span>CYBERWARE</span><strong>{activeInstallations.length}</strong><small>{failedInstallations.length} failed · {health.totals.cyberwareMaintained} services</small></div>
+            <div><span>COVERAGE</span><strong>{health.policies.filter((item) => item.status === "active").length}</strong><small>{recentHealthSnapshot?.uninsuredResidents ?? 0} uninsured residents</small></div>
+          </div>
+          <div className="health-columns">
+            <section className="health-list">
+              <header><span>CLINICAL NETWORK</span><strong>CAPACITY / STOCK / STAFF</strong></header>
+              {health.facilities.map((facility) => (
+                <article className={`health-facility health-facility--${facility.status}`} key={facility.id}>
+                  <div><span>{facility.kind.replace(/-/g, " ").toUpperCase()}</span><strong>{locationName(session, facility.locationId)}</strong><small>{facility.licensed ? "LICENSED" : "UNLICENSED"} · {districtName(session, facility.districtId)}</small></div>
+                  <div><span>LOAD</span><strong>{facility.occupiedBeds}/{facility.bedCapacity} BEDS</strong><small>{facility.queueLength} waiting · {facility.treatmentRooms} rooms</small></div>
+                  <div><span>READINESS</span><strong>{Math.round((facility.staffing + facility.serviceLevel) / 2)}%</strong><small>staff {facility.staffing}% · utilities {facility.serviceLevel}%</small></div>
+                  <div><span>STOCK</span><strong>{Math.round(facility.medicalStock)} MED</strong><small>{Math.round(facility.implantParts)} parts · {Math.round(facility.maintenanceKits)} service kits</small></div>
+                </article>
+              ))}
+            </section>
+            <section className="health-list">
+              <header><span>CASES / CONDITIONS</span><strong>TRIAGE FROM REAL NEED</strong></header>
+              {recentCases.map((caseState) => {
+                const conditionState = health.conditions.find((item) => caseState.conditionIds.includes(item.id));
+                return (
+                  <article className={`health-case health-case--${caseState.status}`} key={caseState.id}>
+                    <div><span>TRIAGE {caseState.triageLevel}</span><strong>{residentName(session, caseState.residentId)}</strong><small>{conditionState?.kind.replace(/-/g, " ").toUpperCase() ?? "CLINICAL CASE"}</small></div>
+                    <div><span>{caseState.status.toUpperCase()}</span><strong>{caseState.waitingDays} DAYS</strong><small>{kernelEntityName(session, caseState.facilityId)}</small></div>
+                    <div><span>BILL</span><strong>₵ {caseState.estimatedCost}</strong><small>insurer {caseState.insurerPaid} · patient {caseState.patientPaid} · debt {caseState.debtCreated}</small></div>
+                  </article>
+                );
+              })}
+              {!recentCases.length ? <div className="empty-terminal">Клинических обращений ещё нет.</div> : null}
+            </section>
+          </div>
+          <div className="health-lower">
+            <section className="health-list health-list--compact">
+              <header><span>HIGH-RISK CONDITIONS</span><strong>CAUSE / WORK LIMIT</strong></header>
+              {highRiskConditions.map((conditionState) => (
+                <article key={conditionState.id}>
+                  <div><span>{conditionState.origin.toUpperCase()}</span><strong>{residentName(session, conditionState.residentId)}</strong><small>{conditionState.kind.replace(/-/g, " ").toUpperCase()}</small></div>
+                  <div><span>SEVERITY</span><strong>{Math.round(conditionState.severity)}%</strong><small>work restriction {conditionState.workRestriction}% · untreated {conditionState.untreatedDays} d</small></div>
+                </article>
+              ))}
+            </section>
+            <section className="health-list health-list--compact">
+              <header><span>CYBERWARE REGISTRY</span><strong>CONDITION / SERVICE</strong></header>
+              {activeInstallations.slice(-12).reverse().map((installation) => {
+                const model = health.cyberwareModels.find((item) => item.id === installation.modelId);
+                return (
+                  <article key={installation.id}>
+                    <div><span>{installation.licensedSerial ? "LICENSED" : "UNREGISTERED"}</span><strong>{residentName(session, installation.residentId)}</strong><small>{model?.name ?? installation.modelId}</small></div>
+                    <div><span>{installation.status.toUpperCase()}</span><strong>{Math.round(installation.condition)}%</strong><small>service day {installation.maintenanceDueDay} · failures {installation.failures}</small></div>
+                  </article>
+                );
+              })}
+              {!activeInstallations.length ? <div className="empty-terminal">Установленных имплантов пока нет.</div> : null}
+            </section>
           </div>
         </section>
       ) : null}

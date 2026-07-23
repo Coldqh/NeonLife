@@ -10,6 +10,7 @@ export type KernelEntityKind =
   | "district"
   | "city"
   | "production-facility"
+  | "health-facility"
   | "system";
 
 export type KernelResource =
@@ -33,9 +34,9 @@ export type KernelResource =
   | "data-substrate-units"
   | "packaging-units";
 
-export type KernelAssetKind = "business-operation" | "housing-block" | "facility" | "district-land" | "infrastructure-node" | "infrastructure-link" | "production-facility" | "warehouse";
+export type KernelAssetKind = "business-operation" | "housing-block" | "facility" | "district-land" | "infrastructure-node" | "infrastructure-link" | "production-facility" | "warehouse" | "medical-facility" | "cyberware-installation";
 export type KernelAssetStatus = "active" | "strained" | "restricted" | "offline";
-export type KernelContractKind = "employment" | "lease" | "supply" | "service" | "loan" | "utility" | "procurement" | "logistics" | "license" | "tax" | "public-service";
+export type KernelContractKind = "employment" | "lease" | "supply" | "service" | "loan" | "utility" | "procurement" | "logistics" | "license" | "tax" | "public-service" | "insurance" | "medical-care" | "cyberware-finance";
 export type KernelContractStatus = "active" | "suspended" | "breached" | "ended";
 export type KernelTransactionReason =
   | "wage"
@@ -68,6 +69,12 @@ export type KernelTransactionReason =
   | "social-transfer"
   | "public-grant"
   | "education-service"
+  | "medical-procurement"
+  | "insurance-premium"
+  | "insurance-claim"
+  | "medical-debt"
+  | "cyberware-installation"
+  | "cyberware-maintenance"
   | "extortion"
   | "bribe"
   | "seizure"

@@ -17,6 +17,7 @@ import { createInfrastructureState } from "../../simulation/infrastructure/infra
 import { createProductionState } from "../../simulation/production/productionSystem";
 import { createOrganizationEcosystem } from "../../simulation/organizations/organizationSystem";
 import { createGovernmentCrimeState } from "../../simulation/government/governmentSystem";
+import { createHealthCyberwareState } from "../../simulation/health/healthSystem";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
 import type {
@@ -186,6 +187,10 @@ export function createWorldSession(seed: string): GameSession {
   const workerDorm = createLocation(seed, "worker-dorm", industrial.id, "WORKER DORM 12", "HAB/R12", "housing", 47, vectra.id, 0, 24);
   const workshop = createLocation(seed, "workshop", industrial.id, "VECTRA SERVICE NODE", "VEC/SN-12", "workshop", 58, vectra.id, 6, 2);
   const clinic = createLocation(seed, "clinic", lower.id, "CMU WALK-IN CLINIC", "CMU/U03", "clinic", 52, medical.id, 0, 24);
+  const traumaStation = createLocation(seed, "trauma-station", industrial.id, "CMU INDUSTRIAL TRAUMA STATION", "CMU/R08", "clinic", 68, medical.id, 0, 24);
+  const regionalHospital = createLocation(seed, "regional-hospital", corporate.id, "CMU REGIONAL HOSPITAL", "CMU/T02", "clinic", 86, medical.id, 0, 24);
+  const occupationalClinic = createLocation(seed, "occupational-clinic", corporate.id, "AURELIAN OCCUPATIONAL CLINIC", "AUR/MED-01", "clinic", 92, aurelian.id, 6, 23);
+  const undergroundClinic = createLocation(seed, "underground-clinic", lower.id, "CUTWIRE BACKROOM SURGERY", "CW/MED-U", "clinic", 19, gang.id, 20, 5);
   const crownHousing = createLocation(seed, "crown-housing", corporate.id, "CROWN RESIDENCES 03", "HAB/T03", "housing", 88, aurelian.id, 0, 24);
   const tower = createLocation(seed, "tower", corporate.id, "AURELIAN CROWN TOWER", "AUR/CT-01", "office", 94, aurelian.id, 7, 22);
   const market = createLocation(seed, "market", lower.id, "UNDERLINE NIGHT MARKET", "MKT/U09", "market", 26, marketCoop.id, 16, 6);
@@ -194,7 +199,7 @@ export function createWorldSession(seed: string): GameSession {
   const lowerLearningHub = createLocation(seed, "lower-learning-hub", lower.id, "CIVIC LEARNING HUB U-04", "EDU/U04", "education", 44, civic.id, 7, 20);
   const technicalInstitute = createLocation(seed, "technical-institute", industrial.id, "VECTRA TECHNICAL INSTITUTE", "EDU/R12", "education", 63, vectra.id, 6, 22);
   const corporateAcademy = createLocation(seed, "corporate-academy", corporate.id, "AURELIAN ACADEMY", "EDU/T03", "education", 91, aurelian.id, 7, 22);
-  const locations = [housing, canteen, transitNode, workerDorm, workshop, clinic, crownHousing, tower, market, courierHub, civicHall, lowerLearningHub, technicalInstitute, corporateAcademy];
+  const locations = [housing, canteen, transitNode, workerDorm, workshop, clinic, traumaStation, regionalHospital, occupationalClinic, undergroundClinic, crownHousing, tower, market, courierHub, civicHall, lowerLearningHub, technicalInstitute, corporateAcademy];
   attachLocations(districts, organizations, locations);
 
   const player = createInitialPlayer(seed, lower.name, lower.code);
@@ -274,6 +279,18 @@ export function createWorldSession(seed: string): GameSession {
     production,
     organizationEcosystem
   });
+  const health = createHealthCyberwareState({
+    timestamp: INITIAL_GAME_TIMESTAMP,
+    seed,
+    districts,
+    locations,
+    organizations,
+    population,
+    economy,
+    infrastructure,
+    production,
+    government
+  });
   const syncedKernel = advanceSimulationKernel(kernel, {
     timestamp: INITIAL_GAME_TIMESTAMP,
     seed,
@@ -287,7 +304,8 @@ export function createWorldSession(seed: string): GameSession {
     infrastructure,
     production,
     organizationEcosystem,
-    government
+    government,
+    health
   });
 
   return {
@@ -305,6 +323,7 @@ export function createWorldSession(seed: string): GameSession {
     production,
     organizationEcosystem,
     government,
+    health,
     events: createInitialEvents({
       seed,
       districtName: lower.name,

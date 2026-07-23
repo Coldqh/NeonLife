@@ -830,22 +830,10 @@ export function advancePopulation(
         description: `Household commuting settlement.`
       });
 
-      const illMembers = members.filter((member) => member.health === "ill" || member.health === "disabled").length;
-      const medicalTarget = illMembers * (household.spendingMode === "survival" ? 2 : household.spendingMode === "restricted" ? 5 : 10);
-      const medicalSpent = Math.min(medicalTarget, household.balance);
-      household.balance -= medicalSpent;
-      const medicalBusiness = findServiceBusiness(businesses, locations, household.districtId, "medical");
-      businesses = settleServicePurchase(businesses, medicalBusiness, medicalSpent);
-      if (medicalSpent > 0) transactions.push({
-        idempotencyKey: `${seed}:day:${dayIndex}:medical:${household.id}`,
-        timestamp: dayIndex * DAY_MS,
-        debitEntityId: household.id,
-        creditEntityId: medicalBusiness?.id ?? kernelSystemEntityId(seed, "city-services"),
-        resource: "credits",
-        amount: medicalSpent,
-        reason: "medical-service",
-        description: `Household medical service settlement.`
-      });
+      // Clinical spending is settled by Health & Cyberware from actual diagnoses,
+      // triage, supplies, coverage and treatment. Population accounting does not
+      // create generic medical purchases from a health flag.
+      const medicalSpent = 0;
 
       const discretionaryTarget = household.spendingMode === "comfortable" ? Math.round(members.length * 8) : household.spendingMode === "standard" ? Math.round(members.length * 3) : 0;
       const discretionarySpent = Math.min(discretionaryTarget, Math.max(0, household.balance - 120));
@@ -932,13 +920,10 @@ export function advancePopulation(
         ? Math.min(0.18, (district.pollution + Math.max(0, 55 - district.infrastructure)) / 1_800)
         : 0.03;
       const pollutionPenalty = dayRng.chance(environmentalRisk) ? 1 : 0;
-      const medicalRecovery = household?.lastLedger?.medicalSpent
-        ? Math.min(3, Math.max(1, Math.round(household.lastLedger.medicalSpent / 12)))
-        : 0;
       const recovery = household?.status === "stable" && household.foodUnits > household.memberIds.length && resident.healthScore < 82
         ? 1
         : 0;
-      const healthScore = clamp(resident.healthScore - foodPenalty - housingPenalty - pollutionPenalty + medicalRecovery + recovery);
+      const healthScore = clamp(resident.healthScore - foodPenalty - housingPenalty - pollutionPenalty + recovery);
       return { ...resident, homeLocationId: household?.homeLocationId ?? null, healthScore, health: healthFor(healthScore), savings: Math.max(0, resident.savings + dayRng.integer(-3, 2)), transportAccess: resident.transportAccess ?? 100 };
     });
 

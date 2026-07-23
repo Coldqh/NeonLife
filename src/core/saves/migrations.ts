@@ -20,6 +20,7 @@ import { normalizeInfrastructureState } from "../../simulation/infrastructure/in
 import { normalizeProductionState } from "../../simulation/production/productionSystem";
 import { normalizeOrganizationEcosystem } from "../../simulation/organizations/organizationSystem";
 import { normalizeGovernmentCrimeState } from "../../simulation/government/governmentSystem";
+import { normalizeHealthCyberwareState } from "../../simulation/health/healthSystem";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -302,6 +303,30 @@ function ensureLocalOperators(
     });
   }
 
+  const medical = organizations.find((organization) => organization.type === "medical");
+  const gang = organizations.find((organization) => organization.type === "gang");
+  const healthDefinitions = [
+    { scope: "trauma-station", name: "CMU INDUSTRIAL TRAUMA STATION", code: "CMU/R08", districtId: industrialDistrictId, organizationId: medical?.id ?? civic.id, security: 68, openHour: 0, closeHour: 24 },
+    { scope: "regional-hospital", name: "CMU REGIONAL HOSPITAL", code: "CMU/T02", districtId: corporateDistrictId, organizationId: medical?.id ?? civic.id, security: 86, openHour: 0, closeHour: 24 },
+    { scope: "occupational-clinic", name: "AURELIAN OCCUPATIONAL CLINIC", code: "AUR/MED-01", districtId: corporateDistrictId, organizationId: aurelian?.id ?? medical?.id ?? civic.id, security: 92, openHour: 6, closeHour: 23 },
+    { scope: "underground-clinic", name: "CUTWIRE BACKROOM SURGERY", code: "CW/MED-U", districtId: lowerDistrictId, organizationId: gang?.id ?? civic.id, security: 19, openHour: 20, closeHour: 5 }
+  ];
+  for (const definition of healthDefinitions) {
+    if (!definition.districtId || locations.some((location) => location.code === definition.code || location.name === definition.name)) continue;
+    locations.push({
+      id: createStableEntityId("location", `${seed}:${definition.scope}`),
+      districtId: definition.districtId,
+      organizationId: definition.organizationId,
+      name: definition.name,
+      code: definition.code,
+      type: "clinic",
+      open: true,
+      security: definition.security,
+      openHour: definition.openHour,
+      closeHour: definition.closeHour
+    });
+  }
+
   for (const organization of organizations) {
     organization.locationIds = locations.filter((location) => location.organizationId === organization.id).map((location) => location.id);
   }
@@ -485,6 +510,18 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     production,
     organizationEcosystem
   });
+  const health = normalizeHealthCyberwareState(payload.health, {
+    timestamp,
+    seed,
+    districts,
+    locations,
+    organizations,
+    population,
+    economy,
+    infrastructure,
+    production,
+    government
+  });
   const kernel = advanceSimulationKernel(baseKernel, {
     timestamp,
     seed,
@@ -498,7 +535,8 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     infrastructure,
     production,
     organizationEcosystem,
-    government
+    government,
+    health
   });
 
   const { situations: _discardedSituations, ...payloadWithoutSituations } = payload;
@@ -517,6 +555,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     production,
     organizationEcosystem,
     government,
+    health,
     currentActivity: `На месте: ${existingLocationName}`,
     world: {
       ...world,

@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": ".healthtest-dist",
+    "rootDir": ".",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "resolveJsonModule": true,
+    "types": []
+  },
+  "include": [
+    "src/core/**/*.ts",
+    "src/data/**/*.ts",
+    "src/gameplay/**/*.ts",
+    "src/people/**/*.ts",
+    "src/simulation/**/*.ts",
+    "src/world/**/*.ts",
+    "tests/healthCyberwareSimulationTest.ts",
+    "tests/globals.d.ts"
+  ],
+  "exclude": [
+    "src/**/*.tsx"
+  ]
+}

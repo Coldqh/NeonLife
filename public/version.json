@@ -1,7 +1,7 @@
 {
-  "version": "0.19.0",
-  "releasedAt": "2026-07-22T18:30:00Z",
+  "version": "0.20.0",
+  "releasedAt": "2026-07-23T09:00:00Z",
   "forceUpdate": true,
-  "title": "POPULATION LIFECYCLE / DEMOGRAPHIC CONTINUITY",
-  "summary": "Education, aging, family formation, births, deaths, retirement and migration now change the city without player input."
+  "title": "HEALTH & CYBERWARE / CLINICAL ECONOMY",
+  "summary": "Diagnoses, workplace injuries, clinical capacity, insurance, medical debt, physical medical supplies and maintained cyberware now operate across the population."
 }

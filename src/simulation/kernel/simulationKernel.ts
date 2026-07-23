@@ -7,6 +7,7 @@ import type { InfrastructureKind, InfrastructureState } from "../infrastructure/
 import type { ProductionResource, ProductionState, ProductionSupplyContract } from "../production/types";
 import type { OrganizationAgreementState, OrganizationEcosystemState } from "../organizations/types";
 import type { GovernmentCrimeState } from "../government/types";
+import type { HealthCyberwareState } from "../health/types";
 import type {
   KernelAccountState,
   KernelAssetState,
@@ -45,6 +46,7 @@ export interface KernelSyncInput {
   production: ProductionState;
   organizationEcosystem?: OrganizationEcosystemState;
   government?: GovernmentCrimeState;
+  health?: HealthCyberwareState;
   drafts?: KernelTransactionDraft[];
 }
 
@@ -124,6 +126,7 @@ function entityKindFor(id: string, input: KernelSyncInput): KernelEntityKind {
   if (input.population.residents.some((item) => item.id === id)) return "resident";
   if (input.economy.businesses.some((item) => item.id === id)) return "business";
   if (input.production.facilities.some((item) => item.id === id)) return "production-facility";
+  if (input.health?.facilities.some((item) => item.id === id)) return "health-facility";
   if (input.locations.some((item) => item.id === id)) return "location";
   if (input.districts.some((item) => item.id === id)) return "district";
   return "system";
@@ -155,6 +158,14 @@ function snapshotAccounts(input: KernelSyncInput): KernelAccountState[] {
     accounts.push(account(facility.id, "production-facility", [
       balance("credits", facility.cash),
       ...facility.inventory.map((item) => balance(resourceForProduction(item.resource), item.amount)),
+      balance("labor-hours", Math.max(0, facility.staffing) * 8)
+    ], input.timestamp));
+  }
+  for (const facility of input.health?.facilities ?? []) {
+    accounts.push(account(facility.id, "health-facility", [
+      balance("credits", facility.cash),
+      balance("medical-units", facility.medicalStock),
+      balance("parts-units", facility.implantParts + facility.maintenanceKits),
       balance("labor-hours", Math.max(0, facility.staffing) * 8)
     ], input.timestamp));
   }
@@ -315,6 +326,41 @@ function buildAssets(input: KernelSyncInput): KernelAssetState[] {
       capacity: facility.capacityLevel,
       valuation: Math.max(0, Math.round(facility.cash + facility.inventory.reduce((sum, item) => sum + item.amount * 8, 0) + facility.capacityLevel * 4_000)),
       resources: facility.inventory.map((item) => balance(resourceForProduction(item.resource), item.amount)),
+      updatedAt: input.timestamp
+    });
+  }
+
+  for (const facility of input.health?.facilities ?? []) {
+    const location = input.locations.find((item) => item.id === facility.locationId);
+    assets.push({
+      id: assetId("medical-facility", facility.id),
+      kind: "medical-facility",
+      name: location?.name ?? `MEDICAL FACILITY ${facility.id}`,
+      ownerEntityId: facility.ownerOrganizationId,
+      controllerEntityId: facility.id,
+      locationId: facility.locationId,
+      districtId: facility.districtId,
+      status: facility.status === "closed" ? "offline" : facility.status === "restricted" ? "restricted" : facility.status === "strained" ? "strained" : "active",
+      condition: Math.round((facility.staffing + facility.serviceLevel) / 2),
+      capacity: facility.bedCapacity + facility.treatmentRooms,
+      valuation: Math.round(facility.cash + facility.bedCapacity * 3_500 + facility.surgicalRooms * 18_000),
+      resources: [balance("medical-units", facility.medicalStock), balance("parts-units", facility.implantParts + facility.maintenanceKits)],
+      updatedAt: input.timestamp
+    });
+  }
+  for (const installation of input.health?.installations ?? []) {
+    const model = input.health?.cyberwareModels.find((item) => item.id === installation.modelId);
+    assets.push({
+      id: assetId("cyberware-installation", installation.id),
+      kind: "cyberware-installation",
+      name: model?.name ?? `CYBERWARE ${installation.id}`,
+      ownerEntityId: installation.residentId,
+      controllerEntityId: installation.residentId,
+      status: installation.status === "failed" || installation.status === "removed" ? "offline" : installation.status === "degraded" ? "strained" : "active",
+      condition: installation.condition,
+      capacity: model?.workSkillBonus ?? 0,
+      valuation: Math.round((model?.basePrice ?? 0) * Math.max(0.1, installation.condition / 100)),
+      resources: [],
       updatedAt: input.timestamp
     });
   }
@@ -526,6 +572,37 @@ function governmentLicenseContracts(input: KernelSyncInput): KernelContractState
   });
 }
 
+function healthContracts(input: KernelSyncInput): KernelContractState[] {
+  if (!input.health) return [];
+  const policies = input.health.policies.map((policy): KernelContractState => ({
+    id: createStableEntityId("contract", `insurance:${policy.id}`),
+    kind: "insurance",
+    sourceEntityId: policy.sponsorOrganizationId ?? policy.householdId,
+    targetEntityId: policy.insurerEntityId,
+    beneficiaryEntityId: policy.householdId,
+    status: policy.status === "active" ? "active" : policy.status === "exhausted" ? "breached" : "suspended",
+    startedAt: input.timestamp - 7 * DAY_MS,
+    nextSettlementAt: (input.health!.dayIndex + 7) * DAY_MS,
+    breachCount: policy.status === "active" ? 0 : 1,
+    terms: [{ resource: "credits", amount: policy.premiumPerWeek, unitValue: 1, intervalMinutes: 7 * 24 * 60 }],
+    metadata: { plan: policy.kind, coveragePercent: policy.coveragePercent, deductible: policy.deductible, annualLimit: policy.annualLimit }
+  }));
+  const debts = input.health.debts.filter((debt) => debt.status !== "paid" && debt.status !== "written-off").map((debt): KernelContractState => ({
+    id: createStableEntityId("contract", `medical-debt:${debt.id}`),
+    kind: "medical-care",
+    sourceEntityId: debt.householdId,
+    targetEntityId: debt.providerEntityId,
+    beneficiaryEntityId: debt.householdId,
+    status: debt.status === "delinquent" ? "breached" : "active",
+    startedAt: debt.createdDay * DAY_MS,
+    nextSettlementAt: (input.health!.dayIndex + 7) * DAY_MS,
+    breachCount: debt.status === "delinquent" ? 1 : 0,
+    terms: [{ resource: "credits", amount: debt.principal, unitValue: 1, intervalMinutes: 7 * 24 * 60 }],
+    metadata: { weeklyInterestRate: debt.weeklyInterestRate, status: debt.status }
+  }));
+  return [...policies, ...debts];
+}
+
 function buildContracts(input: KernelSyncInput, previous: KernelContractState[]): KernelContractState[] {
   const generated = [
     ...input.population.employments.map((item) => activeEmploymentContract(input, item)).filter((item): item is KernelContractState => Boolean(item)),
@@ -533,7 +610,8 @@ function buildContracts(input: KernelSyncInput, previous: KernelContractState[])
     ...input.production.contracts.map((item) => productionContract(input, item)),
     ...utilityContracts(input),
     ...(input.organizationEcosystem?.agreements ?? []).map((item) => organizationAgreementContract(input, item)),
-    ...governmentLicenseContracts(input)
+    ...governmentLicenseContracts(input),
+    ...healthContracts(input)
   ];
   const generatedIds = new Set(generated.map((item) => item.id));
   const ended = previous
@@ -581,6 +659,7 @@ function reconcileAccounts(
   const clearing = kernelSystemEntityId(input.seed, "clearing");
   const protectedSystems = new Set([clearing, kernelSystemEntityId(input.seed, "wholesale"), kernelSystemEntityId(input.seed, "maintenance"), kernelSystemEntityId(input.seed, "credit-bureau"), kernelSystemEntityId(input.seed, "housing-authority"), kernelSystemEntityId(input.seed, "city-services"), kernelSystemEntityId(input.seed, "consumption"), kernelSystemEntityId(input.seed, "power-grid"), kernelSystemEntityId(input.seed, "water-grid"), kernelSystemEntityId(input.seed, "data-grid"), kernelSystemEntityId(input.seed, "transport-grid"), kernelSystemEntityId(input.seed, "waste-grid"), kernelSystemEntityId(input.seed, "logistics-clearing"), kernelSystemEntityId(input.seed, "external-trade"), kernelSystemEntityId(input.seed, "production-consumption"), kernelSystemEntityId(input.seed, "production-output"), kernelSystemEntityId(input.seed, "unregistered-market"), kernelSystemEntityId(input.seed, "illegal-consumption"), kernelSystemEntityId(input.seed, "corrupt-officials")]);
 
+  const snapshotEntityIds = new Set(snapshot.map((item) => item.entityId));
   for (const target of snapshot) {
     if (protectedSystems.has(target.entityId)) continue;
     let current = nextAccounts.find((item) => item.entityId === target.entityId);
@@ -588,17 +667,20 @@ function reconcileAccounts(
       current = account(target.entityId, target.entityKind, [], input.timestamp);
       nextAccounts.push(current);
     }
-    for (const desired of target.balances) {
-      const actual = getBalance(current, desired.resource);
-      const difference = Math.round((desired.amount - actual) * 100) / 100;
+    const desiredBalances = new Map(target.balances.map((entry) => [entry.resource, entry.amount]));
+    const resources = new Set([...target.balances.map((entry) => entry.resource), ...current.balances.map((entry) => entry.resource)]);
+    for (const resource of resources) {
+      const desiredAmount = desiredBalances.get(resource) ?? 0;
+      const actual = getBalance(current, resource);
+      const difference = Math.round((desiredAmount - actual) * 100) / 100;
       if (Math.abs(difference) < 0.01) continue;
-      const key = `${input.seed}:reconcile:${input.timestamp}:${target.entityId}:${desired.resource}:${difference}`;
+      const key = `${input.seed}:reconcile:${input.timestamp}:${target.entityId}:${resource}:${difference}`;
       const transaction = transactionFromDraft({
         idempotencyKey: key,
         timestamp: input.timestamp,
         debitEntityId: difference > 0 ? clearing : target.entityId,
         creditEntityId: difference > 0 ? target.entityId : clearing,
-        resource: desired.resource,
+        resource,
         amount: Math.abs(difference),
         reason: "domain-reconciliation",
         description: `Reconciled ${target.entityKind} state with simulation ledger.`
@@ -608,6 +690,30 @@ function reconcileAccounts(
       nextAccounts = applyTransaction(nextAccounts, transaction, input.timestamp);
       transactions.push(transaction);
       current = nextAccounts.find((item) => item.entityId === target.entityId) ?? current;
+    }
+  }
+
+  // Residents and households can leave the detailed simulation through death, migration,
+  // household merging or separation. Their historical ledger account remains addressable,
+  // but any live balances must be settled back to clearing once the entity disappears
+  // from the authoritative domain snapshot.
+  for (const stale of nextAccounts.filter((item) => item.entityKind !== "system" && !snapshotEntityIds.has(item.entityId))) {
+    for (const balance of stale.balances.filter((entry) => Math.abs(entry.amount) >= 0.01)) {
+      const key = `${input.seed}:reconcile-stale:${input.timestamp}:${stale.entityId}:${balance.resource}:${balance.amount}`;
+      const transaction = transactionFromDraft({
+        idempotencyKey: key,
+        timestamp: input.timestamp,
+        debitEntityId: balance.amount > 0 ? stale.entityId : clearing,
+        creditEntityId: balance.amount > 0 ? clearing : stale.entityId,
+        resource: balance.resource,
+        amount: Math.abs(balance.amount),
+        reason: "domain-reconciliation",
+        description: `Settled archived ${stale.entityKind} account after entity left active simulation.`
+      });
+      if (existingIds.has(transaction.id)) continue;
+      existingIds.add(transaction.id);
+      nextAccounts = applyTransaction(nextAccounts, transaction, input.timestamp);
+      transactions.push(transaction);
     }
   }
   return { accounts: nextAccounts, transactions };
