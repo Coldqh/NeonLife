@@ -13,7 +13,7 @@ const seed = "METROPOLITAN-MOBILITY-24";
 let session = createWorldSession(seed);
 const initial = session.mobility;
 
-assert(session.schemaVersion === 22, "new world schema is not 22");
+assert(session.schemaVersion === 23, "new world schema is not 23");
 assert(initial.version === 1, "mobility state version mismatch");
 assert(initial.sectorFlows.length === session.metropolitan.sectors.length, "not every sector has a mobility flow");
 assert(initial.parking.length === session.metropolitan.sectors.length, "not every sector has physical parking");
@@ -86,7 +86,7 @@ const migrated = migrateEnvelope({
   payload: legacy
 }, "slot-1");
 assert(migrated, "migration returned null");
-assert(migrated.schemaVersion === 22, "migration schema mismatch");
+assert(migrated.schemaVersion === 23, "migration schema mismatch");
 assert(migrated.payload.mobility.version === 1, "migration did not create mobility state");
 assert(migrated.payload.mobility.sectorFlows.length === migrated.payload.metropolitan.sectors.length, "migration lost sector mobility flows");
 assert(migrated.payload.mobility.routes.length > 0, "migration lost route network");

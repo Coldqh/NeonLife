@@ -9,7 +9,7 @@ function assert(condition: unknown, message: string): asserts condition {
 
 const seed = "POPULATION-LIFECYCLE-VALIDATION-19";
 let session = createWorldSession(seed);
-assert(session.schemaVersion === 22, "new world schema mismatch");
+assert(session.schemaVersion === 23, "new world schema mismatch");
 assert(session.population.lifecycle.institutions.length === 3, "education institutions missing");
 assert(session.world.locations.filter((item) => item.type === "education").length === 3, "education locations missing");
 
@@ -102,7 +102,7 @@ const migrated = migrateEnvelope({
   payload: legacyPayload
 }, "slot-1");
 assert(migrated, "migration returned null");
-assert(migrated.schemaVersion === 22, "migration schema mismatch");
+assert(migrated.schemaVersion === 23, "migration schema mismatch");
 assert(migrated.payload.population.lifecycle.version === 1, "lifecycle state not created during migration");
 assert(migrated.payload.population.lifecycle.institutions.length === 3, "education institutions not restored during migration");
 assert(migrated.payload.world.locations.filter((item) => item.type === "education").length === 3, "education locations not restored during migration");

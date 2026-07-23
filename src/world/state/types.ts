@@ -21,6 +21,7 @@ import type { DataSurveillanceState } from "../../simulation/data/types";
 import type { MetropolitanState } from "../../simulation/spatial/types";
 import type { UrbanFabricState } from "../../simulation/urban/types";
 import type { MetropolitanMobilityState } from "../../simulation/mobility/types";
+import type { LocalSceneState } from "../../simulation/localScene/types";
 
 export interface CityState {
   id: EntityId;
@@ -121,6 +122,7 @@ export interface GameSession {
   metropolitan: MetropolitanState;
   urban: UrbanFabricState;
   mobility: MetropolitanMobilityState;
+  localScene: LocalSceneState;
   events: WorldEvent[];
   eventQueue: ScheduledWorldEvent[];
   currentActivity: string;

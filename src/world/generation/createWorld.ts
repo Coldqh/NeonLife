@@ -22,6 +22,7 @@ import { createDataSurveillanceState } from "../../simulation/data/dataSystem";
 import { createMetropolitanState } from "../../simulation/spatial/metropolitanSystem";
 import { createUrbanFabricState } from "../../simulation/urban/urbanSystem";
 import { createMetropolitanMobilityState, synchronizeMetropolitanFromMobility } from "../../simulation/mobility/mobilitySystem";
+import { createLocalSceneState } from "../../simulation/localScene/localSceneSystem";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
 import type {
@@ -350,6 +351,17 @@ export function createWorldSession(seed: string): GameSession {
     activeLocationId: housing.id
   });
   const metropolitan = synchronizeMetropolitanFromMobility(metropolitanBase, mobility);
+  const localScene = createLocalSceneState({
+    timestamp: INITIAL_GAME_TIMESTAMP,
+    seed,
+    activeLocationId: housing.id,
+    locations,
+    people,
+    population,
+    metropolitan,
+    urban,
+    mobility
+  });
   const syncedKernel = advanceSimulationKernel(kernel, {
     timestamp: INITIAL_GAME_TIMESTAMP,
     seed,
@@ -389,6 +401,7 @@ export function createWorldSession(seed: string): GameSession {
     metropolitan,
     urban,
     mobility,
+    localScene,
     events: createInitialEvents({
       seed,
       districtName: lower.name,

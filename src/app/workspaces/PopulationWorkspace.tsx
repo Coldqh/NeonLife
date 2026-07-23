@@ -3,7 +3,7 @@ import { getFoodProduct } from "../../data/products/foodCatalog";
 import type { HouseholdStatus } from "../../simulation/population/types";
 import type { GameSession } from "../../world/state/types";
 
-type PopulationTab = "spatial" | "mobility" | "buildings" | "districts" | "lifecycle" | "households" | "housing" | "labor" | "infrastructure" | "supply" | "organizations" | "government" | "health" | "data" | "flow";
+type PopulationTab = "scene" | "spatial" | "mobility" | "buildings" | "districts" | "lifecycle" | "households" | "housing" | "labor" | "infrastructure" | "supply" | "organizations" | "government" | "health" | "data" | "flow";
 
 function statusRank(status: HouseholdStatus): number {
   if (status === "displaced") return 4;
@@ -92,7 +92,7 @@ function pantryLabel(session: GameSession, householdId: string): string {
 }
 
 export function PopulationWorkspace({ session }: { session: GameSession }) {
-  const [tab, setTab] = useState<PopulationTab>("spatial");
+  const [tab, setTab] = useState<PopulationTab>("scene");
   const state = session.population;
   const labor = state.laborMarket;
   const lifecycle = state.lifecycle;
@@ -160,6 +160,11 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
   const strainedParking = mobility.parking.slice().sort((left, right) => right.pressurePercent - left.pressurePercent).slice(0, 12);
   const majorFleets = mobility.fleets.slice().sort((left, right) => right.activeVehicles - left.activeVehicles).slice(0, 12);
   const activeFreight = mobility.freightMovements.filter((item) => item.status === "queued" || item.status === "in-transit").slice(-12).reverse();
+  const localScene = session.localScene;
+  const localSceneLocation = localScene.playerPosition.locationId ? session.world.locations.find((item) => item.id === localScene.playerPosition.locationId) : undefined;
+  const visibleLocalActors = localScene.actors.filter((actor) => actor.visible).slice(0, 24);
+  const focusLocalActors = localScene.actors.filter((actor) => actor.position.sectorId === localScene.focusSectorId).slice(0, 30);
+  const nearbyLocalBuildings = localScene.buildings.slice(0, 24);
 
   return (
     <div className="population-workspace">
@@ -171,6 +176,7 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
       </section>
 
       <nav className="population-tabs" aria-label="Population systems">
+        <button type="button" className={tab === "scene" ? "is-active" : ""} onClick={() => setTab("scene")}>СЦЕНА</button>
         <button type="button" className={tab === "spatial" ? "is-active" : ""} onClick={() => setTab("spatial")}>МАСШТАБ</button>
         <button type="button" className={tab === "mobility" ? "is-active" : ""} onClick={() => setTab("mobility")}>ДВИЖЕНИЕ</button>
         <button type="button" className={tab === "buildings" ? "is-active" : ""} onClick={() => setTab("buildings")}>ЗДАНИЯ</button>
@@ -187,6 +193,52 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
         <button type="button" className={tab === "data" ? "is-active" : ""} onClick={() => setTab("data")}>ДАННЫЕ</button>
         <button type="button" className={tab === "flow" ? "is-active" : ""} onClick={() => setTab("flow")}>ПОТОКИ</button>
       </nav>
+
+      {tab === "scene" ? (
+        <section className="data-workspace local-scene-workspace">
+          <div className="population-labor__summary">
+            <div><span>PLAYER POSITION</span><strong>{localSceneLocation?.name ?? "STREET"}</strong><small>{localScene.playerPosition.state.toUpperCase()} · {focusSector?.code ?? "UNKNOWN SECTOR"}</small></div>
+            <div><span>PHYSICAL ACTORS</span><strong>{localScene.totals.materializedActors}</strong><small>{localScene.totals.focusSectorActors} in focus sector</small></div>
+            <div><span>VISIBLE NOW</span><strong>{localScene.totals.visibleActors}</strong><small>{localScene.totals.nearbyActors} within {72} m</small></div>
+            <div><span>KNOWN PEOPLE</span><strong>{localScene.totals.knownActors}</strong><small>linked to persistent human network</small></div>
+            <div><span>INTERIORS</span><strong>{localScene.totals.interiorActors}</strong><small>{localScene.totals.commutingActors} currently in transit</small></div>
+            <div><span>LOCAL BUILDINGS</span><strong>{localScene.totals.materializedBuildings}</strong><small>{localScene.totals.ambientPopulationEstimate} ambient slots remain aggregated</small></div>
+          </div>
+          <div className="population-labor__columns">
+            <section className="population-labor__list local-scene-actors">
+              <header><span>VISIBLE ACTORS</span><strong>REAL POSITIONS</strong></header>
+              {visibleLocalActors.map((actor) => (
+                <article key={actor.id}>
+                  <div><span>{actor.knownToPlayer ? "KNOWN" : actor.roleLabel.toUpperCase()}</span><strong>{actor.name}</strong><small>AGE {actor.age} · {actor.health.toUpperCase()} · weight {actor.representedWeight.toLocaleString("ru-RU")}</small></div>
+                  <div><span>ACTIVITY</span><strong>{actor.activity.toUpperCase()}</strong><small>{actor.activityLabel}</small></div>
+                  <div><span>DISTANCE</span><strong>{Math.round(actor.distanceToPlayerM)} M</strong><small>{actor.position.state.toUpperCase()}{actor.interactable ? " · IN REACH" : ""}</small></div>
+                </article>
+              ))}
+              {!visibleLocalActors.length ? <article><div><span>NO DIRECT CONTACT</span><strong>Сейчас рядом никого не видно</strong><small>Актёры продолжают находиться в других зданиях и частях активного сектора.</small></div></article> : null}
+            </section>
+            <section className="population-labor__list local-scene-buildings">
+              <header><span>NEARBY BUILDINGS</span><strong>FOCUS SECTOR</strong></header>
+              {nearbyLocalBuildings.map((building) => (
+                <article key={building.buildingId}>
+                  <div><span>{building.addressCode}</span><strong>{building.use.toUpperCase()}</strong><small>{building.playerInside ? "PLAYER INSIDE · " : ""}{Math.round(building.distanceToPlayerM)} m</small></div>
+                  <div><span>ENTRANCES</span><strong>{building.publicEntrances} / {building.serviceEntrances}</strong><small>public / service</small></div>
+                  <div><span>OCCUPANCY</span><strong>{building.occupiedActorCount}</strong><small>security {building.security}%</small></div>
+                </article>
+              ))}
+            </section>
+          </div>
+          <section className="population-labor__list">
+            <header><span>ACTIVE SECTOR ACTORS</span><strong>MATERIALIZED FROM POPULATION</strong></header>
+            {focusLocalActors.map((actor) => (
+              <article key={`sector-${actor.id}`}>
+                <div><span>{actor.position.state.toUpperCase()}</span><strong>{actor.name}</strong><small>{actor.roleLabel} · {actor.activityLabel}</small></div>
+                <div><span>POSITION</span><strong>{Math.round(actor.position.xM)},{Math.round(actor.position.yM)}</strong><small>{actor.position.buildingId ? `building ${actor.position.buildingId.slice(-6).toUpperCase()}` : "street / transit"}</small></div>
+                <div><span>PLAYER</span><strong>{Math.round(actor.distanceToPlayerM)} M</strong><small>{actor.visible ? "VISIBLE" : "OUT OF SIGHT"}</small></div>
+              </article>
+            ))}
+          </section>
+        </section>
+      ) : null}
 
       {tab === "spatial" ? (
         <section className="data-workspace metropolitan-workspace">

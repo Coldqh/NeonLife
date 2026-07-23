@@ -46,8 +46,9 @@ import { PressureWorkspace } from "./workspaces/PressureWorkspace";
 import { PopulationWorkspace } from "./workspaces/PopulationWorkspace";
 import { activeObligations, activeRequests, committedAmount } from "../gameplay/pressure/pressureSystem";
 import { getActiveCourierOrder, type CourierOrder } from "../gameplay/jobs/courier/courierSystem";
-import { getPerson, peopleAtLocation, toKnownNpc } from "../people/network/humanNetwork";
+import { getPerson, toKnownNpc } from "../people/network/humanNetwork";
 import type { PersonState } from "../people/network/types";
+import type { LocalActorState } from "../simulation/localScene/types";
 import { Meter } from "../ui/components/Meter";
 import { Portrait } from "../ui/components/Portrait";
 import { SystemPanel } from "../ui/components/SystemPanel";
@@ -630,7 +631,7 @@ export default function App() {
             <div className="action-sheet__shortcuts">
               <button type="button" onClick={() => { setActionSheetOpen(false); setActiveNav("work"); }}><Icon name="work" /><span><strong>РАБОТА</strong><small>{session.jobs.courier.orders.filter((order) => order.status === "available").length} заказов</small></span></button>
               <button type="button" onClick={() => { setActionSheetOpen(false); openWindow("food"); }}><Icon name="inventory" /><span><strong>ЕДА</strong><small>{getFreshFoodUnits(session.life.food, session.timestamp)} порций</small></span></button>
-              <button type="button" onClick={() => { setActionSheetOpen(false); setActiveNav("people"); }}><Icon name="people" /><span><strong>ЛЮДИ</strong><small>{peopleAtLocation(session.people, session.life.currentLocationId).length} рядом</small></span></button>
+              <button type="button" onClick={() => { setActionSheetOpen(false); setActiveNav("people"); }}><Icon name="people" /><span><strong>ЛЮДИ</strong><small>{session.localScene.totals.visibleActors} видно</small></span></button>
               <button type="button" onClick={() => { setActionSheetOpen(false); openWindow("home"); }}><Icon name="home" /><span><strong>ДОМ</strong><small>{session.player.housingDaysLeft} дней</small></span></button>
             </div>
             <div className="action-sheet__list">
@@ -1190,7 +1191,12 @@ function BusinessEconomyCard({ business, location, workers, current, onTravel }:
 function PeopleWorkspace({ session, onSelect }: { session: GameSession; onSelect: (personId: string) => void }) {
   const [tab, setTab] = useState<"nearby" | "all" | "memory">("nearby");
   const currentLocation = session.world.locations.find((location) => location.id === session.life.currentLocationId);
-  const nearby = peopleAtLocation(session.people, session.life.currentLocationId);
+  const visibleSceneActors = session.localScene.actors.filter((actor) => actor.visible);
+  const nearby = visibleSceneActors.flatMap((actor) => {
+    const person = actor.activePersonId ? getPerson(session.people, actor.activePersonId) : null;
+    return person ? [person] : [];
+  });
+  const unknownNearby = visibleSceneActors.filter((actor) => !actor.activePersonId);
   const selected = getPerson(session.people, session.world.primaryContactId)
     ?? getPerson(session.people, session.people.selectedPersonId);
   const memories = session.people.people
@@ -1210,13 +1216,13 @@ function PeopleWorkspace({ session, onSelect }: { session: GameSession; onSelect
         </div>
         <div className="people-stats">
           <div><span>KNOWN</span><strong>{session.people.people.length}</strong></div>
-          <div><span>HERE</span><strong>{nearby.length}</strong></div>
+          <div><span>VISIBLE</span><strong>{session.localScene.totals.visibleActors}</strong></div>
           <div><span>MEMORY</span><strong>{session.people.people.reduce((sum, person) => sum + person.memories.length, 0)}</strong></div>
         </div>
       </header>
 
       <nav className="terminal-tabs people-tabs" aria-label="Разделы человеческой сети">
-        <button type="button" className={tab === "nearby" ? "is-active" : ""} onClick={() => setTab("nearby")}>РЯДОМ · {nearby.length}</button>
+        <button type="button" className={tab === "nearby" ? "is-active" : ""} onClick={() => setTab("nearby")}>РЯДОМ · {session.localScene.totals.visibleActors}</button>
         <button type="button" className={tab === "all" ? "is-active" : ""} onClick={() => setTab("all")}>ВСЕ · {session.people.people.length}</button>
         <button type="button" className={tab === "memory" ? "is-active" : ""} onClick={() => setTab("memory")}>ПАМЯТЬ · {memories.length}</button>
       </nav>
@@ -1232,7 +1238,9 @@ function PeopleWorkspace({ session, onSelect }: { session: GameSession; onSelect
               onSelect={onSelect}
             />
           ))}
-          {!visiblePeople.length ? <div className="empty-terminal">На этой точке сейчас нет известных людей. Их расписания продолжают двигаться.</div> : null}
+          {tab === "nearby" ? unknownNearby.map((actor) => <LocalActorCard key={actor.id} actor={actor} />) : null}
+          {tab === "nearby" && !visibleSceneActors.length ? <div className="empty-terminal">В прямой видимости никого нет. Физические актёры продолжают двигаться по сектору, зданиям и маршрутам.</div> : null}
+          {tab === "all" && !visiblePeople.length ? <div className="empty-terminal">Постоянная человеческая сеть пуста.</div> : null}
         </div>
       ) : (
         <div className="people-memory-list">
@@ -1247,6 +1255,31 @@ function PeopleWorkspace({ session, onSelect }: { session: GameSession; onSelect
         </div>
       )}
     </div>
+  );
+}
+
+function LocalActorCard({ actor }: { actor: LocalActorState }) {
+  return (
+    <article className="people-card people-card--local">
+      <div className="people-card__identity">
+        <span className="people-card__code">LOCAL-{actor.residentId.slice(-4).toUpperCase()}</span>
+        <strong>{actor.name}</strong>
+        <small>{actor.roleLabel} · AGE {actor.age}</small>
+      </div>
+      <div className="people-card__status">
+        <span>{actor.activityLabel}</span>
+        <small>{actor.position.state.toUpperCase()} · {Math.round(actor.distanceToPlayerM)} M</small>
+      </div>
+      <div className="people-card__problem">
+        <span>PHYSICAL ACTOR</span>
+        <strong>{actor.health.toUpperCase()}</strong>
+        <small>{actor.position.buildingId ? `BUILDING ${actor.position.buildingId.slice(-6).toUpperCase()}` : "STREET / TRANSIT"}</small>
+      </div>
+      <div className="people-card__relation">
+        <span>{actor.interactable ? "IN REACH" : "VISIBLE"}</span>
+        <span>W {actor.representedWeight.toLocaleString("ru-RU")}</span>
+      </div>
+    </article>
   );
 }
 

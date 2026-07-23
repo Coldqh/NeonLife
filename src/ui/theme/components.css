@@ -5553,3 +5553,26 @@ button:disabled {
 .data-workspace .population-labor__list { max-height: 238px; }
 .data-workspace .population-labor__list > article { grid-template-columns: minmax(0, 1.35fr) minmax(72px, .75fr) minmax(78px, .75fr); }
 .data-workspace .population-labor__list strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* v0.25.0 — physical local actors */
+.people-card--local {
+  grid-template-columns: minmax(125px, 1.15fr) minmax(130px, 1.1fr) minmax(120px, 1fr) auto;
+  cursor: default;
+}
+
+.people-card--local:hover {
+  border-color: var(--line);
+  background: rgba(4, 15, 21, 0.76);
+}
+
+.local-scene-workspace .population-labor__list > article {
+  min-height: 64px;
+}
+
+.local-scene-workspace .local-scene-actors > article:first-of-type {
+  border-left-color: rgba(0, 224, 255, 0.62);
+}
+
+.local-scene-workspace .local-scene-buildings > article:first-of-type {
+  border-left-color: rgba(255, 204, 0, 0.58);
+}

@@ -15,6 +15,7 @@ import { advanceDataSurveillance } from "../../simulation/data/dataSystem";
 import { advanceMetropolitanState } from "../../simulation/spatial/metropolitanSystem";
 import { advanceUrbanFabricState, synchronizeMetropolitanFromUrban } from "../../simulation/urban/urbanSystem";
 import { advanceMetropolitanMobilityState, synchronizeMetropolitanFromMobility } from "../../simulation/mobility/mobilitySystem";
+import { advanceLocalSceneState } from "../../simulation/localScene/localSceneSystem";
 import { canPrepare, consumeFood, discardSpoiledFood, purchaseFood } from "../food/foodSystem";
 import { calculateSleepRecovery, getHousingDaysLeft } from "../housing/housingSystem";
 import { getTravelOptions, isLocationOpen } from "../travel/travelSystem";
@@ -282,6 +283,18 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   const targetDistrict = targetLocation
     ? session.world.districts.find((district) => district.id === targetLocation.districtId)
     : undefined;
+  const localSceneState = advanceLocalSceneState(session.localScene, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    activeLocationId: session.life.currentLocationId,
+    targetLocationId: targetLocation?.id,
+    locations: session.world.locations,
+    people: peopleState,
+    population: populationState,
+    metropolitan: metropolitanState,
+    urban: urbanAdvance.state,
+    mobility: mobilityState
+  });
 
   const generated: WorldEvent[] = [];
   if (options.title && options.category) {
@@ -438,6 +451,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     metropolitan: metropolitanState,
     urban: urbanAdvance.state,
     mobility: mobilityState,
+    localScene: localSceneState,
     district: infrastructurePulse,
     eventQueue: queued.queue,
     currentActivity: pressureAdvance.evicted
