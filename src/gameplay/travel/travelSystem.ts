@@ -1,4 +1,6 @@
 import type { GameSession, LocationState } from "../../world/state/types";
+import { estimateMobilityTravel } from "../../simulation/mobility/mobilitySystem";
+import type { MobilityTravelEstimate } from "../../simulation/mobility/types";
 
 export interface TravelOption {
   location: LocationState;
@@ -6,6 +8,11 @@ export interface TravelOption {
   cost: number;
   districtName: string;
   sameDistrict: boolean;
+  mode: MobilityTravelEstimate["mode"];
+  routeCode: string;
+  distanceKm: number;
+  congestionPercent: number;
+  transitCrowdingPercent: number;
 }
 
 export function getTravelOptions(session: GameSession): TravelOption[] {
@@ -16,16 +23,22 @@ export function getTravelOptions(session: GameSession): TravelOption[] {
     .map((location) => {
       const sameDistrict = location.districtId === currentDistrictId;
       const district = session.world.districts.find((item) => item.id === location.districtId);
-      const baseDuration = sameDistrict ? 14 : 34;
-      const delay = sameDistrict ? Math.ceil(session.district.transitDelayMinutes / 2) : session.district.transitDelayMinutes;
+      const estimate = current ? estimateMobilityTravel(session.mobility, session.metropolitan, current.id, location.id) : null;
+      const baseDuration = estimate?.durationMinutes ?? (sameDistrict ? 14 : 34);
+      const delay = estimate ? 0 : sameDistrict ? Math.ceil(session.district.transitDelayMinutes / 2) : session.district.transitDelayMinutes;
       const transitDebt = session.pressure.obligations.find((obligation) => obligation.type === "transit" && obligation.status === "overdue");
-      const surcharge = transitDebt ? (sameDistrict ? 3 : 7) : 0;
+      const surcharge = transitDebt && (estimate?.mode === "bus" || estimate?.mode === "metro") ? (sameDistrict ? 3 : 7) : 0;
       return {
         location,
         durationMinutes: baseDuration + delay,
-        cost: (sameDistrict ? 4 : 12) + surcharge,
+        cost: (estimate?.cost ?? (sameDistrict ? 4 : 12)) + surcharge,
         districtName: district?.name ?? "UNKNOWN DISTRICT",
-        sameDistrict
+        sameDistrict,
+        mode: estimate?.mode ?? "bus",
+        routeCode: estimate?.routeCode ?? "CITY BUS",
+        distanceKm: Math.round((estimate?.distanceM ?? 0) / 100) / 10,
+        congestionPercent: estimate?.congestionPercent ?? session.district.transitDelayMinutes,
+        transitCrowdingPercent: estimate?.transitCrowdingPercent ?? 0
       };
     })
     .sort((left, right) => left.durationMinutes - right.durationMinutes);

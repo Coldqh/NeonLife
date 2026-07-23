@@ -14,8 +14,8 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
 }
 
 $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
-if (-not (Test-Path (Join-Path $ProjectRoot "package.json"))) {
-    throw "NEON LIFE project not found at $ProjectRoot"
+if (-not (Test-Path (Join-Path $ProjectRoot ".git"))) {
+    throw "NEON LIFE git repository not found at $ProjectRoot"
 }
 
 $files = Get-Content (Join-Path $PatchRoot "PATCH_FILES.txt") |
@@ -35,24 +35,4 @@ foreach ($relativePath in $files) {
     Copy-Item -Force -Path $source -Destination $destination
 }
 
-$obsolete = @(
-    "PATCH_0.10.0.md",
-    "docs\CITY_SITUATIONS.md",
-    "src\gameplay\situations\situationSystem.ts",
-    "src\gameplay\situations\types.ts",
-    "src\ui\components\SituationGate.tsx"
-)
-
-foreach ($relativePath in $obsolete) {
-    $target = Join-Path $ProjectRoot $relativePath
-    if (Test-Path $target) {
-        Remove-Item -Force $target
-    }
-}
-
-$situationsDirectory = Join-Path $ProjectRoot "src\gameplay\situations"
-if ((Test-Path $situationsDirectory) -and -not (Get-ChildItem $situationsDirectory -Force)) {
-    Remove-Item -Force $situationsDirectory
-}
-
-Write-Host "NEON LIFE v0.12.0 HOUSEHOLD ECONOMY applied to $ProjectRoot"
+Write-Host "NEON LIFE v0.24.1 METROPOLITAN MOBILITY HOTFIX applied to $ProjectRoot"

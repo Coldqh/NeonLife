@@ -24,7 +24,7 @@ import { normalizeHealthCyberwareState } from "../../simulation/health/healthSys
 import { normalizeDataSurveillanceState } from "../../simulation/data/dataSystem";
 import { normalizeMetropolitanState } from "../../simulation/spatial/metropolitanSystem";
 import { normalizeUrbanFabricState, synchronizeMetropolitanFromUrban } from "../../simulation/urban/urbanSystem";
-import { normalizeMetropolitanMobilityState } from "../../simulation/mobility/mobilitySystem";
+import { normalizeMetropolitanMobilityState, synchronizeMetropolitanFromMobility } from "../../simulation/mobility/mobilitySystem";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -604,11 +604,12 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     transportServiceLevel: infrastructure.networks.find((item) => item.kind === "transport")?.averageServiceLevel ?? 100,
     dataServiceLevel: infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100
   });
+  const mobilitySynchronizedMetropolitan = synchronizeMetropolitanFromMobility(synchronizedMetropolitan, mobility);
   population = {
     ...population,
     lifecycle: {
       ...population.lifecycle,
-      representedPopulationByDistrict: Object.fromEntries(synchronizedMetropolitan.districts.map((district) => [district.districtId, district.representedPopulation]))
+      representedPopulationByDistrict: Object.fromEntries(mobilitySynchronizedMetropolitan.districts.map((district) => [district.districtId, district.representedPopulation]))
     }
   };
   const kernel = advanceSimulationKernel(baseKernel, {
@@ -648,7 +649,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     government,
     health,
     data,
-    metropolitan: synchronizedMetropolitan,
+    metropolitan: mobilitySynchronizedMetropolitan,
     urban,
     mobility,
     currentActivity: `На месте: ${existingLocationName}`,
@@ -661,7 +662,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
         ...district,
         population: Math.round(population.lifecycle.representedPopulationByDistrict[district.id] ?? district.population)
       })),
-      city: { ...cityState, population: synchronizedMetropolitan.totals.representedPopulation }
+      city: { ...cityState, population: mobilitySynchronizedMetropolitan.totals.representedPopulation }
     },
     district: {
       ...district,
