@@ -20,6 +20,7 @@ import { createGovernmentCrimeState } from "../../simulation/government/governme
 import { createHealthCyberwareState } from "../../simulation/health/healthSystem";
 import { createDataSurveillanceState } from "../../simulation/data/dataSystem";
 import { createMetropolitanState } from "../../simulation/spatial/metropolitanSystem";
+import { createUrbanFabricState } from "../../simulation/urban/urbanSystem";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
 import type {
@@ -320,6 +321,18 @@ export function createWorldSession(seed: string): GameSession {
     recentEventCount: 0,
     recentObservationCount: data.observations.length
   });
+  const urban = createUrbanFabricState({
+    timestamp: INITIAL_GAME_TIMESTAMP,
+    seed,
+    activeLocationId: housing.id,
+    metropolitan,
+    districts,
+    locations,
+    organizations,
+    population,
+    transportServiceLevel: infrastructure.networks.find((item) => item.kind === "transport")?.averageServiceLevel ?? 100,
+    dataServiceLevel: infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100
+  });
   const syncedKernel = advanceSimulationKernel(kernel, {
     timestamp: INITIAL_GAME_TIMESTAMP,
     seed,
@@ -357,6 +370,7 @@ export function createWorldSession(seed: string): GameSession {
     health,
     data,
     metropolitan,
+    urban,
     events: createInitialEvents({
       seed,
       districtName: lower.name,

@@ -1,7 +1,7 @@
 {
-  "version": "0.22.0",
-  "releasedAt": "2026-07-23T11:40:00Z",
+  "version": "0.23.0",
+  "releasedAt": "2026-07-23T12:30:00Z",
   "forceUpdate": true,
-  "title": "METROPOLITAN SCALE FOUNDATION",
-  "summary": "The city now has a 42×36 km metric footprint, 1,512 streamed sectors, persistent addresses, arterial and transit graphs, multi-million represented population and bounded active-memory detail."
+  "title": "BUILDINGS, INTERIORS & MASS DEMOGRAPHY",
+  "summary": "The multi-million resident city now has sector-wide building and apartment indexes, concrete addresses for detailed households, deterministic streamed interiors and monthly mass demography for the whole metropolitan population."
 }

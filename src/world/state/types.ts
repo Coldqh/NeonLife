@@ -19,6 +19,7 @@ import type { GovernmentCrimeState } from "../../simulation/government/types";
 import type { HealthCyberwareState } from "../../simulation/health/types";
 import type { DataSurveillanceState } from "../../simulation/data/types";
 import type { MetropolitanState } from "../../simulation/spatial/types";
+import type { UrbanFabricState } from "../../simulation/urban/types";
 
 export interface CityState {
   id: EntityId;
@@ -117,6 +118,7 @@ export interface GameSession {
   health: HealthCyberwareState;
   data: DataSurveillanceState;
   metropolitan: MetropolitanState;
+  urban: UrbanFabricState;
   events: WorldEvent[];
   eventQueue: ScheduledWorldEvent[];
   currentActivity: string;

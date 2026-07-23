@@ -13,6 +13,7 @@ import { advanceGovernmentCrime } from "../../simulation/government/governmentSy
 import { advanceHealthCyberware } from "../../simulation/health/healthSystem";
 import { advanceDataSurveillance } from "../../simulation/data/dataSystem";
 import { advanceMetropolitanState } from "../../simulation/spatial/metropolitanSystem";
+import { advanceUrbanFabricState, synchronizeMetropolitanFromUrban } from "../../simulation/urban/urbanSystem";
 import { canPrepare, consumeFood, discardSpoiledFood, purchaseFood } from "../food/foodSystem";
 import { calculateSleepRecovery, getHousingDaysLeft } from "../housing/housingSystem";
 import { getTravelOptions, isLocationOpen } from "../travel/travelSystem";
@@ -207,6 +208,27 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     recentEventCount: session.events.length,
     recentObservationCount: dataAdvance.state.observations.length
   });
+  const urbanAdvance = advanceUrbanFabricState(session.urban, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    activeLocationId: session.life.currentLocationId,
+    targetLocationId: options.targetLocationId,
+    metropolitan: metropolitanAdvance.state,
+    districts: session.world.districts,
+    locations: session.world.locations,
+    organizations: dataAdvance.organizations,
+    population: dataAdvance.population,
+    transportServiceLevel: governmentAdvance.infrastructure.networks.find((item) => item.kind === "transport")?.averageServiceLevel ?? 100,
+    dataServiceLevel: governmentAdvance.infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100
+  });
+  const metropolitanState = synchronizeMetropolitanFromUrban(metropolitanAdvance.state, urbanAdvance.state);
+  const populationState = {
+    ...dataAdvance.population,
+    lifecycle: {
+      ...dataAdvance.population.lifecycle,
+      representedPopulationByDistrict: urbanAdvance.representedPopulationByDistrict
+    }
+  };
   const compactedDataState = metropolitanAdvance.compactedObservationBudget < dataAdvance.state.observations.length
     ? { ...dataAdvance.state, observations: dataAdvance.state.observations.slice(-Math.max(250, metropolitanAdvance.compactedObservationBudget)) }
     : dataAdvance.state;
@@ -310,7 +332,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     worldEvents: worldEventCount
   });
   const nextOrganizations = dataAdvance.organizations;
-  const representedPopulation = dataAdvance.population.lifecycle.representedPopulationByDistrict;
+  const representedPopulation = urbanAdvance.representedPopulationByDistrict;
   const nextDistricts = session.world.districts.map((district) => ({
     ...district,
     population: Math.round(representedPopulation[district.id] ?? district.population)
@@ -357,7 +379,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     locations: session.world.locations,
     organizations: nextOrganizations,
     player: nextPlayer,
-    population: dataAdvance.population,
+    population: populationState,
     economy: healthAdvance.economy,
     infrastructure: governmentAdvance.infrastructure,
     production: healthAdvance.production,
@@ -387,7 +409,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     people: peopleState,
     pressure,
     economy: healthAdvance.economy,
-    population: dataAdvance.population,
+    population: populationState,
     kernel,
     infrastructure: governmentAdvance.infrastructure,
     production: healthAdvance.production,
@@ -395,7 +417,8 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     government: dataAdvance.government,
     health: healthAdvance.state,
     data: compactedDataState,
-    metropolitan: metropolitanAdvance.state,
+    metropolitan: metropolitanState,
+    urban: urbanAdvance.state,
     district: infrastructurePulse,
     eventQueue: queued.queue,
     currentActivity: pressureAdvance.evicted

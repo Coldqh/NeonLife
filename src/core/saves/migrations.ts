@@ -23,6 +23,7 @@ import { normalizeGovernmentCrimeState } from "../../simulation/government/gover
 import { normalizeHealthCyberwareState } from "../../simulation/health/healthSystem";
 import { normalizeDataSurveillanceState } from "../../simulation/data/dataSystem";
 import { normalizeMetropolitanState } from "../../simulation/spatial/metropolitanSystem";
+import { normalizeUrbanFabricState, synchronizeMetropolitanFromUrban } from "../../simulation/urban/urbanSystem";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -575,6 +576,26 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     recentEventCount: migratedEvents.length,
     recentObservationCount: data.observations.length
   });
+  const urban = normalizeUrbanFabricState(payload.urban, {
+    timestamp,
+    seed,
+    activeLocationId: existingLocationId ?? housingLocation?.id ?? locations[0]?.id ?? "location-missing",
+    metropolitan,
+    districts,
+    locations,
+    organizations,
+    population,
+    transportServiceLevel: infrastructure.networks.find((item) => item.kind === "transport")?.averageServiceLevel ?? 100,
+    dataServiceLevel: infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100
+  });
+  const synchronizedMetropolitan = synchronizeMetropolitanFromUrban(metropolitan, urban);
+  population = {
+    ...population,
+    lifecycle: {
+      ...population.lifecycle,
+      representedPopulationByDistrict: Object.fromEntries(synchronizedMetropolitan.districts.map((district) => [district.districtId, district.representedPopulation]))
+    }
+  };
   const kernel = advanceSimulationKernel(baseKernel, {
     timestamp,
     seed,
@@ -612,15 +633,19 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     government,
     health,
     data,
-    metropolitan,
+    metropolitan: synchronizedMetropolitan,
+    urban,
     currentActivity: `На месте: ${existingLocationName}`,
     world: {
       ...world,
       primaryContactId: selectedPerson?.id ?? String(world.primaryContactId ?? "person-missing"),
       locations,
       organizations,
-      districts,
-      city: { ...cityState, population: districts.reduce((sum, district) => sum + district.population, 0) }
+      districts: districts.map((district) => ({
+        ...district,
+        population: Math.round(population.lifecycle.representedPopulationByDistrict[district.id] ?? district.population)
+      })),
+      city: { ...cityState, population: synchronizedMetropolitan.totals.representedPopulation }
     },
     district: {
       ...district,

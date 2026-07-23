@@ -3,7 +3,7 @@ import { getFoodProduct } from "../../data/products/foodCatalog";
 import type { HouseholdStatus } from "../../simulation/population/types";
 import type { GameSession } from "../../world/state/types";
 
-type PopulationTab = "spatial" | "districts" | "lifecycle" | "households" | "housing" | "labor" | "infrastructure" | "supply" | "organizations" | "government" | "health" | "data" | "flow";
+type PopulationTab = "spatial" | "buildings" | "districts" | "lifecycle" | "households" | "housing" | "labor" | "infrastructure" | "supply" | "organizations" | "government" | "health" | "data" | "flow";
 
 function statusRank(status: HouseholdStatus): number {
   if (status === "displaced") return 4;
@@ -147,11 +147,17 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
   const activeSpatialDistrict = focusSector ? metropolitan.districts.find((district) => district.districtId === focusSector.districtId) : undefined;
   const busiestSectors = metropolitan.sectors.slice().sort((left, right) => right.crowdLoad - left.crowdLoad || right.trafficLoad - left.trafficLoad).slice(0, 12);
   const largestLocations = metropolitan.locations.slice().sort((left, right) => (right.bounds.widthM * right.bounds.heightM * right.floors) - (left.bounds.widthM * left.bounds.heightM * left.floors)).slice(0, 12);
+  const urban = session.urban;
+  const mass = urban.demography;
+  const recentMass = mass.history[mass.history.length - 1];
+  const largestBuildings = urban.buildings.slice().sort((left, right) => right.floorAreaM2 - left.floorAreaM2).slice(0, 14);
+  const focusBuildings = focusSector ? urban.buildings.filter((building) => building.sectorId === focusSector.id).slice(0, 16) : [];
+  const recentAddresses = urban.householdAddresses.slice(0, 16);
 
   return (
     <div className="population-workspace">
       <section className="population-summary">
-        <div><span>RESIDENTS</span><strong>{state.residents.length}</strong><small>{activeLinks} active NPC</small></div>
+        <div><span>CITY POPULATION</span><strong>{mass.totals.population.toLocaleString("ru-RU")}</strong><small>{state.residents.length} detailed · {activeLinks} active NPC</small></div>
         <div><span>HOUSEHOLDS</span><strong>{state.households.length}</strong><small>{atRisk.length} under pressure</small></div>
         <div><span>EMPLOYMENT</span><strong>{employed}</strong><small>{unemployed} unemployed · {absent} absent</small></div>
         <div><span>HOUSING</span><strong>{availableBeds} BEDS</strong><small>{state.totals.moves} total moves</small></div>
@@ -159,6 +165,7 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
 
       <nav className="population-tabs" aria-label="Population systems">
         <button type="button" className={tab === "spatial" ? "is-active" : ""} onClick={() => setTab("spatial")}>МАСШТАБ</button>
+        <button type="button" className={tab === "buildings" ? "is-active" : ""} onClick={() => setTab("buildings")}>ЗДАНИЯ</button>
         <button type="button" className={tab === "districts" ? "is-active" : ""} onClick={() => setTab("districts")}>РАЙОНЫ</button>
         <button type="button" className={tab === "lifecycle" ? "is-active" : ""} onClick={() => setTab("lifecycle")}>ЖИЗНЬ</button>
         <button type="button" className={tab === "households" ? "is-active" : ""} onClick={() => setTab("households")}>СЕМЬИ</button>
@@ -228,6 +235,73 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
                   <div><span>CAPACITY</span><strong>{placement.verticalPopulationCapacity.toLocaleString("ru-RU")}</strong><small>{placement.entranceCount} public entrances</small></div>
                 </article>
               ))}
+            </section>
+          </div>
+        </section>
+      ) : null}
+
+      {tab === "buildings" ? (
+        <section className="data-workspace urban-buildings-workspace">
+          <div className="population-labor__summary">
+            <div><span>INDEXED BUILDINGS</span><strong>{urban.totals.indexedBuildings.toLocaleString("ru-RU")}</strong><small>{urban.totals.materializedBuildings} currently materialized</small></div>
+            <div><span>RESIDENTIAL UNITS</span><strong>{urban.totals.indexedResidentialUnits.toLocaleString("ru-RU")}</strong><small>capacity {urban.totals.indexedResidentCapacity.toLocaleString("ru-RU")}</small></div>
+            <div><span>DETAILED ADDRESSES</span><strong>{urban.totals.detailedHouseholdAddresses}</strong><small>{urban.totals.materializedUnits} concrete units cached</small></div>
+            <div><span>INTERIORS</span><strong>{urban.totals.materializedInteriors}</strong><small>limit {urban.memory.interiorCacheLimit} · deterministic seeds</small></div>
+            <div><span>URBAN CACHE</span><strong>{urban.memory.estimatedMemoryMb.toFixed(1)} MB</strong><small>peak {urban.memory.peakEstimatedMemoryMb.toFixed(1)} MB</small></div>
+            <div><span>MASS DEMOGRAPHY</span><strong>{mass.totals.population.toLocaleString("ru-RU")}</strong><small>{state.residents.length} detailed sample links</small></div>
+          </div>
+          <div className="population-labor__columns">
+            <section className="population-labor__list">
+              <header><span>MASS POPULATION</span><strong>CITY-WIDE MONTHLY MODEL</strong></header>
+              <article>
+                <div><span>POPULATION</span><strong>{mass.totals.population.toLocaleString("ru-RU")}</strong><small>{mass.totals.households.toLocaleString("ru-RU")} households</small></div>
+                <div><span>BIRTHS / DEATHS</span><strong>{mass.totals.births.toLocaleString("ru-RU")} / {mass.totals.deaths.toLocaleString("ru-RU")}</strong><small>since world start</small></div>
+                <div><span>MIGRATION</span><strong>+{mass.totals.immigrants.toLocaleString("ru-RU")} / −{mass.totals.emigrants.toLocaleString("ru-RU")}</strong><small>{mass.totals.internalMoves.toLocaleString("ru-RU")} internal moves</small></div>
+              </article>
+              <article>
+                <div><span>LATEST MONTH</span><strong>{recentMass ? `+${recentMass.births} / −${recentMass.deaths}` : "NO DATA"}</strong><small>births / deaths</small></div>
+                <div><span>WORK</span><strong>{recentMass?.employed.toLocaleString("ru-RU") ?? 0}</strong><small>{recentMass?.unemployed.toLocaleString("ru-RU") ?? 0} unemployed</small></div>
+                <div><span>EDUCATION</span><strong>{recentMass?.students.toLocaleString("ru-RU") ?? 0}</strong><small>{mass.totals.graduates.toLocaleString("ru-RU")} graduates</small></div>
+              </article>
+            </section>
+            <section className="population-labor__list">
+              <header><span>MEMORY POLICY</span><strong>SEED + PERSISTENT DELTAS</strong></header>
+              <article>
+                <div><span>BUILDINGS</span><strong>{urban.memory.cachedBuildings}/{urban.memory.buildingCacheLimit}</strong><small>{urban.memory.buildingsEvicted} evicted</small></div>
+                <div><span>UNITS</span><strong>{urban.memory.cachedUnits}/{urban.memory.unitCacheLimit}</strong><small>{urban.memory.unitsEvicted} evicted</small></div>
+                <div><span>INTERIORS</span><strong>{urban.memory.cachedInteriors}/{urban.memory.interiorCacheLimit}</strong><small>{urban.memory.interiorsEvicted} evicted</small></div>
+              </article>
+              <article>
+                <div><span>RECONSTRUCTION</span><strong>DETERMINISTIC</strong><small>same building, floor, apartment and room layout after reload</small></div>
+                <div><span>PERSISTENT</span><strong>{urban.interiorDeltas.length}</strong><small>damage, ownership, evidence and access deltas</small></div>
+                <div><span>FOCUS SECTOR</span><strong>{focusBuildings.length}</strong><small>materialized building records</small></div>
+              </article>
+            </section>
+          </div>
+          <div className="population-labor__columns">
+            <section className="population-labor__list">
+              <header><span>MATERIALIZED BUILDINGS</span><strong>REAL COORDINATES</strong></header>
+              {largestBuildings.map((building) => (
+                <article key={building.id}>
+                  <div><span>{building.addressCode}</span><strong>{building.anchorLocationId ? locationName(session, building.anchorLocationId) : building.use.toUpperCase()}</strong><small>{building.scale.toUpperCase()} · {building.floorAreaM2.toLocaleString("ru-RU")} m²</small></div>
+                  <div><span>STRUCTURE</span><strong>{building.floors} F / {building.basementLevels} B</strong><small>{building.elevatorCount} elevators · {building.stairwellCount} stairs</small></div>
+                  <div><span>UNITS</span><strong>{building.residentialUnits.toLocaleString("ru-RU")}</strong><small>{building.representedResidents.toLocaleString("ru-RU")} represented residents</small></div>
+                </article>
+              ))}
+            </section>
+            <section className="population-labor__list">
+              <header><span>DETAILED HOUSEHOLDS</span><strong>CONCRETE APARTMENTS</strong></header>
+              {recentAddresses.map((address) => {
+                const unit = urban.units.find((item) => item.id === address.unitId);
+                const household = state.households.find((item) => item.id === address.householdId);
+                return (
+                  <article key={address.householdId}>
+                    <div><span>{address.addressCode}</span><strong>{household?.kind.toUpperCase() ?? "HOUSEHOLD"}</strong><small>{address.residentIds.map((residentId) => residentName(session, residentId)).slice(0, 3).join(" · ")}</small></div>
+                    <div><span>FLOOR</span><strong>{unit?.floor ?? 0}</strong><small>{unit?.areaM2 ?? 0} m² · {unit?.roomCount ?? 0} rooms</small></div>
+                    <div><span>RENT</span><strong>₵{unit?.monthlyRent ?? 0}</strong><small>condition {unit?.condition ?? 0}%</small></div>
+                  </article>
+                );
+              })}
             </section>
           </div>
         </section>
