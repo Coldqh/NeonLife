@@ -22,6 +22,7 @@ import { normalizeOrganizationEcosystem } from "../../simulation/organizations/o
 import { normalizeGovernmentCrimeState } from "../../simulation/government/governmentSystem";
 import { normalizeHealthCyberwareState } from "../../simulation/health/healthSystem";
 import { normalizeDataSurveillanceState } from "../../simulation/data/dataSystem";
+import { normalizeMetropolitanState } from "../../simulation/spatial/metropolitanSystem";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -42,6 +43,21 @@ function hasBaseSessionShape(value: unknown): value is Record<string, unknown> {
     && Array.isArray(value.events)
     && isObject(value.district)
     && isObject(value.primaryContact);
+}
+
+
+function ensureMetropolitanDistrictPopulation(districts: GameSession["world"]["districts"]): GameSession["world"]["districts"] {
+  const total = districts.reduce((sum, district) => sum + district.population, 0);
+  if (total >= 4_000_000 || !districts.length) return districts;
+  const target = 6_800_000;
+  const weights = districts.map((district, index) => Math.max(1, district.population || (index === 0 ? 45 : index === 1 ? 32 : 23)));
+  const weightTotal = weights.reduce((sum, value) => sum + value, 0);
+  let allocated = 0;
+  return districts.map((district, index) => {
+    const population = index === districts.length - 1 ? target - allocated : Math.max(100_000, Math.floor(target * weights[index] / weightTotal));
+    allocated += population;
+    return { ...district, population };
+  });
 }
 
 function migrateLocationSchedules(locations: LocationState[]): LocationState[] {
@@ -410,7 +426,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
   const district = payload.district as Record<string, unknown>;
   const timestamp = payload.timestamp as number;
   const rawLocations = migrateLocationSchedules((Array.isArray(world.locations) ? world.locations : []) as LocationState[]);
-  const districts = (Array.isArray(world.districts) ? world.districts : []) as GameSession["world"]["districts"];
+  const districts = ensureMetropolitanDistrictPopulation((Array.isArray(world.districts) ? world.districts : []) as GameSession["world"]["districts"]);
   const seed = String(meta?.seed ?? "NEON-LIFE-MIGRATED");
   const districtHousingLocations = ensureDistrictHousing(seed, districts, rawLocations);
   const localOperators = ensureLocalOperators(seed, (Array.isArray(world.organizations) ? world.organizations : []) as GameSession["world"]["organizations"], districtHousingLocations, String((world.city as Record<string, unknown> | undefined)?.name ?? "CITY"));
@@ -463,7 +479,16 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
   const pulseState = isObject(payload.district)
     ? payload.district as unknown as GameSession["district"]
     : createInitialDistrictPulse(timestamp, seed);
-  const population = normalizePopulationState(payload.population, seed, timestamp, districts, locations, organizations, people.people);
+  let population = normalizePopulationState(payload.population, seed, timestamp, districts, locations, organizations, people.people);
+  if (schemaVersion < 20) {
+    population = {
+      ...population,
+      lifecycle: {
+        ...population.lifecycle,
+        representedPopulationByDistrict: Object.fromEntries(districts.map((district) => [district.id, district.population]))
+      }
+    };
+  }
   const economy = normalizeEconomyState(payload.economy, seed, timestamp, locations, people.people, population, foodState, pulseState);
   const courier = migrateCourierState(existingJobs.courier, seed, timestamp, locations, people.people, economy.businesses);
   const pressure = hasPressureState(payload.pressure)
@@ -538,6 +563,18 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     government,
     health
   });
+  const metropolitan = normalizeMetropolitanState(payload.metropolitan, {
+    timestamp,
+    seed,
+    activeLocationId: existingLocationId ?? housingLocation?.id ?? locations[0]?.id ?? "location-missing",
+    districts,
+    locations,
+    representedPopulationByDistrict: population.lifecycle.representedPopulationByDistrict,
+    transportServiceLevel: infrastructure.networks.find((item) => item.kind === "transport")?.averageServiceLevel ?? 100,
+    dataServiceLevel: infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100,
+    recentEventCount: migratedEvents.length,
+    recentObservationCount: data.observations.length
+  });
   const kernel = advanceSimulationKernel(baseKernel, {
     timestamp,
     seed,
@@ -575,12 +612,15 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     government,
     health,
     data,
+    metropolitan,
     currentActivity: `На месте: ${existingLocationName}`,
     world: {
       ...world,
       primaryContactId: selectedPerson?.id ?? String(world.primaryContactId ?? "person-missing"),
       locations,
-      organizations
+      organizations,
+      districts,
+      city: { ...cityState, population: districts.reduce((sum, district) => sum + district.population, 0) }
     },
     district: {
       ...district,

@@ -855,9 +855,11 @@ export function advancePopulationLifecycleDay(input: LifecycleAdvanceInput): Lif
     const unemployed = working.filter((resident) => !activeJobs.has(resident.id)).length;
     const employmentPull = working.length ? 1 - unemployed / working.length : 0;
     const sampleGap = Math.max(0, 240 - residents.length);
+    const representedCityPopulation = input.districts.reduce((sum, district) => sum + district.population, 0);
     const baseArrivals = available > 2 && employmentPull > 0.46 && dayRng.chance(0.68) ? 1 : 0;
     const replacementArrivals = available > 2 && sampleGap > 0 ? Math.min(2, Math.ceil(sampleGap / 55)) : 0;
-    const arrivals = Math.min(3, baseArrivals + replacementArrivals);
+    const metropolitanChurn = representedCityPopulation >= 1_000_000 && available > 2 && residents.length < 300 && input.dayIndex % 360 === 0 ? 1 : 0;
+    const arrivals = Math.min(3, baseArrivals + replacementArrivals + metropolitanChurn);
     for (let index = 0; index < arrivals; index += 1) {
       const district = dayRng.pick(input.districts.slice().sort((left, right) => right.employmentRate - left.employmentRate).slice(0, 2));
       const unit = availableHousing(housing, occupied, 1, district.id);

@@ -19,6 +19,7 @@ import { createOrganizationEcosystem } from "../../simulation/organizations/orga
 import { createGovernmentCrimeState } from "../../simulation/government/governmentSystem";
 import { createHealthCyberwareState } from "../../simulation/health/healthSystem";
 import { createDataSurveillanceState } from "../../simulation/data/dataSystem";
+import { createMetropolitanState } from "../../simulation/spatial/metropolitanSystem";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
 import type {
@@ -137,7 +138,7 @@ export function createWorldSession(seed: string): GameSession {
   const industrialName = rng.pick(INDUSTRIAL_DISTRICTS);
   const corporateName = rng.pick(CORPORATE_DISTRICTS);
 
-  const lower = createDistrict(seed, "lower", lowerName, "BLOCK 07", rng.integer(178_000, 244_000), {
+  const lower = createDistrict(seed, "lower", lowerName, "BLOCK 07", rng.integer(2_750_000, 3_450_000), {
     securityLevel: rng.integer(28, 39),
     costOfLiving: rng.integer(22, 34),
     infrastructure: rng.integer(39, 52),
@@ -147,7 +148,7 @@ export function createWorldSession(seed: string): GameSession {
     governmentInfluence: rng.integer(23, 36),
     employmentRate: rng.integer(52, 66)
   });
-  const industrial = createDistrict(seed, "industrial", industrialName, "RING 12", rng.integer(104_000, 151_000), {
+  const industrial = createDistrict(seed, "industrial", industrialName, "RING 12", rng.integer(1_850_000, 2_450_000), {
     securityLevel: rng.integer(42, 55),
     costOfLiving: rng.integer(34, 47),
     infrastructure: rng.integer(55, 68),
@@ -157,7 +158,7 @@ export function createWorldSession(seed: string): GameSession {
     governmentInfluence: rng.integer(31, 44),
     employmentRate: rng.integer(67, 79)
   });
-  const corporate = createDistrict(seed, "corporate", corporateName, "TIER 03", rng.integer(71_000, 103_000), {
+  const corporate = createDistrict(seed, "corporate", corporateName, "TIER 03", rng.integer(1_150_000, 1_650_000), {
     securityLevel: rng.integer(76, 91),
     costOfLiving: rng.integer(81, 96),
     infrastructure: rng.integer(85, 97),
@@ -307,6 +308,18 @@ export function createWorldSession(seed: string): GameSession {
     government,
     health
   });
+  const metropolitan = createMetropolitanState({
+    timestamp: INITIAL_GAME_TIMESTAMP,
+    seed,
+    activeLocationId: housing.id,
+    districts,
+    locations,
+    representedPopulationByDistrict: population.lifecycle.representedPopulationByDistrict,
+    transportServiceLevel: infrastructure.networks.find((item) => item.kind === "transport")?.averageServiceLevel ?? 100,
+    dataServiceLevel: infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100,
+    recentEventCount: 0,
+    recentObservationCount: data.observations.length
+  });
   const syncedKernel = advanceSimulationKernel(kernel, {
     timestamp: INITIAL_GAME_TIMESTAMP,
     seed,
@@ -343,6 +356,7 @@ export function createWorldSession(seed: string): GameSession {
     government,
     health,
     data,
+    metropolitan,
     events: createInitialEvents({
       seed,
       districtName: lower.name,

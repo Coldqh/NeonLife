@@ -3,7 +3,7 @@ import { getFoodProduct } from "../../data/products/foodCatalog";
 import type { HouseholdStatus } from "../../simulation/population/types";
 import type { GameSession } from "../../world/state/types";
 
-type PopulationTab = "districts" | "lifecycle" | "households" | "housing" | "labor" | "infrastructure" | "supply" | "organizations" | "government" | "health" | "data" | "flow";
+type PopulationTab = "spatial" | "districts" | "lifecycle" | "households" | "housing" | "labor" | "infrastructure" | "supply" | "organizations" | "government" | "health" | "data" | "flow";
 
 function statusRank(status: HouseholdStatus): number {
   if (status === "displaced") return 4;
@@ -92,7 +92,7 @@ function pantryLabel(session: GameSession, householdId: string): string {
 }
 
 export function PopulationWorkspace({ session }: { session: GameSession }) {
-  const [tab, setTab] = useState<PopulationTab>("districts");
+  const [tab, setTab] = useState<PopulationTab>("spatial");
   const state = session.population;
   const labor = state.laborMarket;
   const lifecycle = state.lifecycle;
@@ -142,6 +142,11 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
   const compromisedIdentities = dataState.identities.filter((item) => item.status === "compromised" || item.status === "forged" || item.status === "suspended");
   const recentAccesses = dataState.accessEvents.slice(-14).reverse();
   const recentBreaches = dataState.breaches.slice(-10).reverse();
+  const metropolitan = session.metropolitan;
+  const focusSector = metropolitan.sectors.find((sector) => sector.id === metropolitan.streaming.focusSectorId);
+  const activeSpatialDistrict = focusSector ? metropolitan.districts.find((district) => district.districtId === focusSector.districtId) : undefined;
+  const busiestSectors = metropolitan.sectors.slice().sort((left, right) => right.crowdLoad - left.crowdLoad || right.trafficLoad - left.trafficLoad).slice(0, 12);
+  const largestLocations = metropolitan.locations.slice().sort((left, right) => (right.bounds.widthM * right.bounds.heightM * right.floors) - (left.bounds.widthM * left.bounds.heightM * left.floors)).slice(0, 12);
 
   return (
     <div className="population-workspace">
@@ -153,6 +158,7 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
       </section>
 
       <nav className="population-tabs" aria-label="Population systems">
+        <button type="button" className={tab === "spatial" ? "is-active" : ""} onClick={() => setTab("spatial")}>МАСШТАБ</button>
         <button type="button" className={tab === "districts" ? "is-active" : ""} onClick={() => setTab("districts")}>РАЙОНЫ</button>
         <button type="button" className={tab === "lifecycle" ? "is-active" : ""} onClick={() => setTab("lifecycle")}>ЖИЗНЬ</button>
         <button type="button" className={tab === "households" ? "is-active" : ""} onClick={() => setTab("households")}>СЕМЬИ</button>
@@ -166,6 +172,66 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
         <button type="button" className={tab === "data" ? "is-active" : ""} onClick={() => setTab("data")}>ДАННЫЕ</button>
         <button type="button" className={tab === "flow" ? "is-active" : ""} onClick={() => setTab("flow")}>ПОТОКИ</button>
       </nav>
+
+      {tab === "spatial" ? (
+        <section className="data-workspace metropolitan-workspace">
+          <div className="population-labor__summary">
+            <div><span>CITY FOOTPRINT</span><strong>{metropolitan.config.widthM / 1000} × {metropolitan.config.heightM / 1000} KM</strong><small>{Math.round(metropolitan.config.widthM * metropolitan.config.heightM / 1_000_000).toLocaleString("ru-RU")} km² physical extent</small></div>
+            <div><span>REPRESENTED POPULATION</span><strong>{metropolitan.totals.representedPopulation.toLocaleString("ru-RU")}</strong><small>{state.residents.length} detailed resident records</small></div>
+            <div><span>SECTORS</span><strong>{metropolitan.totals.sectors.toLocaleString("ru-RU")}</strong><small>{metropolitan.streaming.activeSectorIds.length} active · {metropolitan.streaming.warmSectorIds.length} warm</small></div>
+            <div><span>BUILDINGS</span><strong>{metropolitan.totals.estimatedBuildings.toLocaleString("ru-RU")}</strong><small>{Math.round(metropolitan.totals.estimatedFloorAreaM2 / 1_000_000).toLocaleString("ru-RU")}M m² estimated floor area</small></div>
+            <div><span>MEMORY</span><strong>{metropolitan.streaming.estimatedMemoryMb.toFixed(1)} MB</strong><small>budget {metropolitan.config.memoryBudgetMb} MB · peak {metropolitan.streaming.peakEstimatedMemoryMb.toFixed(1)} MB</small></div>
+            <div><span>DETAIL CACHE</span><strong>{metropolitan.streaming.materializedResidentCount} NPC</strong><small>{metropolitan.streaming.materializedInteriorCount} interiors · {metropolitan.streaming.sectorsEvicted} sectors evicted</small></div>
+          </div>
+          <div className="population-labor__columns">
+            <section className="population-labor__list">
+              <header><span>PHYSICAL DISTRICTS</span><strong>REAL METRIC BOUNDS</strong></header>
+              {metropolitan.districts.map((district) => (
+                <article key={district.districtId}>
+                  <div><span>{district.dominantLandUse.toUpperCase()}</span><strong>{districtName(session, district.districtId)}</strong><small>{district.sectorIds.length} km² sectors · center {Math.round(district.center.xM / 1000)},{Math.round(district.center.yM / 1000)} km</small></div>
+                  <div><span>POPULATION</span><strong>{district.representedPopulation.toLocaleString("ru-RU")}</strong><small>{district.densityPerKm2.toLocaleString("ru-RU")} / km²</small></div>
+                  <div><span>VERTICALITY</span><strong>{district.verticality}%</strong><small>transit {district.transitScore}%</small></div>
+                </article>
+              ))}
+            </section>
+            <section className="population-labor__list">
+              <header><span>STREAMING WINDOW</span><strong>{focusSector?.code ?? "NO FOCUS"}</strong></header>
+              <article>
+                <div><span>FOCUS</span><strong>{focusSector ? districtName(session, focusSector.districtId) : "UNKNOWN"}</strong><small>{focusSector?.landUse.toUpperCase() ?? "COLD"} · {focusSector?.representedPopulation.toLocaleString("ru-RU") ?? 0} represented residents</small></div>
+                <div><span>DETAIL</span><strong>{focusSector?.detailLevel.toUpperCase() ?? "COLD"}</strong><small>{activeSpatialDistrict?.densityPerKm2.toLocaleString("ru-RU") ?? 0} / km² district density</small></div>
+                <div><span>LOAD</span><strong>{focusSector?.crowdLoad ?? 0}% / {focusSector?.trafficLoad ?? 0}%</strong><small>crowd / traffic</small></div>
+              </article>
+              <article>
+                <div><span>CACHE POLICY</span><strong>ACTIVE → WARM → COLD</strong><small>{metropolitan.config.activeRadius} km active radius · {metropolitan.config.warmRadius} km warm radius</small></div>
+                <div><span>LIMITS</span><strong>{metropolitan.config.maxMaterializedResidents} NPC</strong><small>{metropolitan.config.maxMaterializedInteriors} detailed interiors</small></div>
+                <div><span>COMPACTION</span><strong>{metropolitan.streaming.compactions}</strong><small>{metropolitan.streaming.residentsDematerialized} NPC · {metropolitan.streaming.interiorsDematerialized} interiors released</small></div>
+              </article>
+            </section>
+          </div>
+          <div className="population-labor__columns">
+            <section className="population-labor__list">
+              <header><span>CITY MOVEMENT LOAD</span><strong>AGGREGATED SECTORS</strong></header>
+              {busiestSectors.map((sector) => (
+                <article key={sector.id}>
+                  <div><span>{sector.code}</span><strong>{districtName(session, sector.districtId)}</strong><small>{sector.landUse.toUpperCase()} · {sector.representedPopulation.toLocaleString("ru-RU")} residents</small></div>
+                  <div><span>CROWD</span><strong>{sector.crowdLoad}%</strong><small>{sector.detailLevel.toUpperCase()}</small></div>
+                  <div><span>TRAFFIC</span><strong>{sector.trafficLoad}%</strong><small>{Math.round(sector.roadLengthM / 1000)} km local roads</small></div>
+                </article>
+              ))}
+            </section>
+            <section className="population-labor__list">
+              <header><span>PLACED LANDMARKS</span><strong>PERSISTENT ADDRESSES</strong></header>
+              {largestLocations.map((placement) => (
+                <article key={placement.locationId}>
+                  <div><span>{placement.addressCode}</span><strong>{locationName(session, placement.locationId)}</strong><small>{placement.footprintKind.toUpperCase()} · sector {metropolitan.sectors.find((sector) => sector.id === placement.sectorId)?.code ?? "UNKNOWN"}</small></div>
+                  <div><span>STRUCTURE</span><strong>{placement.floors} F</strong><small>{placement.basementLevels} basement levels</small></div>
+                  <div><span>CAPACITY</span><strong>{placement.verticalPopulationCapacity.toLocaleString("ru-RU")}</strong><small>{placement.entranceCount} public entrances</small></div>
+                </article>
+              ))}
+            </section>
+          </div>
+        </section>
+      ) : null}
 
       {tab === "districts" ? (
         <section className="population-districts">

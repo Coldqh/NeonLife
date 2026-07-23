@@ -12,6 +12,7 @@ import { advanceOrganizationEcosystem } from "../../simulation/organizations/org
 import { advanceGovernmentCrime } from "../../simulation/government/governmentSystem";
 import { advanceHealthCyberware } from "../../simulation/health/healthSystem";
 import { advanceDataSurveillance } from "../../simulation/data/dataSystem";
+import { advanceMetropolitanState } from "../../simulation/spatial/metropolitanSystem";
 import { canPrepare, consumeFood, discardSpoiledFood, purchaseFood } from "../food/foodSystem";
 import { calculateSleepRecovery, getHousingDaysLeft } from "../housing/housingSystem";
 import { getTravelOptions, isLocationOpen } from "../travel/travelSystem";
@@ -193,6 +194,22 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     government: healthAdvance.government,
     health: healthAdvance.state
   });
+  const metropolitanAdvance = advanceMetropolitanState(session.metropolitan, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    activeLocationId: session.life.currentLocationId,
+    targetLocationId: options.targetLocationId,
+    districts: session.world.districts,
+    locations: session.world.locations,
+    representedPopulationByDistrict: dataAdvance.population.lifecycle.representedPopulationByDistrict,
+    transportServiceLevel: governmentAdvance.infrastructure.networks.find((item) => item.kind === "transport")?.averageServiceLevel ?? 100,
+    dataServiceLevel: governmentAdvance.infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100,
+    recentEventCount: session.events.length,
+    recentObservationCount: dataAdvance.state.observations.length
+  });
+  const compactedDataState = metropolitanAdvance.compactedObservationBudget < dataAdvance.state.observations.length
+    ? { ...dataAdvance.state, observations: dataAdvance.state.observations.slice(-Math.max(250, metropolitanAdvance.compactedObservationBudget)) }
+    : dataAdvance.state;
   const infrastructurePulse = applyInfrastructureToDistrictPulse(pulse.state, governmentAdvance.infrastructure, session.world.activeDistrictId);
   const infrastructureSyncedPeople = synchronizeActivePeopleFromPopulation(populationSyncedPeople, dataAdvance.population);
   let peopleState = applyEconomyPressureToPeople(infrastructureSyncedPeople, healthAdvance.economy, economyAdvance.notices);
@@ -347,7 +364,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     organizationEcosystem: organizationAdvance.state,
     government: dataAdvance.government,
     health: healthAdvance.state,
-    data: dataAdvance.state,
+    data: compactedDataState,
     food: productionAdvance.food,
     drafts: kernelDrafts
   });
@@ -377,7 +394,8 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     organizationEcosystem: organizationAdvance.state,
     government: dataAdvance.government,
     health: healthAdvance.state,
-    data: dataAdvance.state,
+    data: compactedDataState,
+    metropolitan: metropolitanAdvance.state,
     district: infrastructurePulse,
     eventQueue: queued.queue,
     currentActivity: pressureAdvance.evicted

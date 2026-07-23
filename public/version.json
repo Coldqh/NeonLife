@@ -1,7 +1,7 @@
 {
-  "version": "0.21.0",
-  "releasedAt": "2026-07-23T10:20:00Z",
+  "version": "0.22.0",
+  "releasedAt": "2026-07-23T11:40:00Z",
   "forceUpdate": true,
-  "title": "DATA & SURVEILLANCE",
-  "summary": "Residents now have bounded digital identities, credit profiles, access-controlled records, physical surveillance nodes, breaches and forged identities."
+  "title": "METROPOLITAN SCALE FOUNDATION",
+  "summary": "The city now has a 42×36 km metric footprint, 1,512 streamed sectors, persistent addresses, arterial and transit graphs, multi-million represented population and bounded active-memory detail."
 }
