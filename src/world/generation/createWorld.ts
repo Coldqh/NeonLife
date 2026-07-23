@@ -252,7 +252,8 @@ export function createWorldSession(seed: string): GameSession {
     population,
     economy,
     infrastructure,
-    production
+    production,
+    food: foodState
   });
   const organizationEcosystem = createOrganizationEcosystem({
     timestamp: INITIAL_GAME_TIMESTAMP,
@@ -305,7 +306,8 @@ export function createWorldSession(seed: string): GameSession {
     production,
     organizationEcosystem,
     government,
-    health
+    health,
+    food: foodState
   });
 
   return {

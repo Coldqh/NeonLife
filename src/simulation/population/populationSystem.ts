@@ -298,6 +298,8 @@ export function createPopulationState(
     }
   }
 
+  households = households.map((household) => ({ ...household, foodUnits: pantryUnits(household.pantry) }));
+
   const residentByActivePerson = new Map<string, BackgroundResident>();
   for (const person of people) {
     const existing = residents.find((resident) => !resident.activePersonId && resident.age >= Math.max(18, person.age - 6) && resident.age <= person.age + 6);
@@ -761,7 +763,7 @@ export function advancePopulation(
         transactions.push({
           idempotencyKey: `${seed}:day:${dayIndex}:food-unit:${household.id}:${purchase.locationId}:${purchase.productId}`,
           timestamp: dayIndex * DAY_MS,
-          debitEntityId: kernelSystemEntityId(seed, "wholesale"),
+          debitEntityId: sellerId,
           creditEntityId: household.id,
           resource: "food-units",
           amount: purchase.units,
@@ -924,7 +926,7 @@ export function advancePopulation(
         ? 1
         : 0;
       const healthScore = clamp(resident.healthScore - foodPenalty - housingPenalty - pollutionPenalty + recovery);
-      return { ...resident, homeLocationId: household?.homeLocationId ?? null, healthScore, health: healthFor(healthScore), savings: Math.max(0, resident.savings + dayRng.integer(-3, 2)), transportAccess: resident.transportAccess ?? 100 };
+      return { ...resident, homeLocationId: household?.homeLocationId ?? null, healthScore, health: healthFor(healthScore), savings: Math.max(0, resident.savings), transportAccess: resident.transportAccess ?? 100 };
     });
 
     housing = housing.map((unit) => {

@@ -658,7 +658,7 @@ export function advanceGovernmentCrime(state: GovernmentCrimeState, input: Gover
             const stolen = Math.min(shipment.units - 1, Math.max(1, Math.round(shipment.units * (0.08 + pressure / 500))));
             production.shipments = production.shipments.map((item) => item.id === shipment.id ? { ...item, units: Math.max(1, item.units - stolen), condition: clamp(item.condition - stolen * 2) } : item);
             contrabandUnits += stolen;
-            revenue += stolen * Math.max(1, shipment.unitPrice);
+            revenue = stolen * Math.max(1, shipment.unitPrice);
             addTotals(dayTotals, { cargoStolen: stolen });
             pushTransaction(transactions, {
               idempotencyKey: `${input.seed}:cargo-theft:${dayIndex}:${operation.id}:${shipment.id}`,
@@ -687,7 +687,7 @@ export function advanceGovernmentCrime(state: GovernmentCrimeState, input: Gover
         } else if (operation.kind === "stim-market" || operation.kind === "counterfeit-cyberware") {
           const sold = Math.min(contrabandUnits, Math.max(0, Math.round(demand / 9)));
           contrabandUnits -= sold;
-          revenue += sold * (operation.kind === "counterfeit-cyberware" ? 24 : 9);
+          revenue = sold * (operation.kind === "counterfeit-cyberware" ? 24 : 9);
           if (sold > 0) pushTransaction(transactions, {
             idempotencyKey: `${input.seed}:contraband-sale:${dayIndex}:${operation.id}`,
             timestamp,

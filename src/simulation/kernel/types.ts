@@ -42,6 +42,7 @@ export type KernelTransactionReason =
   | "wage"
   | "rent"
   | "food-sale"
+  | "retail-service"
   | "medical-service"
   | "transport-service"
   | "discretionary-service"
@@ -80,6 +81,9 @@ export type KernelTransactionReason =
   | "seizure"
   | "contraband-sale"
   | "cargo-theft"
+  | "household-transfer"
+  | "migration-settlement"
+  | "account-opening"
   | "domain-reconciliation";
 
 export interface KernelResourceBalance {

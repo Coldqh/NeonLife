@@ -483,7 +483,8 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     population,
     economy,
     infrastructure,
-    production
+    production,
+    food: foodState
   });
   const organizationEcosystem = normalizeOrganizationEcosystem(payload.organizationEcosystem, {
     timestamp,
@@ -536,7 +537,8 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     production,
     organizationEcosystem,
     government,
-    health
+    health,
+    food: foodState
   });
 
   const { situations: _discardedSituations, ...payloadWithoutSituations } = payload;

@@ -1,5 +1,6 @@
 import { createStableEntityId } from "../../core/ids/entityId";
 import type { PlayerState } from "../../gameplay/player/demoPlayer";
+import type { FoodState } from "../../gameplay/food/foodSystem";
 import type { BusinessState, LocalEconomyState, SupplyClass } from "../../gameplay/economy/types";
 import type { BackgroundResident, EmploymentRecord, HouseholdState, HousingMarketState, PopulationState } from "../population/types";
 import type { CityState, DistrictState, LocationState, OrganizationState } from "../../world/state/types";
@@ -47,6 +48,7 @@ export interface KernelSyncInput {
   organizationEcosystem?: OrganizationEcosystemState;
   government?: GovernmentCrimeState;
   health?: HealthCyberwareState;
+  food: FoodState;
   drafts?: KernelTransactionDraft[];
 }
 
@@ -148,40 +150,38 @@ function snapshotAccounts(input: KernelSyncInput): KernelAccountState[] {
   for (const district of input.districts) accounts.push(account(district.id, "district", [], input.timestamp));
   for (const location of input.locations) accounts.push(account(location.id, "location", [], input.timestamp));
   for (const business of input.economy.businesses) {
-    accounts.push(account(business.id, "business", [
-      balance("credits", business.cash),
-      balance(resourceForSupply(business.supplyClass), business.stock),
-      balance("labor-hours", Math.max(0, business.staffing) * 8)
-    ], input.timestamp));
+    const balances = [balance("credits", business.cash)];
+    if (business.supplyClass === "food") {
+      const shopStock = input.food.shopStocks[business.locationId];
+      const physicalFoodUnits = shopStock ? Object.values(shopStock).reduce((sum, units) => sum + units, 0) : 0;
+      balances.push(balance("food-units", physicalFoodUnits));
+    }
+    accounts.push(account(business.id, "business", balances, input.timestamp));
   }
   for (const facility of input.production.facilities) {
     accounts.push(account(facility.id, "production-facility", [
       balance("credits", facility.cash),
-      ...facility.inventory.map((item) => balance(resourceForProduction(item.resource), item.amount)),
-      balance("labor-hours", Math.max(0, facility.staffing) * 8)
+      ...facility.inventory.map((item) => balance(resourceForProduction(item.resource), item.amount))
     ], input.timestamp));
   }
   for (const facility of input.health?.facilities ?? []) {
     accounts.push(account(facility.id, "health-facility", [
-      balance("credits", facility.cash),
       balance("medical-units", facility.medicalStock),
-      balance("parts-units", facility.implantParts + facility.maintenanceKits),
-      balance("labor-hours", Math.max(0, facility.staffing) * 8)
+      balance("parts-units", facility.implantParts + facility.maintenanceKits)
     ], input.timestamp));
   }
   for (const household of input.population.households) {
     accounts.push(account(household.id, "household", [
       balance("credits", household.balance),
-      balance("food-units", household.foodUnits)
+      balance("food-units", household.pantry.reduce((sum, item) => sum + item.units, 0))
     ], input.timestamp));
   }
   for (const resident of input.population.residents) {
-    accounts.push(account(resident.id, "resident", [], input.timestamp));
+    accounts.push(account(resident.id, "resident", [balance("credits", resident.savings)], input.timestamp));
   }
   for (const housing of input.population.housing) {
     accounts.push(account(housing.id, "location", [
-      balance("credits", housing.maintenanceFund),
-      balance("housing-beds", Math.max(0, housing.capacity - housing.occupied))
+      balance("credits", housing.maintenanceFund)
     ], input.timestamp));
   }
   for (const kind of ["clearing", "wholesale", "maintenance", "credit-bureau", "housing-authority", "city-services", "consumption", "power-grid", "water-grid", "data-grid", "transport-grid", "waste-grid", "logistics-clearing", "external-trade", "production-consumption", "production-output", "unregistered-market", "illegal-consumption", "corrupt-officials"] as const) {
@@ -648,6 +648,12 @@ function transactionFromDraft(draft: KernelTransactionDraft): KernelTransactionS
   };
 }
 
+function sanitizeAccountToSnapshot(current: KernelAccountState, target: KernelAccountState, timestamp: number): KernelAccountState {
+  const trackedResources = new Set(target.balances.map((entry) => entry.resource));
+  const balances = current.balances.filter((entry) => trackedResources.has(entry.resource));
+  return { ...current, entityKind: target.entityKind, balances, updatedAt: timestamp };
+}
+
 function reconcileAccounts(
   accounts: KernelAccountState[],
   snapshot: KernelAccountState[],
@@ -663,17 +669,23 @@ function reconcileAccounts(
   for (const target of snapshot) {
     if (protectedSystems.has(target.entityId)) continue;
     let current = nextAccounts.find((item) => item.entityId === target.entityId);
+    const accountWasMissing = !current;
     if (!current) {
       current = account(target.entityId, target.entityKind, [], input.timestamp);
       nextAccounts.push(current);
+    } else {
+      const sanitized = sanitizeAccountToSnapshot(current, target, input.timestamp);
+      nextAccounts = nextAccounts.map((item) => item.entityId === target.entityId ? sanitized : item);
+      current = sanitized;
     }
     const desiredBalances = new Map(target.balances.map((entry) => [entry.resource, entry.amount]));
     const resources = new Set([...target.balances.map((entry) => entry.resource), ...current.balances.map((entry) => entry.resource)]);
     for (const resource of resources) {
       const desiredAmount = desiredBalances.get(resource) ?? 0;
       const actual = getBalance(current, resource);
+      const resourceWasUntracked = !current.balances.some((entry) => entry.resource === resource);
       const difference = Math.round((desiredAmount - actual) * 100) / 100;
-      if (Math.abs(difference) < 0.01) continue;
+      if (Math.abs(difference) < 0.02) continue;
       const key = `${input.seed}:reconcile:${input.timestamp}:${target.entityId}:${resource}:${difference}`;
       const transaction = transactionFromDraft({
         idempotencyKey: key,
@@ -682,8 +694,10 @@ function reconcileAccounts(
         creditEntityId: difference > 0 ? target.entityId : clearing,
         resource,
         amount: Math.abs(difference),
-        reason: "domain-reconciliation",
-        description: `Reconciled ${target.entityKind} state with simulation ledger.`
+        reason: accountWasMissing || resourceWasUntracked ? "account-opening" : "domain-reconciliation",
+        description: accountWasMissing || resourceWasUntracked
+          ? `Opened ${target.entityKind} account resource from authoritative domain state.`
+          : `Reconciled ${target.entityKind} state with simulation ledger.`
       });
       if (existingIds.has(transaction.id)) continue;
       existingIds.add(transaction.id);

@@ -4,6 +4,7 @@ import type { BusinessState } from "../../gameplay/economy/types";
 import type { OrganizationState } from "../../world/state/types";
 import type { BackgroundResident, HouseholdState, EmploymentRecord } from "../population/types";
 import type { ProductionFacilityState } from "../production/types";
+import { kernelSystemEntityId } from "../kernel/simulationKernel";
 import type {
   CareLevel,
   ClinicalConditionState,
@@ -441,12 +442,11 @@ function procureImplantStock(
     nextSource = setInventory(nextSource, resource, available - affordable);
     sourceCash += price;
     nextOrganizations = updateOrganizationBudget(nextOrganizations, facility.ownerOrganizationId, -price);
-    nextOrganizations = updateOrganizationBudget(nextOrganizations, source.ownerEntityId, price);
     transactions.push({
       idempotencyKey: `${seed}:health-procurement:${dayIndex}:${facility.id}:${source.id}:${resource}:${affordable}`,
       timestamp: dayIndex * DAY_MS,
       debitEntityId: facility.ownerOrganizationId,
-      creditEntityId: source.ownerEntityId,
+      creditEntityId: source.id,
       resource: "credits",
       amount: price,
       reason: "medical-procurement",
@@ -525,6 +525,7 @@ function settleMedicalBill(
       if (policy.kind === "public-basic") {
         insurerPaid = Math.min(claim, nextGovernment.budget.treasury);
         nextGovernment = { ...nextGovernment, budget: { ...nextGovernment.budget, treasury: nextGovernment.budget.treasury - insurerPaid, medicalGrants: nextGovernment.budget.medicalGrants + insurerPaid, spendingToday: nextGovernment.budget.spendingToday + insurerPaid } };
+        nextOrganizations = updateOrganizationBudget(nextOrganizations, nextGovernment.budget.authorityOrganizationId, -insurerPaid);
       } else {
         const payerId = policy.sponsorOrganizationId ?? policy.insurerEntityId;
         const payer = nextOrganizations.find((item) => item.id === payerId);
@@ -555,7 +556,6 @@ function settleMedicalBill(
     if (existing) nextDebts = debts.map((item) => item.id === existing.id ? { ...item, principal: round(item.principal + debtCreated), status: "current" } : item);
     else nextDebts = [...debts, { id: createStableEntityId("medical-debt", `${seed}:${household.id}:${provider.ownerOrganizationId}:${dayIndex}`), householdId: household.id, providerEntityId: provider.ownerOrganizationId, principal: debtCreated, weeklyInterestRate: provider.licensed ? 0.003 : 0.012, status: "current", createdDay: dayIndex, lastPaymentDay: dayIndex }];
     nextHousehold = { ...nextHousehold, debt: nextHousehold.debt + debtCreated };
-    transactions.push({ idempotencyKey: `${seed}:medical-debt:${dayIndex}:${household.id}:${provider.id}:${debtCreated}`, timestamp: dayIndex * DAY_MS, debitEntityId: household.id, creditEntityId: provider.ownerOrganizationId, resource: "credits", amount: debtCreated, reason: "medical-debt", description: `Unpaid clinical balance converted to medical debt.` });
   }
   return { household: nextHousehold, policy: nextPolicy, organizations: nextOrganizations, government: nextGovernment, debts: nextDebts, insurerPaid, patientPaid, debtCreated };
 }
@@ -611,6 +611,16 @@ function processCases(
       const needsBed = conditionState.careLevel === "inpatient" || conditionState.careLevel === "surgery";
       if (needsBed && beds >= facility.bedCapacity) continue;
       stock -= supply;
+      transactions.push({
+        idempotencyKey: `${seed}:clinical-supplies:${dayIndex}:${caseState.id}`,
+        timestamp: dayIndex * DAY_MS,
+        debitEntityId: facility.id,
+        creditEntityId: kernelSystemEntityId(seed, "production-consumption"),
+        resource: "medical-units",
+        amount: supply,
+        reason: "inventory-transfer",
+        description: `Clinical supplies consumed for ${conditionState.kind}.`
+      });
       if (needsBed) beds += 1;
       treated += 1;
       treatedToday += 1;
@@ -630,7 +640,7 @@ function processCases(
     const waitingCount = nextCases.filter((item) => item.facilityId === facility.id && item.status === "waiting").length;
     nextFacilities = nextFacilities.map((item) => item.id === facility.id ? { ...item, medicalStock: stock, queueLength: waitingCount, occupiedBeds: beds, cash: item.cash + nextCases.filter((entry) => entry.facilityId === facility.id && entry.admittedDay === dayIndex).reduce((sum, entry) => sum + entry.insurerPaid + entry.patientPaid, 0) } : item);
     const business = nextEconomy.businesses.find((item) => item.locationId === facility.locationId);
-    if (business) nextEconomy = { ...nextEconomy, businesses: nextEconomy.businesses.map((item) => item.id === business.id ? { ...item, stock: stock, cash: Math.max(0, item.cash + treated * 8), demand: clamp(item.demand + waitingCount / 4), shortage: stock < 32 } : item) };
+    if (business) nextEconomy = { ...nextEconomy, businesses: nextEconomy.businesses.map((item) => item.id === business.id ? { ...item, stock, demand: clamp(item.demand + waitingCount / 4), shortage: stock < 32 } : item) };
   }
   return { facilities: nextFacilities, cases: nextCases, conditions: nextConditions, households: nextHouseholds, policies: nextPolicies, organizations: nextOrganizations, government: nextGovernment, economy: nextEconomy, debts: nextDebts, treatedToday };
 }
@@ -686,11 +696,8 @@ function weeklyPremiums(
     const policy = dayIndex % 365 === 0 ? { ...sourcePolicy, usedThisYear: 0, status: sourcePolicy.kind === "uninsured" ? "active" as const : sourcePolicy.status } : sourcePolicy;
     if (policy.kind === "uninsured" || policy.premiumPerWeek <= 0) return { ...policy, lastPremiumDay: dayIndex };
     if (policy.kind === "public-basic") {
-      const paid = Math.min(policy.premiumPerWeek, nextGovernment.budget.treasury);
-      nextGovernment = { ...nextGovernment, budget: { ...nextGovernment.budget, treasury: nextGovernment.budget.treasury - paid, medicalGrants: nextGovernment.budget.medicalGrants + paid, spendingToday: nextGovernment.budget.spendingToday + paid } };
-      nextOrganizations = updateOrganizationBudget(nextOrganizations, policy.insurerEntityId, paid);
-      transactions.push({ idempotencyKey: `${seed}:public-premium:${dayIndex}:${policy.id}`, timestamp: dayIndex * DAY_MS, debitEntityId: nextGovernment.budget.authorityOrganizationId, creditEntityId: policy.insurerEntityId, resource: "credits", amount: paid, reason: "insurance-premium", contractId: policy.id, description: `Public medical coverage contribution.` });
-      return { ...policy, status: paid >= policy.premiumPerWeek ? "active" as const : "lapsed" as const, lastPremiumDay: dayIndex };
+      const funded = nextGovernment.budget.treasury >= policy.premiumPerWeek;
+      return { ...policy, status: funded ? "active" as const : "lapsed" as const, lastPremiumDay: dayIndex };
     }
     if (policy.kind === "employer" && policy.sponsorOrganizationId) {
       const sponsor = nextOrganizations.find((item) => item.id === policy.sponsorOrganizationId);
@@ -747,7 +754,7 @@ function serviceCyberware(
             idempotencyKey: `${seed}:cyberware-repair:${dayIndex}:${installation.id}`,
             timestamp: dayIndex * DAY_MS,
             debitEntityId: provider.id,
-            creditEntityId: installation.residentId,
+            creditEntityId: kernelSystemEntityId(seed, "production-consumption"),
             resource: "parts-units",
             amount: 2,
             reason: "cyberware-maintenance",
@@ -775,7 +782,7 @@ function serviceCyberware(
         idempotencyKey: `${seed}:cyberware-maintenance:${dayIndex}:${installation.id}`,
         timestamp: dayIndex * DAY_MS,
         debitEntityId: provider.id,
-        creditEntityId: installation.residentId,
+        creditEntityId: kernelSystemEntityId(seed, "production-consumption"),
         resource: "parts-units",
         amount: 1,
         reason: "cyberware-maintenance",
@@ -892,7 +899,7 @@ function installCyberware(
     };
     nextInstallations = [...nextInstallations, installation];
     addTotals(totals, { cyberwareInstalled: 1, medicalUnitsConsumed: model.installationMedicalUnits, partsUnitsConsumed: model.installationPartsUnits, undergroundProcedures: facility.licensed ? 0 : 1 });
-    transactions.push({ idempotencyKey: `${seed}:cyberware-parts:${dayIndex}:${installation.id}`, timestamp: dayIndex * DAY_MS, debitEntityId: facility.id, creditEntityId: resident.id, resource: "parts-units", amount: model.installationPartsUnits, reason: "cyberware-installation", assetId: installation.id, description: `${model.name} components installed.` }, { idempotencyKey: `${seed}:cyberware-medical:${dayIndex}:${installation.id}`, timestamp: dayIndex * DAY_MS, debitEntityId: facility.id, creditEntityId: resident.id, resource: "medical-units", amount: model.installationMedicalUnits, reason: "cyberware-installation", assetId: installation.id, description: `Sterile and surgical supplies consumed for ${model.name}.` });
+    transactions.push({ idempotencyKey: `${seed}:cyberware-parts:${dayIndex}:${installation.id}`, timestamp: dayIndex * DAY_MS, debitEntityId: facility.id, creditEntityId: kernelSystemEntityId(seed, "production-consumption"), resource: "parts-units", amount: model.installationPartsUnits, reason: "cyberware-installation", assetId: installation.id, description: `${model.name} components installed.` }, { idempotencyKey: `${seed}:cyberware-medical:${dayIndex}:${installation.id}`, timestamp: dayIndex * DAY_MS, debitEntityId: facility.id, creditEntityId: kernelSystemEntityId(seed, "production-consumption"), resource: "medical-units", amount: model.installationMedicalUnits, reason: "cyberware-installation", assetId: installation.id, description: `Sterile and surgical supplies consumed for ${model.name}.` });
     if (rng.chance(model.rejectionRisk * (facility.licensed ? 1 : 2.2))) nextConditions = [...nextConditions, condition(seed, resident.id, dayIndex, "implant-rejection", rng.integer(34, 76), "cyberware", installation.id)];
     installedThisWeek += 1;
   }

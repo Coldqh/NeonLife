@@ -2,6 +2,7 @@ import { createStableEntityId } from "../../core/ids/entityId";
 import { SeededRandom } from "../../core/random/seededRandom";
 import { createResidentSkills } from "../labor/laborMarket";
 import type { ResidentSkillProfile, SkillDomain } from "../labor/types";
+import { kernelSystemEntityId } from "../kernel/simulationKernel";
 import type { KernelTransactionDraft } from "../kernel/types";
 import type {
   BackgroundResident,
@@ -289,6 +290,18 @@ function availableHousing(housing: HousingMarketState[], occupied: Map<string, n
     ?? null;
 }
 
+function pantryUnits(pantry: HouseholdState["pantry"]): number {
+  return pantry.reduce((sum, item) => sum + Math.max(0, item.units), 0);
+}
+
+function mergePantries(...pantries: HouseholdState["pantry"][]): HouseholdState["pantry"] {
+  const totals = new Map<string, number>();
+  for (const pantry of pantries) {
+    for (const item of pantry) totals.set(item.productId, (totals.get(item.productId) ?? 0) + Math.max(0, item.units));
+  }
+  return [...totals.entries()].filter(([, units]) => units > 0).map(([productId, units]) => ({ productId, units }));
+}
+
 function removeEmptyHouseholds(households: HouseholdState[]): HouseholdState[] {
   return households.filter((household) => household.memberIds.length > 0);
 }
@@ -490,11 +503,38 @@ export function advancePopulationLifecycleDay(input: LifecycleAdvanceInput): Lif
       if (unit) {
         const sourceA = households.find((item) => item.id === first.householdId);
         const sourceB = households.find((item) => item.id === second.householdId);
-        const contributionA = sourceA ? Math.min(450, Math.round(sourceA.balance * 0.28)) : 0;
-        const contributionB = sourceB ? Math.min(450, Math.round(sourceB.balance * 0.28)) : 0;
-        if (sourceA) { sourceA.balance -= contributionA; sourceA.memberIds = sourceA.memberIds.filter((id) => id !== first.id); }
-        if (sourceB) { sourceB.balance -= contributionB; sourceB.memberIds = sourceB.memberIds.filter((id) => id !== second.id); }
         const householdId = createStableEntityId("household", `${input.seed}:partnership:${input.dayIndex}:${first.id}:${second.id}`);
+        let contributionA = 0;
+        let contributionB = 0;
+        let transferredPantryA: HouseholdState["pantry"] = [];
+        let transferredPantryB: HouseholdState["pantry"] = [];
+        if (sourceA) {
+          sourceA.memberIds = sourceA.memberIds.filter((id) => id !== first.id);
+          contributionA = sourceA.memberIds.length === 0 ? sourceA.balance : Math.min(450, Math.round(sourceA.balance * 0.28));
+          sourceA.balance = Math.max(0, sourceA.balance - contributionA);
+          if (sourceA.memberIds.length === 0) {
+            transferredPantryA = sourceA.pantry.map((item) => ({ ...item }));
+            sourceA.pantry = [];
+            sourceA.foodUnits = 0;
+          }
+        }
+        if (sourceB) {
+          sourceB.memberIds = sourceB.memberIds.filter((id) => id !== second.id);
+          contributionB = sourceB.memberIds.length === 0 ? sourceB.balance : Math.min(450, Math.round(sourceB.balance * 0.28));
+          sourceB.balance = Math.max(0, sourceB.balance - contributionB);
+          if (sourceB.memberIds.length === 0) {
+            transferredPantryB = sourceB.pantry.map((item) => ({ ...item }));
+            sourceB.pantry = [];
+            sourceB.foodUnits = 0;
+          }
+        }
+        const combinedPantry = mergePantries(transferredPantryA, transferredPantryB);
+        if (sourceA && contributionA > 0) transactions.push({ idempotencyKey: `${input.seed}:household-transfer:${input.dayIndex}:${sourceA.id}:${householdId}:credits`, timestamp: input.dayIndex * DAY_MS, debitEntityId: sourceA.id, creditEntityId: householdId, resource: "credits", amount: contributionA, reason: "household-transfer", description: `Household assets transferred during partnership formation.` });
+        if (sourceB && contributionB > 0) transactions.push({ idempotencyKey: `${input.seed}:household-transfer:${input.dayIndex}:${sourceB.id}:${householdId}:credits`, timestamp: input.dayIndex * DAY_MS, debitEntityId: sourceB.id, creditEntityId: householdId, resource: "credits", amount: contributionB, reason: "household-transfer", description: `Household assets transferred during partnership formation.` });
+        const foodA = pantryUnits(transferredPantryA);
+        const foodB = pantryUnits(transferredPantryB);
+        if (sourceA && foodA > 0) transactions.push({ idempotencyKey: `${input.seed}:household-transfer:${input.dayIndex}:${sourceA.id}:${householdId}:food`, timestamp: input.dayIndex * DAY_MS, debitEntityId: sourceA.id, creditEntityId: householdId, resource: "food-units", amount: foodA, reason: "household-transfer", description: `Pantry transferred during partnership formation.` });
+        if (sourceB && foodB > 0) transactions.push({ idempotencyKey: `${input.seed}:household-transfer:${input.dayIndex}:${sourceB.id}:${householdId}:food`, timestamp: input.dayIndex * DAY_MS, debitEntityId: sourceB.id, creditEntityId: householdId, resource: "food-units", amount: foodB, reason: "household-transfer", description: `Pantry transferred during partnership formation.` });
         households.push({
           id: householdId,
           districtId: unit.districtId,
@@ -503,8 +543,8 @@ export function advancePopulationLifecycleDay(input: LifecycleAdvanceInput): Lif
           memberIds: [first.id, second.id],
           balance: contributionA + contributionB,
           debt: 0,
-          foodUnits: 0,
-          pantry: [],
+          foodUnits: pantryUnits(combinedPantry),
+          pantry: combinedPantry,
           rentPerWeek: Math.round(unit.baseRentPerBedWeek * 2),
           dailyIncome: 0,
           dailyExpenses: 0,
@@ -541,6 +581,16 @@ export function advancePopulationLifecycleDay(input: LifecycleAdvanceInput): Lif
         source.balance -= contribution;
         source.memberIds = source.memberIds.filter((id) => id !== independent.id);
         const householdId = createStableEntityId("household", `${input.seed}:independence:${input.dayIndex}:${independent.id}`);
+        if (contribution > 0) transactions.push({
+          idempotencyKey: `${input.seed}:household-transfer:${input.dayIndex}:${source.id}:${householdId}:credits`,
+          timestamp: input.dayIndex * DAY_MS,
+          debitEntityId: source.id,
+          creditEntityId: householdId,
+          resource: "credits",
+          amount: contribution,
+          reason: "household-transfer",
+          description: `Starter funds transferred to an independent household.`
+        });
         households.push({
           id: householdId,
           districtId: unit.districtId,
@@ -580,8 +630,19 @@ export function advancePopulationLifecycleDay(input: LifecycleAdvanceInput): Lif
       if (partner && unit) {
         separating.memberIds = separating.memberIds.filter((id) => id !== partner.id);
         const householdId = createStableEntityId("household", `${input.seed}:separation:${input.dayIndex}:${partner.id}`);
-        households.push({ ...separating, id: householdId, districtId: unit.districtId, homeLocationId: unit.locationId, kind: "single", memberIds: [partner.id], balance: Math.round(separating.balance * 0.35), debt: Math.round(separating.debt * 0.35), pantry: [], foodUnits: 0, rentPerWeek: unit.baseRentPerBedWeek, status: "strained", foundedDay: input.dayIndex, originHouseholdIds: [separating.id] });
-        separating.balance = Math.max(0, separating.balance - households[households.length - 1].balance);
+        const transferredBalance = Math.round(separating.balance * 0.35);
+        households.push({ ...separating, id: householdId, districtId: unit.districtId, homeLocationId: unit.locationId, kind: "single", memberIds: [partner.id], balance: transferredBalance, debt: Math.round(separating.debt * 0.35), pantry: [], foodUnits: 0, rentPerWeek: unit.baseRentPerBedWeek, status: "strained", foundedDay: input.dayIndex, originHouseholdIds: [separating.id] });
+        separating.balance = Math.max(0, separating.balance - transferredBalance);
+        if (transferredBalance > 0) transactions.push({
+          idempotencyKey: `${input.seed}:household-transfer:${input.dayIndex}:${separating.id}:${householdId}:credits`,
+          timestamp: input.dayIndex * DAY_MS,
+          debitEntityId: separating.id,
+          creditEntityId: householdId,
+          resource: "credits",
+          amount: transferredBalance,
+          reason: "household-transfer",
+          description: `Household balance divided during separation.`
+        });
         separating.debt = Math.max(0, separating.debt - households[households.length - 1].debt);
         const formerPartnerId = partner.partnerId;
         residents = residents.map((resident) => resident.id === partner.id
@@ -671,7 +732,55 @@ export function advancePopulationLifecycleDay(input: LifecycleAdvanceInput): Lif
     archive.push(archivedResident(resident, "deceased", input.dayIndex, cause));
     if (household) {
       household.memberIds = household.memberIds.filter((id) => id !== resident.id);
-      household.balance += Math.max(0, resident.savings);
+      const inheritance = Math.max(0, resident.savings);
+      if (household.memberIds.length > 0) {
+        household.balance += inheritance;
+        if (inheritance > 0) transactions.push({
+          idempotencyKey: `${input.seed}:inheritance:${input.dayIndex}:${resident.id}:${household.id}`,
+          timestamp: input.dayIndex * DAY_MS,
+          debitEntityId: resident.id,
+          creditEntityId: household.id,
+          resource: "credits",
+          amount: inheritance,
+          reason: "household-transfer",
+          description: `Personal savings transferred to the surviving household.`
+        });
+      } else {
+        if (inheritance > 0) transactions.push({
+          idempotencyKey: `${input.seed}:estate-resident:${input.dayIndex}:${resident.id}`,
+          timestamp: input.dayIndex * DAY_MS,
+          debitEntityId: resident.id,
+          creditEntityId: kernelSystemEntityId(input.seed, "credit-bureau"),
+          resource: "credits",
+          amount: inheritance,
+          reason: "household-transfer",
+          description: `Unclaimed personal estate entered civic settlement.`
+        });
+        if (household.balance > 0) transactions.push({
+          idempotencyKey: `${input.seed}:estate-household:${input.dayIndex}:${household.id}:credits`,
+          timestamp: input.dayIndex * DAY_MS,
+          debitEntityId: household.id,
+          creditEntityId: kernelSystemEntityId(input.seed, "credit-bureau"),
+          resource: "credits",
+          amount: household.balance,
+          reason: "household-transfer",
+          description: `Unclaimed household balance entered civic settlement.`
+        });
+        const remainingFood = pantryUnits(household.pantry);
+        if (remainingFood > 0) transactions.push({
+          idempotencyKey: `${input.seed}:estate-household:${input.dayIndex}:${household.id}:food`,
+          timestamp: input.dayIndex * DAY_MS,
+          debitEntityId: household.id,
+          creditEntityId: kernelSystemEntityId(input.seed, "consumption"),
+          resource: "food-units",
+          amount: remainingFood,
+          reason: "household-transfer",
+          description: `Perishable household stock cleared after the final resident died.`
+        });
+        household.balance = 0;
+        household.pantry = [];
+        household.foodUnits = 0;
+      }
     }
     if (resident.partnerId) residents = residents.map((item) => item.id === resident.partnerId ? { ...item, partnerId: null } : item);
     employments = employments.map((employment) => employment.residentId === resident.id && employment.status !== "unemployed"
@@ -696,7 +805,40 @@ export function advancePopulationLifecycleDay(input: LifecycleAdvanceInput): Lif
     const leavingHousehold = migrationCandidates.length ? dayRng.pick(migrationCandidates) : null;
     if (leavingHousehold && dayRng.chance(0.2)) {
       const leaving = residents.filter((resident) => resident.householdId === leavingHousehold.id);
-      for (const resident of leaving) archive.push(archivedResident(resident, "emigrated", input.dayIndex, "economic displacement", "EXTERNAL INDUSTRIAL REGION"));
+      for (const resident of leaving) {
+        archive.push(archivedResident(resident, "emigrated", input.dayIndex, "economic displacement", "EXTERNAL INDUSTRIAL REGION"));
+        if (resident.savings > 0) transactions.push({
+          idempotencyKey: `${input.seed}:migration-out:${input.dayIndex}:${resident.id}:credits`,
+          timestamp: input.dayIndex * DAY_MS,
+          debitEntityId: resident.id,
+          creditEntityId: kernelSystemEntityId(input.seed, "external-trade"),
+          resource: "credits",
+          amount: resident.savings,
+          reason: "migration-settlement",
+          description: `Personal savings left the city with an emigrating resident.`
+        });
+      }
+      if (leavingHousehold.balance > 0) transactions.push({
+        idempotencyKey: `${input.seed}:migration-out:${input.dayIndex}:${leavingHousehold.id}:credits`,
+        timestamp: input.dayIndex * DAY_MS,
+        debitEntityId: leavingHousehold.id,
+        creditEntityId: kernelSystemEntityId(input.seed, "external-trade"),
+        resource: "credits",
+        amount: leavingHousehold.balance,
+        reason: "migration-settlement",
+        description: `Household funds left the city during emigration.`
+      });
+      const leavingFood = pantryUnits(leavingHousehold.pantry);
+      if (leavingFood > 0) transactions.push({
+        idempotencyKey: `${input.seed}:migration-out:${input.dayIndex}:${leavingHousehold.id}:food`,
+        timestamp: input.dayIndex * DAY_MS,
+        debitEntityId: leavingHousehold.id,
+        creditEntityId: kernelSystemEntityId(input.seed, "external-trade"),
+        resource: "food-units",
+        amount: leavingFood,
+        reason: "migration-settlement",
+        description: `Household provisions left the city during emigration.`
+      });
       const leavingIds = new Set(leaving.map((resident) => resident.id));
       residents = residents.filter((resident) => !leavingIds.has(resident.id));
       employments = employments.map((employment) => leavingIds.has(employment.residentId) && employment.status !== "unemployed"
@@ -727,6 +869,7 @@ export function advancePopulationLifecycleDay(input: LifecycleAdvanceInput): Lif
       const educationLevel: EducationLevel = rng.chance(0.18) ? "higher" : rng.chance(0.46) ? "vocational" : "secondary";
       const skill = educationLevel === "higher" ? rng.integer(58, 88) : educationLevel === "vocational" ? rng.integer(42, 76) : rng.integer(24, 58);
       const householdId = createStableEntityId("household", `${input.seed}:immigrant-household:${input.dayIndex}:${index}`);
+      const startingSavings = rng.integer(30, 280);
       const resident: BackgroundResident = {
         id: residentId,
         name,
@@ -741,7 +884,7 @@ export function advancePopulationLifecycleDay(input: LifecycleAdvanceInput): Lif
         health: "healthy",
         healthScore: rng.integer(64, 92),
         skillLevel: skill,
-        savings: rng.integer(30, 280),
+        savings: startingSavings,
         transportAccess: 100,
         skills: createResidentSkills(input.seed, residentId, skill),
         careerPreference: rng.pick(["income", "stability", "distance", "day-shift", "advancement"] as const),
@@ -757,6 +900,8 @@ export function advancePopulationLifecycleDay(input: LifecycleAdvanceInput): Lif
         generation: 0,
         retired: false
       };
+      const startingBalance = rng.integer(80, 360);
+      const startingFoodUnits = 2;
       residents.push(resident);
       households.push({
         id: householdId,
@@ -764,10 +909,10 @@ export function advancePopulationLifecycleDay(input: LifecycleAdvanceInput): Lif
         homeLocationId: unit.locationId,
         kind: "temporary",
         memberIds: [residentId],
-        balance: rng.integer(80, 360),
+        balance: startingBalance,
         debt: rng.integer(0, 80),
-        foodUnits: 2,
-        pantry: [{ productId: "kernel-9-brick", units: 2 }],
+        foodUnits: startingFoodUnits,
+        pantry: [{ productId: "kernel-9-brick", units: startingFoodUnits }],
         rentPerWeek: unit.baseRentPerBedWeek,
         dailyIncome: 0,
         dailyExpenses: 0,
@@ -780,6 +925,36 @@ export function advancePopulationLifecycleDay(input: LifecycleAdvanceInput): Lif
         lastLedger: null,
         foundedDay: input.dayIndex,
         originHouseholdIds: []
+      });
+      transactions.push({
+        idempotencyKey: `${input.seed}:migration-settlement:${input.dayIndex}:${householdId}:credits`,
+        timestamp: input.dayIndex * DAY_MS,
+        debitEntityId: kernelSystemEntityId(input.seed, "external-trade"),
+        creditEntityId: householdId,
+        resource: "credits",
+        amount: startingBalance,
+        reason: "migration-settlement",
+        description: `Declared funds entered the city with a new household.`
+      });
+      transactions.push({
+        idempotencyKey: `${input.seed}:migration-settlement:${input.dayIndex}:${householdId}:food`,
+        timestamp: input.dayIndex * DAY_MS,
+        debitEntityId: kernelSystemEntityId(input.seed, "external-trade"),
+        creditEntityId: householdId,
+        resource: "food-units",
+        amount: startingFoodUnits,
+        reason: "migration-settlement",
+        description: `Travel provisions entered the city with a new household.`
+      });
+      if (startingSavings > 0) transactions.push({
+        idempotencyKey: `${input.seed}:migration-settlement:${input.dayIndex}:${residentId}:credits`,
+        timestamp: input.dayIndex * DAY_MS,
+        debitEntityId: kernelSystemEntityId(input.seed, "external-trade"),
+        creditEntityId: residentId,
+        resource: "credits",
+        amount: startingSavings,
+        reason: "migration-settlement",
+        description: `Declared personal savings entered the city with a new resident.`
       });
       occupied.set(unit.locationId, (occupied.get(unit.locationId) ?? 0) + 1);
       totals.immigrants += 1;

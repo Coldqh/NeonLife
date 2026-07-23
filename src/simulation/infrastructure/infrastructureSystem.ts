@@ -60,6 +60,10 @@ export function infrastructureGridAccount(seed: string, kind: InfrastructureKind
   return kernelSystemEntityId(seed, `${kind}-grid`);
 }
 
+function settlementEntityId(seed: string, cityId: string, kind: InfrastructureKind, providerEntityId: string): string {
+  return providerEntityId === cityId ? infrastructureGridAccount(seed, kind) : providerEntityId;
+}
+
 function providerFor(kind: InfrastructureKind, city: CityState, organizations: OrganizationState[]): string {
   if (kind === "transport") return organizations.find((item) => item.type === "transport")?.id ?? city.id;
   if (kind === "power" || kind === "data") return organizations.find((item) => item.type === "corporation")?.id ?? city.id;
@@ -640,7 +644,7 @@ export function advanceInfrastructure(
         transactions.push({
           idempotencyKey: `${seed}:maintenance:${order.id}:funded`,
           timestamp: hourTimestamp,
-          debitEntityId: order.providerEntityId,
+          debitEntityId: settlementEntityId(seed, city.id, order.kind, order.providerEntityId),
           creditEntityId: kernelSystemEntityId(seed, "maintenance"),
           resource: "credits",
           amount: order.creditsCost,
@@ -650,7 +654,7 @@ export function advanceInfrastructure(
           idempotencyKey: `${seed}:maintenance:${order.id}:parts`,
           timestamp: hourTimestamp,
           debitEntityId: kernelSystemEntityId(seed, "wholesale"),
-          creditEntityId: order.providerEntityId,
+          creditEntityId: kernelSystemEntityId(seed, "maintenance"),
           resource: "parts-units",
           amount: order.partsCost,
           reason: "inventory-transfer",
@@ -705,7 +709,7 @@ export function advanceInfrastructure(
               idempotencyKey: `${seed}:utility:household:${dayIndex}:${household.id}:${charge.kind}`,
               timestamp: hourTimestamp,
               debitEntityId: household.id,
-              creditEntityId: charge.provider,
+              creditEntityId: settlementEntityId(seed, city.id, charge.kind, charge.provider),
               resource: "credits",
               amount: paid,
               reason: "utility-service",
@@ -747,7 +751,7 @@ export function advanceInfrastructure(
               idempotencyKey: `${seed}:utility:business:${dayIndex}:${business.id}:${charge.kind}`,
               timestamp: hourTimestamp,
               debitEntityId: business.id,
-              creditEntityId: chargeNetwork.providerEntityId,
+              creditEntityId: settlementEntityId(seed, city.id, charge.kind, chargeNetwork.providerEntityId),
               resource: "credits",
               amount: paid,
               reason: "utility-service",

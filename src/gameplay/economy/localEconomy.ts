@@ -6,6 +6,8 @@ import type { LocationState } from "../../world/state/types";
 import type { HumanNetworkState, PersonState } from "../../people/network/types";
 import type { CourierOrder } from "../jobs/courier/courierSystem";
 import type { PopulationState } from "../../simulation/population/types";
+import { kernelSystemEntityId } from "../../simulation/kernel/simulationKernel";
+import type { KernelTransactionDraft } from "../../simulation/kernel/types";
 import { getPopulationWorkerAvailability } from "../../simulation/population/populationSystem";
 import type { BusinessKind, BusinessState, BusinessStatus, EconomyNotice, LocalEconomyState, SupplyClass } from "./types";
 
@@ -189,6 +191,7 @@ export interface EconomyAdvanceResult {
   state: LocalEconomyState;
   food: FoodState;
   notices: EconomyNotice[];
+  transactions: KernelTransactionDraft[];
 }
 
 export function advanceLocalEconomy(
@@ -201,12 +204,13 @@ export function advanceLocalEconomy(
   foodState: FoodState,
   pulse: DistrictPulseState
 ): EconomyAdvanceResult {
-  if (timestamp <= state.lastUpdatedAt) return { state, food: foodState, notices: [] };
+  if (timestamp <= state.lastUpdatedAt) return { state, food: foodState, notices: [], transactions: [] };
   const targetCycle = Math.floor(timestamp / CYCLE_MS);
   let cycle = Math.max(state.cycle, Math.floor(state.lastUpdatedAt / CYCLE_MS));
   let businesses = state.businesses;
   let food = foodState;
   const notices: EconomyNotice[] = [];
+  const transactions: KernelTransactionDraft[] = [];
 
   while (cycle < targetCycle) {
     cycle += 1;
@@ -224,14 +228,46 @@ export function advanceLocalEconomy(
         + rng.integer(-9, 12)
       ), 18, 100);
       const consumption = Math.max(1, Math.round(demand / 17));
+      const foodBefore = totalFoodStock(food, business.locationId);
       food = consumeFoodStock(food, business.locationId, consumption, rng);
       const actualFoodStock = totalFoodStock(food, business.locationId);
+      const physicalFoodConsumed = foodBefore === null || actualFoodStock === null ? 0 : Math.max(0, foodBefore - actualFoodStock);
       let stock = actualFoodStock === null
         ? clamp(business.stock - consumption + rng.integer(-2, 2))
         : clamp(Math.round(actualFoodStock / capacityFor(business.kind) * 100));
       const passiveRevenue = Math.round(demand * business.priceIndex / 58);
       const operatingCost = Math.max(8, Math.round(10 + business.capacityLevel * 4 + pulse.transitDelayMinutes * 0.35));
       let cash = Math.max(-500, business.cash + passiveRevenue - operatingCost);
+      if (passiveRevenue > 0) transactions.push({
+        idempotencyKey: `${seed}:economy:${cycle}:${business.id}:revenue`,
+        timestamp: cycle * CYCLE_MS,
+        debitEntityId: kernelSystemEntityId(seed, "consumption"),
+        creditEntityId: business.id,
+        resource: "credits",
+        amount: passiveRevenue,
+        reason: "retail-service",
+        description: `Background customer revenue for ${business.kind}.`
+      });
+      if (operatingCost > 0) transactions.push({
+        idempotencyKey: `${seed}:economy:${cycle}:${business.id}:operating`,
+        timestamp: cycle * CYCLE_MS,
+        debitEntityId: business.id,
+        creditEntityId: kernelSystemEntityId(seed, "city-services"),
+        resource: "credits",
+        amount: operatingCost,
+        reason: "operating-settlement",
+        description: `Operating costs for ${business.kind}.`
+      });
+      if (physicalFoodConsumed > 0) transactions.push({
+        idempotencyKey: `${seed}:economy:${cycle}:${business.id}:food-consumption`,
+        timestamp: cycle * CYCLE_MS,
+        debitEntityId: business.id,
+        creditEntityId: kernelSystemEntityId(seed, "consumption"),
+        resource: "food-units",
+        amount: physicalFoodConsumed,
+        reason: "inventory-transfer",
+        description: `Food units sold to background customers.`
+      });
       // Wholesale inventory is replenished only by Production & Logistics.
       // This cycle consumes stock and records demand, but never creates supplies from nowhere.
       const restockCost = 0;
@@ -271,7 +307,8 @@ export function advanceLocalEconomy(
   return {
     state: { businesses, lastUpdatedAt: timestamp, cycle },
     food,
-    notices
+    notices,
+    transactions
   };
 }
 
