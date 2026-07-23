@@ -34,9 +34,9 @@ export type KernelResource =
   | "data-substrate-units"
   | "packaging-units";
 
-export type KernelAssetKind = "business-operation" | "housing-block" | "facility" | "district-land" | "infrastructure-node" | "infrastructure-link" | "production-facility" | "warehouse" | "medical-facility" | "cyberware-installation";
+export type KernelAssetKind = "business-operation" | "housing-block" | "facility" | "district-land" | "infrastructure-node" | "infrastructure-link" | "production-facility" | "warehouse" | "medical-facility" | "cyberware-installation" | "surveillance-node";
 export type KernelAssetStatus = "active" | "strained" | "restricted" | "offline";
-export type KernelContractKind = "employment" | "lease" | "supply" | "service" | "loan" | "utility" | "procurement" | "logistics" | "license" | "tax" | "public-service" | "insurance" | "medical-care" | "cyberware-finance";
+export type KernelContractKind = "employment" | "lease" | "supply" | "service" | "loan" | "utility" | "procurement" | "logistics" | "license" | "tax" | "public-service" | "insurance" | "medical-care" | "cyberware-finance" | "data-access";
 export type KernelContractStatus = "active" | "suspended" | "breached" | "ended";
 export type KernelTransactionReason =
   | "wage"
@@ -84,6 +84,9 @@ export type KernelTransactionReason =
   | "household-transfer"
   | "migration-settlement"
   | "account-opening"
+  | "data-sale"
+  | "identity-forgery"
+  | "data-security"
   | "domain-reconciliation";
 
 export interface KernelResourceBalance {

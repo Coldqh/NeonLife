@@ -44,6 +44,9 @@ export interface BackgroundResident {
   childIds?: EntityId[];
   generation?: number;
   retired?: boolean;
+  creditScore?: number;
+  digitalAccess?: number;
+  identityStatus?: "verified" | "limited" | "compromised" | "forged" | "suspended";
 }
 
 export interface HouseholdPantryItem {

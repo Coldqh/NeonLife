@@ -559,14 +559,19 @@ function chooseHousing(
   household: HouseholdState,
   housing: HousingMarketState[],
   occupied: Map<string, number>,
-  allowBetter: boolean
+  allowBetter: boolean,
+  residents: BackgroundResident[]
 ): HousingMarketState | null {
   const current = housing.find((item) => item.locationId === household.homeLocationId);
   const affordable = Math.max(55, household.dailyIncome * 5 + household.balance * 0.15);
+  const members = residents.filter((item) => household.memberIds.includes(item.id));
+  const averageCredit = members.length ? members.reduce((sum, item) => sum + (item.creditScore ?? 620), 0) / members.length : 620;
+  const suspendedIdentity = members.some((item) => item.identityStatus === "suspended");
   const candidates = housing
     .filter((item) => item.locationId !== household.homeLocationId)
     .filter((item) => item.capacity - (occupied.get(item.locationId) ?? item.occupied) >= household.memberIds.length)
     .filter((item) => housingRentFor(item, household.memberIds.length) <= affordable)
+    .filter((item) => item.quality < 72 || (averageCredit >= 560 && !suspendedIdentity))
     .filter((item) => allowBetter ? item.quality > (current?.quality ?? 0) + 10 : true)
     .sort((left, right) => {
       if (allowBetter) return right.quality - left.quality || housingRentFor(left, household.memberIds.length) - housingRentFor(right, household.memberIds.length);
@@ -893,7 +898,7 @@ export function advancePopulation(
       const shouldMove = household.status === "displaced" || household.consecutiveRentMisses >= 28;
       const canUpgrade = !shouldMove && household.status === "stable" && household.balance > 1_000 && dayRng.chance(0.015);
       if (!shouldMove && !canUpgrade) return household;
-      const target = chooseHousing(household, housing, occupied, canUpgrade);
+      const target = chooseHousing(household, housing, occupied, canUpgrade, residents);
       if (!target) {
         if (household.homeLocationId && household.consecutiveRentMisses < 60) return household;
         if (household.homeLocationId) occupied.set(household.homeLocationId, Math.max(0, (occupied.get(household.homeLocationId) ?? 0) - household.memberIds.length));

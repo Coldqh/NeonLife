@@ -3,7 +3,7 @@ import { getFoodProduct } from "../../data/products/foodCatalog";
 import type { HouseholdStatus } from "../../simulation/population/types";
 import type { GameSession } from "../../world/state/types";
 
-type PopulationTab = "districts" | "lifecycle" | "households" | "housing" | "labor" | "infrastructure" | "supply" | "organizations" | "government" | "health" | "flow";
+type PopulationTab = "districts" | "lifecycle" | "households" | "housing" | "labor" | "infrastructure" | "supply" | "organizations" | "government" | "health" | "data" | "flow";
 
 function statusRank(status: HouseholdStatus): number {
   if (status === "displaced") return 4;
@@ -135,6 +135,13 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
   const recentHealthSnapshot = health.history[health.history.length - 1];
   const recentCases = health.cases.slice().sort((left, right) => right.requestedDay - left.requestedDay).slice(0, 12);
   const highRiskConditions = activeConditions.slice().sort((left, right) => right.severity - left.severity).slice(0, 12);
+  const dataState = session.data;
+  const recentDataSnapshot = dataState.history[dataState.history.length - 1];
+  const activeBreaches = dataState.breaches.filter((item) => item.status === "active");
+  const activeForgeries = dataState.forgeries.filter((item) => item.status === "active");
+  const compromisedIdentities = dataState.identities.filter((item) => item.status === "compromised" || item.status === "forged" || item.status === "suspended");
+  const recentAccesses = dataState.accessEvents.slice(-14).reverse();
+  const recentBreaches = dataState.breaches.slice(-10).reverse();
 
   return (
     <div className="population-workspace">
@@ -156,6 +163,7 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
         <button type="button" className={tab === "organizations" ? "is-active" : ""} onClick={() => setTab("organizations")}>ОРГАНИЗАЦИИ</button>
         <button type="button" className={tab === "government" ? "is-active" : ""} onClick={() => setTab("government")}>ВЛАСТЬ</button>
         <button type="button" className={tab === "health" ? "is-active" : ""} onClick={() => setTab("health")}>МЕДИЦИНА</button>
+        <button type="button" className={tab === "data" ? "is-active" : ""} onClick={() => setTab("data")}>ДАННЫЕ</button>
         <button type="button" className={tab === "flow" ? "is-active" : ""} onClick={() => setTab("flow")}>ПОТОКИ</button>
       </nav>
 
@@ -566,6 +574,69 @@ export function PopulationWorkspace({ session }: { session: GameSession }) {
                 );
               })}
               {!activeInstallations.length ? <div className="empty-terminal">Установленных имплантов пока нет.</div> : null}
+            </section>
+          </div>
+        </section>
+      ) : null}
+
+      {tab === "data" ? (
+        <section className="data-workspace">
+          <div className="population-labor__summary">
+            <div><span>DIGITAL IDENTITIES</span><strong>{dataState.identities.length}</strong><small>{compromisedIdentities.length} compromised / limited</small></div>
+            <div><span>SURVEILLANCE</span><strong>{recentDataSnapshot?.activeNodes ?? 0}</strong><small>{recentDataSnapshot?.offlineNodes ?? 0} offline nodes</small></div>
+            <div><span>ACCESS REQUESTS</span><strong>{dataState.totals.accesses.toLocaleString("ru-RU")}</strong><small>{dataState.totals.deniedAccesses} denied</small></div>
+            <div><span>BREACHES</span><strong>{activeBreaches.length}</strong><small>{dataState.totals.recordsStolen} records stolen</small></div>
+            <div><span>FORGED IDS</span><strong>{activeForgeries.length}</strong><small>{dataState.totals.forgeriesDetected} detected</small></div>
+            <div><span>AVG CREDIT</span><strong>{recentDataSnapshot?.averageCreditScore ?? 0}</strong><small>300–850 civic score</small></div>
+          </div>
+          <div className="population-labor__columns">
+            <section className="population-labor__list">
+              <header><span>NETWORK NODES</span><strong>PHYSICAL COVERAGE</strong></header>
+              {dataState.nodes.slice().sort((left, right) => left.status.localeCompare(right.status) || right.vulnerability - left.vulnerability).slice(0, 16).map((node) => (
+                <article key={node.id}>
+                  <div><span>{node.kind.replace(/-/g, " ").toUpperCase()}</span><strong>{locationName(session, node.locationId)}</strong><small>{districtName(session, node.districtId)} · {node.ownerEntityId}</small></div>
+                  <div><span>STATUS</span><strong>{node.status.toUpperCase()}</strong><small>quality {node.quality}%</small></div>
+                  <div><span>RISK</span><strong>{node.vulnerability}%</strong><small>{node.capturesToday} captures today</small></div>
+                </article>
+              ))}
+            </section>
+            <section className="population-labor__list">
+              <header><span>DATA BREACHES</span><strong>REAL RECORD LOSS</strong></header>
+              {recentBreaches.map((breach) => (
+                <article key={breach.id}>
+                  <div><span>{breach.status.toUpperCase()}</span><strong>{kernelEntityName(session, breach.sourceEntityId)}</strong><small>{districtName(session, breach.districtId)} · day {breach.startedDay}</small></div>
+                  <div><span>STOLEN</span><strong>{breach.stolenRecords}</strong><small>severity {breach.severity}</small></div>
+                  <div><span>VALUE</span><strong>₵ {breach.marketValue}</strong><small>evidence {breach.evidence}%</small></div>
+                </article>
+              ))}
+              {!recentBreaches.length ? <div className="empty-terminal">Подтверждённых утечек пока нет.</div> : null}
+            </section>
+          </div>
+          <div className="population-labor__columns">
+            <section className="population-labor__list">
+              <header><span>RECENT ACCESS</span><strong>WHO KNOWS WHAT</strong></header>
+              {recentAccesses.map((access) => {
+                const record = dataState.records.find((item) => item.id === access.recordId);
+                return (
+                  <article key={access.id}>
+                    <div><span>{access.purpose.replace(/-/g, " ").toUpperCase()}</span><strong>{kernelEntityName(session, access.actorEntityId)}</strong><small>{record ? residentName(session, record.subjectId) : "EXPIRED RECORD"}</small></div>
+                    <div><span>RECORD</span><strong>{record?.kind.replace(/-/g, " ").toUpperCase() ?? "PURGED"}</strong><small>{record?.sensitivity.toUpperCase() ?? "RETAINED LOG"}</small></div>
+                    <div><span>RESULT</span><strong>{access.outcome.toUpperCase()}</strong><small>day {access.dayIndex}</small></div>
+                  </article>
+                );
+              })}
+              {!recentAccesses.length ? <div className="empty-terminal">Запросов к реестрам пока нет.</div> : null}
+            </section>
+            <section className="population-labor__list">
+              <header><span>IDENTITY PRESSURE</span><strong>SERVICE ACCESS</strong></header>
+              {compromisedIdentities.slice().sort((left, right) => left.digitalAccess - right.digitalAccess).slice(0, 14).map((identity) => (
+                <article key={identity.id}>
+                  <div><span>{identity.status.toUpperCase()}</span><strong>{residentName(session, identity.residentId)}</strong><small>{identity.aliases.length ? identity.aliases.join(" / ") : identity.civicIdentifier}</small></div>
+                  <div><span>ACCESS</span><strong>{identity.digitalAccess}%</strong><small>profile {identity.profileCompleteness}%</small></div>
+                  <div><span>CREDIT</span><strong>{identity.creditScore}</strong><small>fraud risk {identity.fraudRisk}%</small></div>
+                </article>
+              ))}
+              {!compromisedIdentities.length ? <div className="empty-terminal">Все активные профили подтверждены.</div> : null}
             </section>
           </div>
         </section>

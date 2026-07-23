@@ -18,6 +18,7 @@ import { createProductionState } from "../../simulation/production/productionSys
 import { createOrganizationEcosystem } from "../../simulation/organizations/organizationSystem";
 import { createGovernmentCrimeState } from "../../simulation/government/governmentSystem";
 import { createHealthCyberwareState } from "../../simulation/health/healthSystem";
+import { createDataSurveillanceState } from "../../simulation/data/dataSystem";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
 import type {
@@ -292,6 +293,20 @@ export function createWorldSession(seed: string): GameSession {
     production,
     government
   });
+  const data = createDataSurveillanceState({
+    timestamp: INITIAL_GAME_TIMESTAMP,
+    seed,
+    cityId: city.id,
+    districts,
+    locations,
+    organizations,
+    population,
+    economy,
+    infrastructure,
+    organizationEcosystem,
+    government,
+    health
+  });
   const syncedKernel = advanceSimulationKernel(kernel, {
     timestamp: INITIAL_GAME_TIMESTAMP,
     seed,
@@ -307,6 +322,7 @@ export function createWorldSession(seed: string): GameSession {
     organizationEcosystem,
     government,
     health,
+    data,
     food: foodState
   });
 
@@ -326,6 +342,7 @@ export function createWorldSession(seed: string): GameSession {
     organizationEcosystem,
     government,
     health,
+    data,
     events: createInitialEvents({
       seed,
       districtName: lower.name,

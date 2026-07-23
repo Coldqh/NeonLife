@@ -286,7 +286,13 @@ function applicationScore(
           : resident.careerPreference === "advancement" && vacancy.reason === "expansion" ? 12
             : 0;
   const healthBonus = (resident.healthScore - 50) * 0.16;
-  const score = Math.round(56 + skillScore * 1.35 + wageGain * 0.58 - commute + preferenceBonus + healthBonus);
+  const location = locations.find((item) => item.id === vacancy.locationId);
+  const digitalRequirement = location?.type === "office" ? 58 : location?.type === "clinic" || location?.type === "government" ? 46 : location?.type === "transport" ? 30 : 16;
+  const digitalAccess = resident.digitalAccess ?? 70;
+  const identityPenalty = resident.identityStatus === "suspended" ? 90 : resident.identityStatus === "compromised" ? 20 : resident.identityStatus === "forged" ? 12 : 0;
+  const accessPenalty = Math.max(0, digitalRequirement - digitalAccess) * 1.15;
+  const creditPenalty = location?.type === "office" ? Math.max(0, 540 - (resident.creditScore ?? 620)) * 0.06 : 0;
+  const score = Math.round(56 + skillScore * 1.35 + wageGain * 0.58 - commute + preferenceBonus + healthBonus - identityPenalty - accessPenalty - creditPenalty);
   return { score, skillScore, wageGain, commutePenalty: commute };
 }
 
@@ -306,6 +312,7 @@ function submitApplications(
 
   for (const resident of residents) {
     if (resident.lifeStage !== "working-age" || resident.healthScore <= 30) continue;
+    if (resident.identityStatus === "suspended" && (resident.digitalAccess ?? 0) < 20) continue;
     const current = currentEmploymentFor(resident, employments);
     const searchStatus: JobSearchStatus = current
       ? (current.satisfaction ?? 58) < 43 || current.unpaidDays > 0 ? "open" : resident.jobSearchStatus ?? "inactive"

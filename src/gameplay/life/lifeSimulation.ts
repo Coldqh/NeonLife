@@ -11,6 +11,7 @@ import { advanceProductionAndLogistics } from "../../simulation/production/produ
 import { advanceOrganizationEcosystem } from "../../simulation/organizations/organizationSystem";
 import { advanceGovernmentCrime } from "../../simulation/government/governmentSystem";
 import { advanceHealthCyberware } from "../../simulation/health/healthSystem";
+import { advanceDataSurveillance } from "../../simulation/data/dataSystem";
 import { canPrepare, consumeFood, discardSpoiledFood, purchaseFood } from "../food/foodSystem";
 import { calculateSleepRecovery, getHousingDaysLeft } from "../housing/housingSystem";
 import { getTravelOptions, isLocationOpen } from "../travel/travelSystem";
@@ -178,8 +179,22 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     production: governmentAdvance.production,
     government: governmentAdvance.state
   });
+  const dataAdvance = advanceDataSurveillance(session.data, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    cityId: session.world.city.id,
+    districts: session.world.districts,
+    locations: session.world.locations,
+    organizations: healthAdvance.organizations,
+    population: healthAdvance.population,
+    economy: healthAdvance.economy,
+    infrastructure: governmentAdvance.infrastructure,
+    organizationEcosystem: organizationAdvance.state,
+    government: healthAdvance.government,
+    health: healthAdvance.state
+  });
   const infrastructurePulse = applyInfrastructureToDistrictPulse(pulse.state, governmentAdvance.infrastructure, session.world.activeDistrictId);
-  const infrastructureSyncedPeople = synchronizeActivePeopleFromPopulation(populationSyncedPeople, healthAdvance.population);
+  const infrastructureSyncedPeople = synchronizeActivePeopleFromPopulation(populationSyncedPeople, dataAdvance.population);
   let peopleState = applyEconomyPressureToPeople(infrastructureSyncedPeople, healthAdvance.economy, economyAdvance.notices);
   const pressureAdvance = advancePressureState(session.pressure, nextTimestamp, session.world.meta.seed, peopleState.people);
   for (const notice of pressureAdvance.notices) {
@@ -249,6 +264,9 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   for (const notice of healthAdvance.notices) {
     generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
   }
+  for (const notice of dataAdvance.notices) {
+    generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
+  }
   for (const notice of pressureAdvance.notices) {
     generated.push(createEvent(session, nextTimestamp, notice.category, notice.title, notice.detail, notice.importance));
   }
@@ -266,7 +284,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   );
   const selectedPerson = getPerson(peopleState, session.world.primaryContactId)
     ?? getPerson(peopleState, peopleState.selectedPersonId);
-  const worldEventCount = options.worldEvents ?? (queued.events.length + pulse.events.length + network.notices.length + economyAdvance.notices.length + populationAdvance.notices.length + infrastructureAdvance.notices.length + productionAdvance.notices.length + organizationAdvance.notices.length + governmentAdvance.notices.length + healthAdvance.notices.length + pressureAdvance.notices.length);
+  const worldEventCount = options.worldEvents ?? (queued.events.length + pulse.events.length + network.notices.length + economyAdvance.notices.length + populationAdvance.notices.length + infrastructureAdvance.notices.length + productionAdvance.notices.length + organizationAdvance.notices.length + governmentAdvance.notices.length + healthAdvance.notices.length + dataAdvance.notices.length + pressureAdvance.notices.length);
   const pressure = trackPressureMetrics(pressureAdvance.state, {
     balanceDelta: options.trackBalance === false ? 0 : options.balanceDelta,
     deliveries: options.deliveryCompleted ? 1 : 0,
@@ -274,8 +292,8 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     relationChanges: options.relationChanges,
     worldEvents: worldEventCount
   });
-  const nextOrganizations = healthAdvance.organizations;
-  const representedPopulation = governmentAdvance.population.lifecycle.representedPopulationByDistrict;
+  const nextOrganizations = dataAdvance.organizations;
+  const representedPopulation = dataAdvance.population.lifecycle.representedPopulationByDistrict;
   const nextDistricts = session.world.districts.map((district) => ({
     ...district,
     population: Math.round(representedPopulation[district.id] ?? district.population)
@@ -300,7 +318,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
       hunger: clamp(session.player.condition.hunger + baselineHunger + (options.hungerDelta ?? 0))
     }
   };
-  const kernelDrafts = [...populationAdvance.transactions, ...economyAdvance.transactions, ...infrastructureAdvance.transactions, ...productionAdvance.transactions, ...organizationAdvance.transactions, ...governmentAdvance.transactions, ...healthAdvance.transactions];
+  const kernelDrafts = [...populationAdvance.transactions, ...economyAdvance.transactions, ...infrastructureAdvance.transactions, ...productionAdvance.transactions, ...organizationAdvance.transactions, ...governmentAdvance.transactions, ...healthAdvance.transactions, ...dataAdvance.transactions];
   if ((options.balanceDelta ?? 0) !== 0) {
     const amount = Math.abs(options.balanceDelta ?? 0);
     kernelDrafts.push({
@@ -322,13 +340,14 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     locations: session.world.locations,
     organizations: nextOrganizations,
     player: nextPlayer,
-    population: healthAdvance.population,
+    population: dataAdvance.population,
     economy: healthAdvance.economy,
     infrastructure: governmentAdvance.infrastructure,
     production: healthAdvance.production,
     organizationEcosystem: organizationAdvance.state,
-    government: healthAdvance.government,
+    government: dataAdvance.government,
     health: healthAdvance.state,
+    data: dataAdvance.state,
     food: productionAdvance.food,
     drafts: kernelDrafts
   });
@@ -351,13 +370,14 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     people: peopleState,
     pressure,
     economy: healthAdvance.economy,
-    population: healthAdvance.population,
+    population: dataAdvance.population,
     kernel,
     infrastructure: governmentAdvance.infrastructure,
     production: healthAdvance.production,
     organizationEcosystem: organizationAdvance.state,
-    government: healthAdvance.government,
+    government: dataAdvance.government,
     health: healthAdvance.state,
+    data: dataAdvance.state,
     district: infrastructurePulse,
     eventQueue: queued.queue,
     currentActivity: pressureAdvance.evicted

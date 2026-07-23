@@ -17,6 +17,7 @@ import type { ProductionState } from "../../simulation/production/types";
 import type { OrganizationEcosystemState } from "../../simulation/organizations/types";
 import type { GovernmentCrimeState } from "../../simulation/government/types";
 import type { HealthCyberwareState } from "../../simulation/health/types";
+import type { DataSurveillanceState } from "../../simulation/data/types";
 
 export interface CityState {
   id: EntityId;
@@ -113,6 +114,7 @@ export interface GameSession {
   organizationEcosystem: OrganizationEcosystemState;
   government: GovernmentCrimeState;
   health: HealthCyberwareState;
+  data: DataSurveillanceState;
   events: WorldEvent[];
   eventQueue: ScheduledWorldEvent[];
   currentActivity: string;

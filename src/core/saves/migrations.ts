@@ -21,6 +21,7 @@ import { normalizeProductionState } from "../../simulation/production/production
 import { normalizeOrganizationEcosystem } from "../../simulation/organizations/organizationSystem";
 import { normalizeGovernmentCrimeState } from "../../simulation/government/governmentSystem";
 import { normalizeHealthCyberwareState } from "../../simulation/health/healthSystem";
+import { normalizeDataSurveillanceState } from "../../simulation/data/dataSystem";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -523,6 +524,20 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     production,
     government
   });
+  const data = normalizeDataSurveillanceState(payload.data, {
+    timestamp,
+    seed,
+    cityId: cityState.id,
+    districts,
+    locations,
+    organizations,
+    population,
+    economy,
+    infrastructure,
+    organizationEcosystem,
+    government,
+    health
+  });
   const kernel = advanceSimulationKernel(baseKernel, {
     timestamp,
     seed,
@@ -538,6 +553,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     organizationEcosystem,
     government,
     health,
+    data,
     food: foodState
   });
 
@@ -558,6 +574,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     organizationEcosystem,
     government,
     health,
+    data,
     currentActivity: `На месте: ${existingLocationName}`,
     world: {
       ...world,

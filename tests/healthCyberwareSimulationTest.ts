@@ -11,7 +11,7 @@ const DAY_MS = 24 * 60 * 60_000;
 const seed = "HEALTH-CYBERWARE-VALIDATION-20";
 let session = createWorldSession(seed);
 
-assert(session.schemaVersion === 18, "new world schema mismatch");
+assert(session.schemaVersion === 19, "new world schema mismatch");
 assert(session.health.facilities.length >= 5, "clinical network missing");
 assert(session.health.cyberwareModels.length >= 8, "cyberware catalog missing");
 assert(session.health.policies.length === session.population.households.length, "insurance coverage not initialized for every household");
@@ -88,6 +88,7 @@ const legacySession = createWorldSession("HEALTH-CYBERWARE-MIGRATION-20");
 const legacyPayload = structuredClone(legacySession) as any;
 legacyPayload.schemaVersion = 17;
 delete legacyPayload.health;
+delete legacyPayload.data;
 legacyPayload.world.locations = legacyPayload.world.locations.filter((item: any) => ![
   "CMU INDUSTRIAL TRAUMA STATION",
   "CMU REGIONAL HOSPITAL",
@@ -103,8 +104,9 @@ const migrated = migrateEnvelope({
   payload: legacyPayload
 }, "slot-1");
 assert(migrated, "migration returned null");
-assert(migrated.schemaVersion === 18, "migration schema mismatch");
+assert(migrated.schemaVersion === 19, "migration schema mismatch");
 assert(migrated.payload.health.version === 1, "health state not created during migration");
+assert(migrated.payload.data.version === 1, "data state not created during migration");
 assert(migrated.payload.health.facilities.length >= 5, "clinical facilities not restored during migration");
 assert(migrated.payload.health.policies.length === migrated.payload.population.households.length, "insurance policies not restored during migration");
 assert(migrated.payload.world.locations.filter((item) => item.type === "clinic").length >= 5, "clinical locations not restored during migration");

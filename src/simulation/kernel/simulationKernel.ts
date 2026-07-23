@@ -9,6 +9,7 @@ import type { ProductionResource, ProductionState, ProductionSupplyContract } fr
 import type { OrganizationAgreementState, OrganizationEcosystemState } from "../organizations/types";
 import type { GovernmentCrimeState } from "../government/types";
 import type { HealthCyberwareState } from "../health/types";
+import type { DataSurveillanceState } from "../data/types";
 import type {
   KernelAccountState,
   KernelAssetState,
@@ -48,6 +49,7 @@ export interface KernelSyncInput {
   organizationEcosystem?: OrganizationEcosystemState;
   government?: GovernmentCrimeState;
   health?: HealthCyberwareState;
+  data?: DataSurveillanceState;
   food: FoodState;
   drafts?: KernelTransactionDraft[];
 }
@@ -365,6 +367,24 @@ function buildAssets(input: KernelSyncInput): KernelAssetState[] {
     });
   }
 
+  for (const node of input.data?.nodes ?? []) {
+    assets.push({
+      id: assetId("surveillance-node", node.id),
+      kind: "surveillance-node",
+      name: `${node.kind.replace(/-/g, " ").toUpperCase()} ${node.locationId}`,
+      ownerEntityId: node.ownerEntityId,
+      controllerEntityId: node.id,
+      locationId: node.locationId,
+      districtId: node.districtId,
+      status: node.status === "offline" ? "offline" : node.status === "degraded" || node.status === "compromised" ? "strained" : "active",
+      condition: Math.round(Math.max(0, Math.min(100, node.quality - node.vulnerability * 0.25))),
+      capacity: node.coverage,
+      valuation: Math.round(1_500 + node.quality * 95 + node.retentionDays * 8),
+      resources: [],
+      updatedAt: input.timestamp
+    });
+  }
+
   for (const district of input.districts) {
     assets.push({
       id: assetId("district-land", district.id),
@@ -603,6 +623,28 @@ function healthContracts(input: KernelSyncInput): KernelContractState[] {
   return [...policies, ...debts];
 }
 
+function dataAccessContracts(input: KernelSyncInput): KernelContractState[] {
+  if (!input.data) return [];
+  return input.data.grants.filter((grant) => grant.active).map((grant) => ({
+    id: createStableEntityId("contract", `data-access:${grant.id}`),
+    kind: "data-access" as const,
+    sourceEntityId: grant.authorityEntityId,
+    targetEntityId: grant.granteeEntityId,
+    beneficiaryEntityId: grant.granteeEntityId,
+    status: "active" as const,
+    startedAt: grant.validFromDay * DAY_MS,
+    endedAt: grant.validUntilDay ? grant.validUntilDay * DAY_MS : undefined,
+    nextSettlementAt: (input.population.dayIndex + 30) * DAY_MS,
+    breachCount: 0,
+    terms: [],
+    metadata: {
+      purpose: grant.purpose,
+      scope: grant.scope,
+      recordKinds: grant.recordKinds.join(",")
+    }
+  }));
+}
+
 function buildContracts(input: KernelSyncInput, previous: KernelContractState[]): KernelContractState[] {
   const generated = [
     ...input.population.employments.map((item) => activeEmploymentContract(input, item)).filter((item): item is KernelContractState => Boolean(item)),
@@ -611,7 +653,8 @@ function buildContracts(input: KernelSyncInput, previous: KernelContractState[])
     ...utilityContracts(input),
     ...(input.organizationEcosystem?.agreements ?? []).map((item) => organizationAgreementContract(input, item)),
     ...governmentLicenseContracts(input),
-    ...healthContracts(input)
+    ...healthContracts(input),
+    ...dataAccessContracts(input)
   ];
   const generatedIds = new Set(generated.map((item) => item.id));
   const ended = previous

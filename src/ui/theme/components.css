@@ -5540,3 +5540,16 @@ button:disabled {
 .health-case--waiting { border-left: 2px solid var(--yellow); }
 .health-case--admitted { border-left: 2px solid var(--cyan); }
 .health-case--abandoned { border-left: 2px solid var(--red); }
+
+/* v0.21.0 — digital identity and surveillance */
+.data-workspace {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.data-workspace .population-labor__summary { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.data-workspace .population-labor__columns { min-height: 0; }
+.data-workspace .population-labor__list { max-height: 238px; }
+.data-workspace .population-labor__list > article { grid-template-columns: minmax(0, 1.35fr) minmax(72px, .75fr) minmax(78px, .75fr); }
+.data-workspace .population-labor__list strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
