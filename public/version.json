@@ -1,7 +1,0 @@
-{
-  "version": "0.23.0",
-  "releasedAt": "2026-07-23T12:30:00Z",
-  "forceUpdate": true,
-  "title": "BUILDINGS, INTERIORS & MASS DEMOGRAPHY",
-  "summary": "The multi-million resident city now has sector-wide building and apartment indexes, concrete addresses for detailed households, deterministic streamed interiors and monthly mass demography for the whole metropolitan population."
-}

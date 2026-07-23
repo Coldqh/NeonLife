@@ -24,6 +24,7 @@ import { normalizeHealthCyberwareState } from "../../simulation/health/healthSys
 import { normalizeDataSurveillanceState } from "../../simulation/data/dataSystem";
 import { normalizeMetropolitanState } from "../../simulation/spatial/metropolitanSystem";
 import { normalizeUrbanFabricState, synchronizeMetropolitanFromUrban } from "../../simulation/urban/urbanSystem";
+import { normalizeMetropolitanMobilityState } from "../../simulation/mobility/mobilitySystem";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -589,6 +590,20 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     dataServiceLevel: infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100
   });
   const synchronizedMetropolitan = synchronizeMetropolitanFromUrban(metropolitan, urban);
+  const mobility = normalizeMetropolitanMobilityState(payload.mobility, {
+    timestamp,
+    seed,
+    metropolitan: synchronizedMetropolitan,
+    urban,
+    districts,
+    locations,
+    organizations,
+    population,
+    economy,
+    production,
+    transportServiceLevel: infrastructure.networks.find((item) => item.kind === "transport")?.averageServiceLevel ?? 100,
+    dataServiceLevel: infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100
+  });
   population = {
     ...population,
     lifecycle: {
@@ -635,6 +650,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     data,
     metropolitan: synchronizedMetropolitan,
     urban,
+    mobility,
     currentActivity: `На месте: ${existingLocationName}`,
     world: {
       ...world,

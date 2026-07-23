@@ -1,6 +1,6 @@
 import type { GameSession } from "../../world/state/types";
 
-export const SAVE_SCHEMA_VERSION = 21;
+export const SAVE_SCHEMA_VERSION = 22;
 export const SAVE_SLOT_IDS = ["slot-1", "slot-2", "slot-3"] as const;
 
 export type SaveSlotId = typeof SAVE_SLOT_IDS[number];
