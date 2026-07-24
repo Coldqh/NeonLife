@@ -18,7 +18,7 @@ function assert(condition: unknown, message: string): asserts condition {
 const seed = "BUILDING-ACCESS-26";
 let session = createWorldSession(seed);
 
-assert(session.schemaVersion === 26, "new world schema is not 26");
+assert(session.schemaVersion === 27, "new world schema is not 27");
 assert(session.buildingAccess.version === 1, "building access version mismatch");
 assert(session.localScene.playerPosition.buildingId, "player did not start inside home building");
 assert(session.buildingAccess.player.level === "building", "player access level did not start inside building");
@@ -103,7 +103,7 @@ const migrated = migrateEnvelope({
   payload: legacy
 }, "slot-1");
 assert(migrated, "migration returned null");
-assert(migrated.schemaVersion === 26, "migration schema mismatch");
+assert(migrated.schemaVersion === 27, "migration schema mismatch");
 assert(migrated.payload.buildingAccess.version === 1, "migration did not create building access state");
 assert(
   migrated.payload.buildingAccess.player.level !== "street"

@@ -6267,3 +6267,63 @@ button:disabled {
     display: grid;
   }
 }
+
+/* Vehicle theft and witness layer */
+.vehicle-summary-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.vehicle-crime-panel {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 72, 72, 0.42);
+  background: rgba(120, 14, 22, 0.16);
+  box-shadow: inset 3px 0 0 var(--red);
+}
+
+.vehicle-crime-panel strong {
+  color: var(--red-bright, #ff6666);
+  letter-spacing: 0.09em;
+}
+
+.vehicle-crime-panel span {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.vehicle-crime-panel button,
+.vehicle-presence-list__actions .button--danger {
+  border-color: rgba(255, 72, 72, 0.56);
+  color: #ff8a8a;
+}
+
+.vehicle-presence-list article:has(.warning-text) {
+  border-color: rgba(255, 72, 72, 0.28);
+}
+
+@media (max-width: 1180px) {
+  .vehicle-summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .vehicle-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vehicle-crime-panel {
+    grid-template-columns: 1fr;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 480px) {
+  .vehicle-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}

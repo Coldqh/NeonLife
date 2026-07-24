@@ -26,6 +26,7 @@ import { createLocalSceneState } from "../../simulation/localScene/localSceneSys
 import { createBuildingAccessState } from "../../simulation/access/buildingAccessSystem";
 import { createPhysicalVehiclesState } from "../../simulation/vehicles/physicalVehicleSystem";
 import { createTransitOperationsState } from "../../simulation/transit/transitOperationsSystem";
+import { createVehicleCrimeState } from "../../simulation/crime/vehicleCrimeSystem";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
 import type {
@@ -391,6 +392,7 @@ export function createWorldSession(seed: string): GameSession {
     population,
     organizations
   });
+  const vehicleCrime = createVehicleCrimeState(INITIAL_GAME_TIMESTAMP);
   const transitOperations = createTransitOperationsState({
     timestamp: INITIAL_GAME_TIMESTAMP,
     seed,
@@ -449,6 +451,7 @@ export function createWorldSession(seed: string): GameSession {
     buildingAccess,
     vehicles,
     transit: transitOperations,
+    vehicleCrime,
     events: createInitialEvents({
       seed,
       districtName: lower.name,

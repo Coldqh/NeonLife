@@ -251,6 +251,13 @@ function initialPlayerVehicle(input: PhysicalVehiclesInput, previous?: PhysicalV
     modelName: MODELS.compact.name,
     vehicleClass: MODELS.compact.vehicleClass,
     plate: plate(input.seed, id),
+    originalPlate: plate(input.seed, id),
+    legalStatus: "registered",
+    stolenByPlayer: false,
+    hotwired: false,
+    cabinLootCredits: rng.integer(8, 48),
+    insured: true,
+    insuranceValue: 4_800,
     ownerEntityId: input.playerId,
     access: "owned",
     state: "parked",
@@ -304,9 +311,15 @@ function generatedVehicle(
   const localNodes = nodes.filter((node) => node.sectorId === sector.id);
   const node = localNodes.length ? localNodes[slot % localNodes.length] : undefined;
   const hour = Math.floor(input.timestamp / (60 * 60_000));
-  const moving = slot % 5 === 0 && model.vehicleClass !== "bus" ? true : slot % 7 === 0 && model.vehicleClass === "bus";
+  const focusSlot = sector.id === input.playerPosition.sectorId && slot < 7;
+  const moving = focusSlot ? false : slot % 5 === 0 && model.vehicleClass !== "bus" ? true : slot % 7 === 0 && model.vehicleClass === "bus";
   const movingPoint = pointInBounds(sector.bounds, `${input.seed}:moving-vehicle:${sector.id}:${slot}:${hour}`, 12);
-  const parkedPoint = node
+  const parkedPoint = focusSlot
+    ? clampPointToSector(input, sector.id, {
+        xM: input.playerPosition.xM + 24 + (slot % 4) * 19,
+        yM: input.playerPosition.yM + ((slot % 3) - 1) * 21
+      })
+    : node
     ? clampPointToSector(input, sector.id, {
         xM: round1(node.xM + ((slot % 4) - 1.5) * 3.2),
         yM: round1(node.yM + (Math.floor(slot / 4) % 3) * 3.6)
@@ -318,19 +331,29 @@ function generatedVehicle(
   const access: PhysicalVehicleAccess = model.vehicleClass === "taxi" || model.vehicleClass === "bus" ? "public" : "locked";
   const condition = previous?.condition ?? rng.integer(model.vehicleClass === "truck" || model.vehicleClass === "bus" ? 48 : 56, 94);
   const fuelL = previous?.fuelL ?? round1(model.fuelCapacityL * rng.integer(28, 92) / 100);
+  const preservePhysical = Boolean(previous && previous.state !== "moving");
   return {
     id,
     modelCode: model.code,
     modelName: model.name,
     vehicleClass: model.vehicleClass,
     plate: previous?.plate ?? plate(input.seed, id),
+    originalPlate: previous?.originalPlate ?? previous?.plate ?? plate(input.seed, id),
+    legalStatus: previous?.legalStatus ?? "registered",
+    theftIncidentId: previous?.theftIncidentId,
+    stolenByPlayer: previous?.stolenByPlayer ?? false,
+    hotwired: previous?.hotwired ?? false,
+    alarmTriggeredAt: previous?.alarmTriggeredAt,
+    cabinLootCredits: previous?.cabinLootCredits ?? rng.integer(0, model.vehicleClass === "truck" || model.vehicleClass === "van" ? 180 : 75),
+    insured: previous?.insured ?? Boolean(ownerResidentId || organization),
+    insuranceValue: previous?.insuranceValue ?? Math.round((model.vehicleClass === "truck" ? 18_000 : model.vehicleClass === "bus" ? 28_000 : model.vehicleClass === "police" || model.vehicleClass === "medical" ? 14_000 : 4_200) * (0.55 + condition / 200)),
     ownerEntityId: ownerResidentId ?? organization?.id,
     ownerResidentId,
     organizationId: organization?.id,
     fleetMode,
-    access,
-    state: condition < 18 ? "disabled" : moving ? "moving" : model.vehicleClass === "medical" || model.vehicleClass === "police" ? "service" : "parked",
-    position: {
+    access: previous?.access ?? access,
+    state: preservePhysical ? previous!.state : condition < 18 ? "disabled" : moving ? "moving" : model.vehicleClass === "medical" || model.vehicleClass === "police" ? "service" : "parked",
+    position: preservePhysical ? { ...previous!.position, updatedAt: input.timestamp } : {
       sectorId: sector.id,
       xM: position.xM,
       yM: position.yM,
@@ -347,9 +370,9 @@ function generatedVehicle(
     odometerKm: previous?.odometerKm ?? rng.integer(4_000, 280_000),
     driverEntityId: moving ? previous?.driverEntityId ?? organization?.id ?? ownerResidentId : undefined,
     passengerEntityIds: previous?.passengerEntityIds ?? [],
-    locked: true,
-    alarmed: model.vehicleClass !== "truck" ? condition >= 45 : condition >= 62,
-    persistent: false,
+    locked: previous?.locked ?? true,
+    alarmed: previous?.alarmed ?? (model.vehicleClass !== "truck" ? condition >= 45 : condition >= 62),
+    persistent: previous?.persistent ?? false,
     distanceToPlayerM: 0,
     visible: false,
     nearby: false,
@@ -404,6 +427,84 @@ function applyCommand(
       lastMovedAt: input.timestamp
     } : item);
     return { vehicles: updated, player: { ...player, currentVehicleId: undefined, seat: null } };
+  }
+
+  if (command.kind === "crime-unlock") {
+    const updated = vehicles.map((item) => item.id === vehicle.id ? {
+      ...item,
+      locked: command.success ? false : item.locked,
+      alarmTriggeredAt: command.alarmTriggered ? input.timestamp : item.alarmTriggeredAt,
+      theftIncidentId: command.incidentId ?? item.theftIncidentId,
+      persistent: item.persistent || command.success,
+      lastMovedAt: input.timestamp
+    } : item);
+    return { vehicles: updated, player };
+  }
+
+  if (command.kind === "crime-steal") {
+    if (!command.success) {
+      const failed = vehicles.map((item) => item.id === vehicle.id ? {
+        ...item,
+        alarmTriggeredAt: command.alarmTriggered ? input.timestamp : item.alarmTriggeredAt,
+        theftIncidentId: command.incidentId ?? item.theftIncidentId,
+        lastMovedAt: input.timestamp
+      } : item);
+      return { vehicles: failed, player };
+    }
+    const updated = vehicles.map((item) => item.id === vehicle.id ? {
+      ...item,
+      access: "authorized" as const,
+      state: "occupied" as const,
+      legalStatus: "stolen" as const,
+      stolenByPlayer: true,
+      hotwired: true,
+      locked: false,
+      persistent: true,
+      driverEntityId: input.playerId,
+      theftIncidentId: command.incidentId ?? item.theftIncidentId,
+      alarmTriggeredAt: command.alarmTriggered ? input.timestamp : item.alarmTriggeredAt,
+      passengerEntityIds: item.passengerEntityIds.filter((id) => id !== input.playerId),
+      lastMovedAt: input.timestamp,
+      lastMaterializedAt: input.timestamp
+    } : item);
+    return {
+      vehicles: updated,
+      player: {
+        ...player,
+        currentVehicleId: vehicle.id,
+        seat: "driver",
+        keyVehicleIds: [...new Set([...player.keyVehicleIds, vehicle.id])]
+      }
+    };
+  }
+
+  if (command.kind === "crime-loot") {
+    const updated = vehicles.map((item) => item.id === vehicle.id ? { ...item, cabinLootCredits: 0, lastMovedAt: input.timestamp } : item);
+    return { vehicles: updated, player };
+  }
+
+  if (command.kind === "crime-replate") {
+    const updated = vehicles.map((item) => item.id === vehicle.id ? {
+      ...item,
+      originalPlate: item.originalPlate ?? item.plate,
+      plate: command.plate,
+      legalStatus: "replated" as const,
+      alarmed: false,
+      lastMovedAt: input.timestamp
+    } : item);
+    return { vehicles: updated, player };
+  }
+
+  if (command.kind === "crime-dispose") {
+    return {
+      vehicles: vehicles.filter((item) => item.id !== vehicle.id),
+      player: {
+        ...player,
+        currentVehicleId: player.currentVehicleId === vehicle.id ? undefined : player.currentVehicleId,
+        seat: player.currentVehicleId === vehicle.id ? null : player.seat,
+        keyVehicleIds: player.keyVehicleIds.filter((id) => id !== vehicle.id)
+      }
+    };
   }
 
   if (command.kind === "drive") {
@@ -466,11 +567,11 @@ function decorateVehicles(input: PhysicalVehiclesInput, vehicles: PhysicalVehicl
     const vehicleDistance = current ? 0 : sameSector ? distance(input.playerPosition, vehicle.position) : Number.MAX_SAFE_INTEGER;
     const visible = current || (!playerInside && sameSector && vehicleDistance <= VISIBLE_DISTANCE_M);
     const nearby = current || (visible && vehicleDistance <= NEARBY_DISTANCE_M);
-    const accessAllowed = vehicle.access === "owned" || vehicle.access === "authorized" || vehicle.access === "public";
+    const accessAllowed = vehicle.access === "owned" || vehicle.access === "authorized" || vehicle.access === "public" || vehicle.hotwired;
     const canEnterState = vehicle.state === "parked" || vehicle.state === "service" || vehicle.state === "occupied";
-    const playerCanUnlock = vehicle.access === "owned" || vehicle.access === "authorized";
+    const playerCanUnlock = vehicle.access === "owned" || vehicle.access === "authorized" || player.keyVehicleIds.includes(vehicle.id);
     const playerCanEnter = !current && (playerCanUnlock || !vehicle.locked) && accessAllowed && canEnterState && vehicleDistance <= ENTER_DISTANCE_M;
-    const playerCanDrive = (vehicle.access === "owned" || vehicle.access === "authorized") && vehicle.condition >= 18 && vehicle.fuelL > 0;
+    const playerCanDrive = (vehicle.access === "owned" || vehicle.access === "authorized" || vehicle.hotwired || player.keyVehicleIds.includes(vehicle.id)) && vehicle.condition >= 18 && vehicle.fuelL > 0;
     return {
       ...vehicle,
       distanceToPlayerM: vehicleDistance,
@@ -492,6 +593,8 @@ function attachParkingOccupancy(nodes: VehicleParkingNodeState[], vehicles: Phys
 
 function buildState(input: PhysicalVehiclesInput, previous?: PhysicalVehiclesState): PhysicalVehiclesState {
   const previousById = new Map(previous?.vehicles.map((vehicle) => [vehicle.id, vehicle]) ?? []);
+  const disposedVehicleIds = new Set(previous?.disposedVehicleIds ?? []);
+  if (input.command?.kind === "crime-dispose") disposedVehicleIds.add(input.command.vehicleId);
   let nodes = parkingNodes(input);
   const playerVehicleId = createStableEntityId("physical-vehicle", `${input.seed}:player:${input.playerId}:starter`);
   const vehicles: PhysicalVehicleEntityState[] = [initialPlayerVehicle(input, previousById.get(playerVehicleId))];
@@ -501,7 +604,7 @@ function buildState(input: PhysicalVehiclesInput, previous?: PhysicalVehiclesSta
     const count = targetVehicleCount(input, sector);
     for (let slot = 0; slot < count && vehicles.length < MAX_MATERIALIZED_VEHICLES; slot += 1) {
       const id = createStableEntityId("physical-vehicle", `${input.seed}:${sector.id}:${slot}`);
-      if (id === playerVehicleId) continue;
+      if (id === playerVehicleId || disposedVehicleIds.has(id)) continue;
       vehicles.push(generatedVehicle(input, sector, slot, nodes, previousById.get(id)));
     }
   }
@@ -523,6 +626,7 @@ function buildState(input: PhysicalVehiclesInput, previous?: PhysicalVehiclesSta
     parkingNodes: nodes,
     player,
     persistentVehicleIds: decorated.filter((vehicle) => vehicle.persistent).map((vehicle) => vehicle.id),
+    disposedVehicleIds: [...disposedVehicleIds],
     totals: {
       materializedVehicles: decorated.length,
       focusSectorVehicles: decorated.filter((vehicle) => vehicle.position.sectorId === focusSectorId).length,
@@ -559,6 +663,7 @@ export function normalizePhysicalVehiclesState(value: unknown, input: PhysicalVe
     parkingNodes: Array.isArray(raw.parkingNodes) ? raw.parkingNodes : [],
     player: raw.player,
     persistentVehicleIds: Array.isArray(raw.persistentVehicleIds) ? raw.persistentVehicleIds : [],
+    disposedVehicleIds: Array.isArray(raw.disposedVehicleIds) ? raw.disposedVehicleIds : [],
     totals: raw.totals ?? {
       materializedVehicles: raw.vehicles.length,
       focusSectorVehicles: 0,

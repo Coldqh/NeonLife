@@ -469,6 +469,15 @@ function materializeActors(input: LocalSceneInput, playerPosition: SpatialPositi
     });
   }
 
+  const focusSector = sectorById(input, playerPosition.sectorId);
+  if (focusSector && playerPosition.state !== "inside") {
+    const ambientNearCount = Math.min(6, Math.max(2, focusSector.materializedResidentCount));
+    for (let slot = 0; slot < ambientNearCount && actors.length < input.metropolitan.config.maxMaterializedResidents; slot += 1) {
+      const ambient = createSyntheticActor(input, focusSector, slot, Math.max(ambientNearCount, focusSector.materializedResidentCount), playerPosition);
+      if (!actors.some((actor) => actor.id === ambient.id)) actors.push(ambient);
+    }
+  }
+
   const sectorOrder = input.metropolitan.streaming.activeSectorIds
     .map((sectorId) => sectorById(input, sectorId))
     .filter((sector): sector is MetropolitanSectorState => Boolean(sector))
@@ -477,7 +486,8 @@ function materializeActors(input: LocalSceneInput, playerPosition: SpatialPositi
     const targetCount = sector.materializedResidentCount;
     const existingCount = actors.filter((actor) => actor.position.sectorId === sector.id).length;
     let syntheticAdded = 0;
-    for (let slot = 0; existingCount + syntheticAdded < targetCount && actors.length < input.metropolitan.config.maxMaterializedResidents; slot += 1) {
+    const firstSyntheticSlot = sector.id === playerPosition.sectorId && playerPosition.state !== "inside" ? 6 : 0;
+    for (let slot = firstSyntheticSlot; existingCount + syntheticAdded < targetCount && actors.length < input.metropolitan.config.maxMaterializedResidents; slot += 1) {
       actors.push(createSyntheticActor(input, sector, slot, targetCount, playerPosition));
       syntheticAdded += 1;
     }

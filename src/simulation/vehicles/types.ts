@@ -10,6 +10,7 @@ export type PhysicalVehicleClass = "compact" | "sedan" | "van" | "taxi" | "servi
 export type PhysicalVehicleStateKind = "parked" | "moving" | "occupied" | "service" | "disabled";
 export type PhysicalVehicleAccess = "owned" | "authorized" | "public" | "locked";
 export type VehicleParkingKind = "curb" | "residential" | "commercial" | "service" | "freight";
+export type VehicleLegalStatus = "registered" | "stolen" | "wanted" | "replated" | "stripped";
 
 export interface PhysicalVehiclePositionState {
   sectorId: EntityId;
@@ -27,6 +28,15 @@ export interface PhysicalVehicleEntityState {
   modelName: string;
   vehicleClass: PhysicalVehicleClass;
   plate: string;
+  originalPlate?: string;
+  legalStatus: VehicleLegalStatus;
+  theftIncidentId?: EntityId;
+  stolenByPlayer: boolean;
+  hotwired: boolean;
+  alarmTriggeredAt?: number;
+  cabinLootCredits: number;
+  insured: boolean;
+  insuranceValue: number;
   ownerEntityId?: EntityId;
   ownerResidentId?: EntityId;
   organizationId?: EntityId;
@@ -99,6 +109,7 @@ export interface PhysicalVehiclesState {
   parkingNodes: VehicleParkingNodeState[];
   player: PlayerVehicleControlState;
   persistentVehicleIds: EntityId[];
+  disposedVehicleIds: EntityId[];
   totals: PhysicalVehicleTotalsState;
   lastProcessedHour: number;
   lastUpdatedAt: number;
@@ -115,7 +126,12 @@ export type VehicleCommand =
       durationMinutes: number;
       fuelUsedL: number;
     }
-  | { kind: "service"; vehicleId: EntityId; fuelAddedL: number; conditionRestored: number };
+  | { kind: "service"; vehicleId: EntityId; fuelAddedL: number; conditionRestored: number }
+  | { kind: "crime-unlock"; vehicleId: EntityId; success: boolean; alarmTriggered: boolean; incidentId?: EntityId }
+  | { kind: "crime-steal"; vehicleId: EntityId; success: boolean; alarmTriggered: boolean; incidentId?: EntityId }
+  | { kind: "crime-loot"; vehicleId: EntityId }
+  | { kind: "crime-replate"; vehicleId: EntityId; plate: string }
+  | { kind: "crime-dispose"; vehicleId: EntityId; method: "strip" | "fence" };
 
 export interface PhysicalVehiclesInput {
   timestamp: number;

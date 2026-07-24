@@ -29,6 +29,7 @@ import { normalizeLocalSceneState } from "../../simulation/localScene/localScene
 import { normalizeBuildingAccessState } from "../../simulation/access/buildingAccessSystem";
 import { normalizePhysicalVehiclesState } from "../../simulation/vehicles/physicalVehicleSystem";
 import { normalizeTransitOperationsState } from "../../simulation/transit/transitOperationsSystem";
+import { normalizeVehicleCrimeState } from "../../simulation/crime/vehicleCrimeSystem";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -665,6 +666,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     mobility,
     physicalVehicles: vehicles
   });
+  const vehicleCrime = normalizeVehicleCrimeState(payload.vehicleCrime, timestamp);
   const kernel = advanceSimulationKernel(baseKernel, {
     timestamp,
     seed,
@@ -710,6 +712,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     buildingAccess,
     vehicles,
     transit,
+    vehicleCrime,
     currentActivity: `На месте: ${existingLocationName}`,
     world: {
       ...world,

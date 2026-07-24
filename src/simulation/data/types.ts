@@ -22,7 +22,8 @@ export type DataRecordKind =
   | "criminal"
   | "license"
   | "cyberware"
-  | "access-log";
+  | "access-log"
+  | "vehicle-registration";
 export type DataPurpose = "service" | "employment-screening" | "care" | "insurance" | "tax" | "investigation" | "security" | "commercial-analysis" | "illegal-sale" | "identity-forgery";
 export type AccessOutcome = "allowed" | "denied" | "overridden" | "forged";
 export type SurveillanceNodeKind = "camera" | "identity-gate" | "transit-scanner" | "medical-terminal" | "work-terminal" | "implant-reader" | "network-sensor";
@@ -113,6 +114,9 @@ export interface SurveillanceObservationState {
   ownerEntityId: EntityId;
   districtId: EntityId;
   subjectIds: EntityId[];
+  vehicleIds?: EntityId[];
+  eventKind?: "routine" | "vehicle-theft" | "public-order";
+  observedPlate?: string;
   quality: number;
   retainedUntilDay: number;
   accessedByIds: EntityId[];

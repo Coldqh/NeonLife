@@ -53,6 +53,12 @@ import {
   leavePhysicalVehicle,
   drivePhysicalVehicleToLocation,
   servicePhysicalVehicle,
+  inspectPhysicalVehicleForTheft,
+  forceOpenPhysicalVehicle,
+  hotwirePhysicalVehicle,
+  stealPhysicalVehicleContents,
+  replateStolenPhysicalVehicle,
+  disposeStolenPhysicalVehicle,
   boardTransitVehicle,
   takeTransitSeat,
   standInTransit,
@@ -72,6 +78,7 @@ import { getPerson, toKnownNpc } from "../people/network/humanNetwork";
 import type { PersonState } from "../people/network/types";
 import type { LocalActorState } from "../simulation/localScene/types";
 import { estimatePhysicalVehicleTravel, getPhysicalVehicle } from "../simulation/vehicles/physicalVehicleSystem";
+import { getVehicleCrimeInspection, getVehicleWantedState } from "../simulation/crime/vehicleCrimeSystem";
 import { getTransitBoardingVehicle, getTransitLegMinutes, getTransitRoute, getTransitStop, getTransitVehicle } from "../simulation/transit/transitOperationsSystem";
 import type { TransitPhoneActivity, TransitPriorityNeed } from "../simulation/transit/types";
 import { Meter } from "../ui/components/Meter";
@@ -110,6 +117,12 @@ interface PhysicalVehicleActions {
   onLeave: () => void;
   onDrive: (locationId: string) => void;
   onService: (vehicleId: string) => void;
+  onInspect: (vehicleId: string) => void;
+  onBreakIn: (vehicleId: string) => void;
+  onHotwire: (vehicleId: string) => void;
+  onLoot: (vehicleId: string) => void;
+  onReplate: (vehicleId: string) => void;
+  onDispose: (vehicleId: string, method: "strip" | "fence") => void;
 }
 
 interface TransitActions {
@@ -383,6 +396,30 @@ export default function App() {
 
   function serviceVehicle(vehicleId: string): void {
     setSession((current) => servicePhysicalVehicle(current, vehicleId));
+  }
+
+  function inspectVehicle(vehicleId: string): void {
+    setSession((current) => inspectPhysicalVehicleForTheft(current, vehicleId));
+  }
+
+  function breakIntoVehicle(vehicleId: string): void {
+    setSession((current) => forceOpenPhysicalVehicle(current, vehicleId));
+  }
+
+  function hotwireVehicle(vehicleId: string): void {
+    setSession((current) => hotwirePhysicalVehicle(current, vehicleId));
+  }
+
+  function lootVehicle(vehicleId: string): void {
+    setSession((current) => stealPhysicalVehicleContents(current, vehicleId));
+  }
+
+  function replateVehicle(vehicleId: string): void {
+    setSession((current) => replateStolenPhysicalVehicle(current, vehicleId));
+  }
+
+  function disposeVehicle(vehicleId: string, method: "strip" | "fence"): void {
+    setSession((current) => disposeStolenPhysicalVehicle(current, vehicleId, method));
   }
 
   function boardTransit(): void {
@@ -672,7 +709,13 @@ export default function App() {
     onEnter: enterVehicle,
     onLeave: leaveVehicle,
     onDrive: driveVehicle,
-    onService: serviceVehicle
+    onService: serviceVehicle,
+    onInspect: inspectVehicle,
+    onBreakIn: breakIntoVehicle,
+    onHotwire: hotwireVehicle,
+    onLoot: lootVehicle,
+    onReplate: replateVehicle,
+    onDispose: disposeVehicle
   };
 
   const transitActions: TransitActions = {
@@ -1547,6 +1590,7 @@ function PhysicalVehiclesWorkspace({ session, actions }: { session: GameSession;
         <div><span>PARKING</span><strong>{session.vehicles.totals.occupiedParkingSpaces}</strong><small>{session.vehicles.totals.parkingNodes} physical nodes</small></div>
         <div><span>PLAYER VEHICLE</span><strong>{currentVehicle?.plate ?? playerControl.ownedVehicleIds.length}</strong><small>{currentVehicle ? `${playerControl.seat?.toUpperCase()} · ${currentVehicle.modelName}` : "owned vehicles"}</small></div>
         <div><span>DRIVEN</span><strong>{playerControl.distanceDrivenKm.toFixed(1)} KM</strong><small>{playerControl.tripsCompleted} trips · {playerControl.fuelConsumedL.toFixed(1)} L</small></div>
+        <div><span>CRIME HEAT</span><strong>{Math.round(session.vehicleCrime.playerHeat)}%</strong><small>{session.vehicleCrime.stolenVehicleIds.length} stolen · {session.vehicleCrime.totals.casesOpened} cases</small></div>
       </section>
 
       {currentVehicle ? (
@@ -1560,6 +1604,13 @@ function PhysicalVehiclesWorkspace({ session, actions }: { session: GameSession;
             <div><span>CONDITION</span><strong>{Math.round(currentVehicle.condition)}%</strong><i><b style={{ width: `${currentVehicle.condition}%` }} /></i></div>
             <div><span>ODOMETER</span><strong>{Math.round(currentVehicle.odometerKm).toLocaleString("ru-RU")} KM</strong><small>{currentVehicle.consumptionLPer100Km} L / 100 KM</small></div>
           </div>
+          {getVehicleWantedState(session.vehicleCrime, currentVehicle.id) ? (
+            <div className="vehicle-crime-panel">
+              <strong>{currentVehicle.legalStatus.toUpperCase()}</strong>
+              <span>HEAT {getVehicleWantedState(session.vehicleCrime, currentVehicle.id)?.heat ?? 0}% · original plate {currentVehicle.originalPlate}</span>
+              {currentLocation?.type === "workshop" ? <button type="button" onClick={() => actions.onReplate(currentVehicle.id)}>СМЕНИТЬ НОМЕРА</button> : null}
+            </div>
+          ) : null}
           {playerControl.seat === "driver" ? (
             <div className="vehicle-destination-list">
               {destinations.map(({ location, estimate }) => {
@@ -1580,10 +1631,13 @@ function PhysicalVehiclesWorkspace({ session, actions }: { session: GameSession;
           <header><span>ACTIVE SECTOR / PHYSICAL VEHICLES</span><strong>{visibleVehicles.length} RECORDS</strong></header>
           {visibleVehicles.map((vehicle) => {
             const owned = ownedIds.has(vehicle.id);
+            const inspection = getVehicleCrimeInspection(session.vehicleCrime, vehicle.id);
+            const wanted = getVehicleWantedState(session.vehicleCrime, vehicle.id);
             const closeEnough = vehicle.distanceToPlayerM <= 6;
             const canApproach = session.localScene.playerPosition.state === "outside" && vehicle.visible && vehicle.state !== "moving";
             const canEnter = session.localScene.playerPosition.state === "outside" && closeEnough && (vehicle.access === "owned" || vehicle.access === "authorized" || (!vehicle.locked && vehicle.access === "public")) && vehicle.state !== "moving" && vehicle.state !== "disabled";
             const canService = currentLocation?.type === "workshop" && closeEnough && owned;
+            const canCrimeService = currentLocation?.type === "workshop" && closeEnough && Boolean(wanted);
             return (
               <article key={vehicle.id} className={`${owned ? "is-owned" : ""} ${closeEnough ? "is-near" : ""}`}>
                 <div className="vehicle-presence-list__identity">
@@ -1594,13 +1648,22 @@ function PhysicalVehiclesWorkspace({ session, actions }: { session: GameSession;
                 <div className="vehicle-presence-list__metrics">
                   <span className={vehicle.condition < 30 ? "warning-text" : ""}>COND {Math.round(vehicle.condition)}%</span>
                   <span>FUEL {vehicle.fuelL}/{vehicle.fuelCapacityL} L</span>
-                  <small>{owned ? "PLAYER OWNED · KEY AVAILABLE" : `${vehicle.access.toUpperCase()} · ${vehicle.locked ? "LOCKED" : "UNLOCKED"}`}</small>
+                  <small>{owned ? "PLAYER OWNED · KEY AVAILABLE" : `${vehicle.access.toUpperCase()} · ${vehicle.locked ? "LOCKED" : "UNLOCKED"} · ${vehicle.legalStatus.toUpperCase()}`}</small>
+                  {inspection ? <small>LOCK {inspection.lockDifficulty}% · IGN {inspection.ignitionDifficulty}% · ALARM {inspection.alarmRisk}% · CAM {inspection.cameraRisk}%</small> : null}
+                  {wanted ? <small className="warning-text">WANTED {wanted.heat}% · EVIDENCE {wanted.evidence}%</small> : null}
                 </div>
                 <div className="vehicle-presence-list__actions">
                   {!closeEnough && canApproach ? <button type="button" onClick={() => actions.onApproach(vehicle.id)}>ПОДОЙТИ</button> : null}
                   {canEnter ? <button type="button" className="button--primary" onClick={() => actions.onEnter(vehicle.id)}>СЕСТЬ</button> : null}
                   {canService ? <button type="button" onClick={() => actions.onService(vehicle.id)}>СЕРВИС</button> : null}
-                  {!canEnter && closeEnough && !canService ? <button type="button" disabled>{vehicle.state === "disabled" ? "НЕИСПРАВНА" : "НЕТ ДОСТУПА"}</button> : null}
+                  {closeEnough && !owned && vehicle.state !== "moving" && !inspection ? <button type="button" onClick={() => actions.onInspect(vehicle.id)}>ОСМОТРЕТЬ</button> : null}
+                  {closeEnough && !owned && vehicle.locked && inspection ? <button type="button" className="button--danger" onClick={() => actions.onBreakIn(vehicle.id)}>ВСКРЫТЬ</button> : null}
+                  {closeEnough && !owned && !vehicle.locked && inspection && !vehicle.hotwired ? <button type="button" className="button--danger" onClick={() => actions.onHotwire(vehicle.id)}>ЗАВЕСТИ</button> : null}
+                  {closeEnough && !vehicle.locked && vehicle.cabinLootCredits > 0 ? <button type="button" onClick={() => actions.onLoot(vehicle.id)}>ОБЫСКАТЬ</button> : null}
+                  {canCrimeService ? <button type="button" onClick={() => actions.onReplate(vehicle.id)}>НОМЕРА</button> : null}
+                  {canCrimeService ? <button type="button" className="button--danger" onClick={() => actions.onDispose(vehicle.id, "strip")}>РАЗОБРАТЬ</button> : null}
+                  {canCrimeService ? <button type="button" className="button--danger" onClick={() => actions.onDispose(vehicle.id, "fence")}>ПРОДАТЬ</button> : null}
+                  {!canEnter && closeEnough && !canService && owned ? <button type="button" disabled>{vehicle.state === "disabled" ? "НЕИСПРАВНА" : "НЕТ ДОСТУПА"}</button> : null}
                 </div>
               </article>
             );

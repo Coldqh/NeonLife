@@ -44,6 +44,17 @@ import {
 } from "../../simulation/transit/transitOperationsSystem";
 import type { TransitCommand, TransitPhoneActivity } from "../../simulation/transit/types";
 import {
+  advanceVehicleCrimeState,
+  appendVehicleCrimeObservations,
+  attemptVehicleCrimeAction,
+  getVehicleCrimeInspection,
+  getVehicleWantedState,
+  inspectVehicleCrimeOpportunity,
+  recordVehicleCabinTheft,
+  resolveVehicleFenceAction,
+  synchronizeVehicleCrimeStatus
+} from "../../simulation/crime/vehicleCrimeSystem";
+import {
   advanceBuildingAccessState,
   findAccessDoor,
   recordAccessDenied,
@@ -361,6 +372,17 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     organizations: dataAdvance.organizations,
     command: options.vehicleCommand
   });
+  const crimeAdvance = advanceVehicleCrimeState(session.vehicleCrime, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    data: compactedDataState,
+    government: dataAdvance.government,
+    vehicles: vehiclesState,
+    population: populationState,
+    organizations: dataAdvance.organizations
+  });
+  const crimeVehiclesState = synchronizeVehicleCrimeStatus(crimeAdvance.state, vehiclesState);
   const transitState = advanceTransitOperationsState(session.transit, {
     timestamp: nextTimestamp,
     seed: session.world.meta.seed,
@@ -373,7 +395,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     population: populationState,
     metropolitan: metropolitanState,
     mobility: mobilityState,
-    physicalVehicles: vehiclesState,
+    physicalVehicles: crimeVehiclesState,
     command: options.transitCommand
   });
   const localSceneState = advanceLocalSceneState(provisionalLocalScene, {
@@ -434,6 +456,16 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   for (const notice of pressureAdvance.notices) {
     generated.push(createEvent(session, nextTimestamp, notice.category, notice.title, notice.detail, notice.importance));
   }
+  for (const incident of crimeAdvance.newlyReported) {
+    generated.push(createEvent(
+      session,
+      nextTimestamp,
+      "local",
+      incident.status === "investigating" ? "Открыто дело об угоне машины." : "Владелец заявил об угоне.",
+      `${incident.observedPlate} · улики ${incident.evidence}% · свидетели ${incident.witnessReportIds.length} · камеры ${incident.cameraObservationIds.length}`,
+      incident.status === "investigating" ? 3 : 2
+    ));
+  }
 
   const baselineFatigue = Math.max(0, Math.round(minutes / 120));
   const baselineHunger = Math.max(0, Math.round(minutes / 150));
@@ -448,7 +480,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   );
   const selectedPerson = getPerson(peopleState, session.world.primaryContactId)
     ?? getPerson(peopleState, peopleState.selectedPersonId);
-  const worldEventCount = options.worldEvents ?? (queued.events.length + pulse.events.length + network.notices.length + economyAdvance.notices.length + populationAdvance.notices.length + infrastructureAdvance.notices.length + productionAdvance.notices.length + organizationAdvance.notices.length + governmentAdvance.notices.length + healthAdvance.notices.length + dataAdvance.notices.length + pressureAdvance.notices.length);
+  const worldEventCount = options.worldEvents ?? (queued.events.length + pulse.events.length + network.notices.length + economyAdvance.notices.length + populationAdvance.notices.length + infrastructureAdvance.notices.length + productionAdvance.notices.length + organizationAdvance.notices.length + governmentAdvance.notices.length + healthAdvance.notices.length + dataAdvance.notices.length + pressureAdvance.notices.length + crimeAdvance.newlyReported.length);
   const pressure = trackPressureMetrics(pressureAdvance.state, {
     balanceDelta: options.trackBalance === false ? 0 : options.balanceDelta,
     deliveries: options.deliveryCompleted ? 1 : 0,
@@ -456,7 +488,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     relationChanges: options.relationChanges,
     worldEvents: worldEventCount
   });
-  const nextOrganizations = dataAdvance.organizations;
+  const nextOrganizations = crimeAdvance.organizations;
   const representedPopulation = urbanAdvance.representedPopulationByDistrict;
   const nextDistricts = session.world.districts.map((district) => ({
     ...district,
@@ -492,7 +524,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     urban: urbanState,
     localScene: localSceneState
   });
-  const kernelDrafts = [...populationAdvance.transactions, ...economyAdvance.transactions, ...infrastructureAdvance.transactions, ...productionAdvance.transactions, ...organizationAdvance.transactions, ...governmentAdvance.transactions, ...healthAdvance.transactions, ...dataAdvance.transactions];
+  const kernelDrafts = [...populationAdvance.transactions, ...economyAdvance.transactions, ...infrastructureAdvance.transactions, ...productionAdvance.transactions, ...organizationAdvance.transactions, ...governmentAdvance.transactions, ...healthAdvance.transactions, ...dataAdvance.transactions, ...crimeAdvance.transactions];
   if ((options.balanceDelta ?? 0) !== 0) {
     const amount = Math.abs(options.balanceDelta ?? 0);
     kernelDrafts.push({
@@ -514,15 +546,15 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     locations: session.world.locations,
     organizations: nextOrganizations,
     player: nextPlayer,
-    population: populationState,
+    population: crimeAdvance.population,
     economy: healthAdvance.economy,
     infrastructure: governmentAdvance.infrastructure,
     production: healthAdvance.production,
     organizationEcosystem: organizationAdvance.state,
-    government: dataAdvance.government,
+    government: crimeAdvance.government,
     health: healthAdvance.state,
-    data: compactedDataState,
-    vehicles: vehiclesState,
+    data: crimeAdvance.data,
+    vehicles: crimeVehiclesState,
     food: productionAdvance.food,
     drafts: kernelDrafts
   });
@@ -545,21 +577,22 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     people: peopleState,
     pressure,
     economy: healthAdvance.economy,
-    population: populationState,
+    population: crimeAdvance.population,
     kernel,
     infrastructure: governmentAdvance.infrastructure,
     production: healthAdvance.production,
     organizationEcosystem: organizationAdvance.state,
-    government: dataAdvance.government,
+    government: crimeAdvance.government,
     health: healthAdvance.state,
-    data: compactedDataState,
+    data: crimeAdvance.data,
     metropolitan: metropolitanState,
     urban: urbanState,
     mobility: mobilityState,
     localScene: localSceneState,
     buildingAccess: buildingAccessState,
-    vehicles: vehiclesState,
+    vehicles: crimeVehiclesState,
     transit: transitState,
+    vehicleCrime: crimeAdvance.state,
     district: infrastructurePulse,
     eventQueue: queued.queue,
     currentActivity: pressureAdvance.evicted
@@ -1214,6 +1247,162 @@ export function servicePhysicalVehicle(session: GameSession, vehicleId: string):
     activity: `Сервис завершён: ${vehicle.modelName}`,
     playerPosition: session.localScene.playerPosition,
     vehicleCommand: { kind: "service", vehicleId, fuelAddedL, conditionRestored }
+  });
+}
+
+
+function vehicleCrimeDistrictId(session: GameSession, vehicleId: string): string {
+  const vehicle = getPhysicalVehicle(session.vehicles, vehicleId);
+  const sector = session.metropolitan.sectors.find((item) => item.id === vehicle?.position.sectorId);
+  return sector?.districtId ?? session.world.activeDistrictId;
+}
+
+function vehicleCrimeInput(session: GameSession, vehicleId: string) {
+  const vehicle = getPhysicalVehicle(session.vehicles, vehicleId);
+  if (!vehicle) return null;
+  return {
+    timestamp: session.timestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    vehicle,
+    vehicles: session.vehicles,
+    localScene: session.localScene,
+    data: session.data,
+    districtId: vehicleCrimeDistrictId(session, vehicleId)
+  };
+}
+
+export function inspectPhysicalVehicleForTheft(session: GameSession, vehicleId: string): GameSession {
+  if (session.localScene.playerPosition.state !== "outside") return session;
+  const input = vehicleCrimeInput(session, vehicleId);
+  if (!input || input.vehicle.distanceToPlayerM > 6 || input.vehicle.state === "moving" || input.vehicle.access === "owned") return session;
+  const inspected = inspectVehicleCrimeOpportunity(session.vehicleCrime, input);
+  return progressLife({ ...session, vehicleCrime: inspected.state }, 2, {
+    category: "personal",
+    title: `Осмотр машины ${input.vehicle.plate}.`,
+    detail: `Замок ${inspected.inspection.lockDifficulty}% · зажигание ${inspected.inspection.ignitionDifficulty}% · сигнализация ${inspected.inspection.alarmRisk}% · камеры ${inspected.inspection.cameraRisk}% · свидетели ${inspected.inspection.witnessRisk}%`,
+    importance: 1,
+    stressDelta: 1,
+    activity: `Осмотр машины: ${input.vehicle.modelName}`,
+    playerPosition: session.localScene.playerPosition
+  });
+}
+
+export function forceOpenPhysicalVehicle(session: GameSession, vehicleId: string): GameSession {
+  if (session.localScene.playerPosition.state !== "outside") return session;
+  const input = vehicleCrimeInput(session, vehicleId);
+  if (!input || input.vehicle.distanceToPlayerM > 6 || !input.vehicle.locked || input.vehicle.state === "moving" || input.vehicle.access === "owned") return session;
+  if (!getVehicleCrimeInspection(session.vehicleCrime, vehicleId)) return session;
+  const result = attemptVehicleCrimeAction(session.vehicleCrime, { ...input, action: "break-in" });
+  const data = appendVehicleCrimeObservations(session.data, result.observations, session.timestamp);
+  return progressLife({ ...session, vehicleCrime: result.state, data }, 4, {
+    category: "personal",
+    title: result.success ? `Замок машины ${input.vehicle.plate} вскрыт.` : `Вскрытие машины ${input.vehicle.plate} сорвалось.`,
+    detail: `${result.detail} · улики ${result.evidence}%`,
+    importance: result.alarmTriggered ? 3 : result.success ? 2 : 1,
+    stressDelta: result.alarmTriggered ? 8 : 3,
+    activity: result.success ? `Открытая машина: ${input.vehicle.modelName}` : `У машины: ${input.vehicle.modelName}`,
+    playerPosition: session.localScene.playerPosition,
+    vehicleCommand: { kind: "crime-unlock", vehicleId, success: result.success, alarmTriggered: result.alarmTriggered, incidentId: result.incidentId }
+  });
+}
+
+export function hotwirePhysicalVehicle(session: GameSession, vehicleId: string): GameSession {
+  if (session.localScene.playerPosition.state !== "outside") return session;
+  const input = vehicleCrimeInput(session, vehicleId);
+  if (!input || input.vehicle.distanceToPlayerM > 6 || input.vehicle.locked || input.vehicle.state === "moving" || input.vehicle.state === "disabled" || input.vehicle.access === "owned") return session;
+  if (!getVehicleCrimeInspection(session.vehicleCrime, vehicleId)) return session;
+  const result = attemptVehicleCrimeAction(session.vehicleCrime, { ...input, action: "hotwire" });
+  const data = appendVehicleCrimeObservations(session.data, result.observations, session.timestamp);
+  const position = result.success ? playerVehiclePosition(input.vehicle, session.timestamp + 6 * 60_000, "vehicle") : session.localScene.playerPosition;
+  return progressLife({ ...session, vehicleCrime: result.state, data }, 6, {
+    category: "personal",
+    title: result.success ? `Машина ${input.vehicle.plate} угнана.` : `Зажигание ${input.vehicle.plate} не поддалось.`,
+    detail: `${result.detail} · заявление владельца ${result.ownerReportDueAt ? "ожидается" : "не создано"}`,
+    importance: result.success || result.alarmTriggered ? 3 : 2,
+    stressDelta: result.success ? 7 : 5,
+    activity: result.success ? `В угнанной машине: ${input.vehicle.modelName}` : `У машины: ${input.vehicle.modelName}`,
+    playerPosition: position,
+    vehicleCommand: { kind: "crime-steal", vehicleId, success: result.success, alarmTriggered: result.alarmTriggered, incidentId: result.incidentId }
+  });
+}
+
+export function stealPhysicalVehicleContents(session: GameSession, vehicleId: string): GameSession {
+  if (session.localScene.playerPosition.state !== "outside") return session;
+  const vehicle = getPhysicalVehicle(session.vehicles, vehicleId);
+  if (!vehicle || vehicle.distanceToPlayerM > 6 || vehicle.locked || vehicle.cabinLootCredits <= 0 || vehicle.state === "moving") return session;
+  const credits = vehicle.cabinLootCredits;
+  const result = recordVehicleCabinTheft(session.vehicleCrime, {
+    timestamp: session.timestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    vehicle,
+    localScene: session.localScene,
+    data: session.data,
+    districtId: vehicleCrimeDistrictId(session, vehicleId),
+    credits
+  });
+  const data = appendVehicleCrimeObservations(session.data, result.observations, session.timestamp);
+  return progressLife({ ...session, vehicleCrime: result.state, data }, 3, {
+    category: "personal",
+    title: `Салон ${vehicle.plate} обыскан.`,
+    detail: `Наличные и мелкие вещи · ₵ ${credits} · свидетели ${result.witnessCount} · камеры ${result.cameraCount}`,
+    importance: result.witnessCount || result.cameraCount ? 2 : credits >= 80 ? 2 : 1,
+    balanceDelta: credits,
+    stressDelta: 2,
+    activity: `У машины: ${vehicle.modelName}`,
+    playerPosition: session.localScene.playerPosition,
+    vehicleCommand: { kind: "crime-loot", vehicleId }
+  });
+}
+
+function forgedVehiclePlate(session: GameSession, vehicleId: string): string {
+  const code = createStableEntityId("vehicle-plate-forgery", `${session.world.meta.seed}:${vehicleId}:${session.timestamp}`).replace(/[^a-z0-9]/gi, "").toUpperCase();
+  return `NX-${code.slice(-5)}-${code.slice(-2)}`;
+}
+
+function isAtVehicleWorkshop(session: GameSession): boolean {
+  return session.world.locations.find((location) => location.id === session.life.currentLocationId)?.type === "workshop";
+}
+
+export function replateStolenPhysicalVehicle(session: GameSession, vehicleId: string): GameSession {
+  if (!isAtVehicleWorkshop(session)) return session;
+  const vehicle = getPhysicalVehicle(session.vehicles, vehicleId);
+  const wanted = getVehicleWantedState(session.vehicleCrime, vehicleId);
+  if (!vehicle || !wanted || !session.vehicleCrime.stolenVehicleIds.includes(vehicleId)) return session;
+  if (session.localScene.playerPosition.state !== "outside" && session.vehicles.player.currentVehicleId !== vehicleId) return session;
+  const plate = forgedVehiclePlate(session, vehicleId);
+  const resolved = resolveVehicleFenceAction(session.vehicleCrime, vehicleId, "replate", session.timestamp, plate);
+  if (!resolved || session.player.balance < Math.abs(resolved.amount)) return session;
+  return progressLife({ ...session, vehicleCrime: resolved.state }, 90, {
+    category: "personal",
+    title: `Машина ${vehicle.plate} получила новые номера.`,
+    detail: `${plate} · старый номер ${wanted.originalPlate} остаётся в деле · ₵ ${Math.abs(resolved.amount)}`,
+    importance: 2,
+    balanceDelta: resolved.amount,
+    stressDelta: -3,
+    activity: `Новые номера: ${plate}`,
+    playerPosition: session.localScene.playerPosition,
+    vehicleCommand: { kind: "crime-replate", vehicleId, plate }
+  });
+}
+
+export function disposeStolenPhysicalVehicle(session: GameSession, vehicleId: string, method: "strip" | "fence"): GameSession {
+  if (!isAtVehicleWorkshop(session) || session.localScene.playerPosition.state !== "outside") return session;
+  const vehicle = getPhysicalVehicle(session.vehicles, vehicleId);
+  if (!vehicle || vehicle.distanceToPlayerM > 30 || !session.vehicleCrime.stolenVehicleIds.includes(vehicleId)) return session;
+  const resolved = resolveVehicleFenceAction(session.vehicleCrime, vehicleId, method, session.timestamp);
+  if (!resolved) return session;
+  return progressLife({ ...session, vehicleCrime: resolved.state }, method === "strip" ? 180 : 60, {
+    category: "personal",
+    title: method === "strip" ? `Машина ${vehicle.plate} разобрана.` : `Машина ${vehicle.plate} передана скупщику.`,
+    detail: `${method === "strip" ? "Детали ушли по подпольным каналам" : "Новый владелец забрал машину"} · ₵ ${resolved.amount}`,
+    importance: 3,
+    balanceDelta: resolved.amount,
+    stressDelta: -4,
+    activity: method === "strip" ? "Машина разобрана" : "Машина продана",
+    playerPosition: session.localScene.playerPosition,
+    vehicleCommand: { kind: "crime-dispose", vehicleId, method }
   });
 }
 

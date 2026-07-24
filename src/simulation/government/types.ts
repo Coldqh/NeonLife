@@ -13,7 +13,7 @@ export type LicenseKind = "retail" | "food" | "medical" | "industrial" | "logist
 export type CrimeOperationKind = "cargo-diversion" | "data-theft" | "counterfeit-cyberware" | "stim-market" | "extortion" | "identity-fraud";
 export type CrimeOperationStatus = "active" | "strained" | "disrupted" | "dormant";
 export type EnforcementCaseStatus = "open" | "investigating" | "charged" | "closed" | "cold";
-export type EnforcementCaseKind = "organized-crime" | "cargo-theft" | "cybercrime" | "extortion" | "contraband" | "corruption";
+export type EnforcementCaseKind = "organized-crime" | "cargo-theft" | "vehicle-theft" | "cybercrime" | "extortion" | "contraband" | "corruption";
 
 export interface GovernmentPolicyState {
   householdIncomeTaxRate: number;
@@ -132,6 +132,8 @@ export interface EnforcementCaseState {
   detainedResidentIds: EntityId[];
   seizedCredits: number;
   arrests: number;
+  subjectVehicleId?: EntityId;
+  suspectResidentIds?: EntityId[];
 }
 
 export interface GovernmentDailySnapshot {
