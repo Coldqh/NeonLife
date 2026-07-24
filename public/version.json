@@ -1,7 +1,13 @@
 {
-  "version": "0.29.0",
-  "releasedAt": "2026-07-24T09:17:57Z",
+  "version": "0.30.0",
+  "releasedAt": "2026-07-24T11:15:00Z",
   "forceUpdate": true,
-  "title": "VEHICLE THEFT & WITNESSES",
-  "summary": "Adds physical vehicle break-ins, hotwiring, cabin theft, witnesses, surveillance evidence, owner reports, enforcement cases, insurance settlements, wanted plates and underground replate, strip and fence services."
+  "title": "MOBILE VISUAL SYSTEM",
+  "notes": [
+    "Полностью новая мобильная оболочка под iPhone 14 Pro.",
+    "Глобальная карта отображает все сектора мегаполиса без жёсткого лимита.",
+    "Каждый сектор открывается как локальная карта улиц, кварталов, зданий и объектов.",
+    "Профиль и главная больше не фиксируют игрока в профессии курьера.",
+    "Nearby объединяет физических NPC, здания, машины и локальные события."
+  ]
 }

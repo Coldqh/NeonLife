@@ -1,13 +1,14 @@
 {
   "name": "neon-life",
   "private": true,
-  "version": "0.29.0",
+  "version": "0.30.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.app.json --pretty false && tsc --noEmit -p tsconfig.node.json --pretty false"
+    "typecheck": "tsc --noEmit -p tsconfig.app.json --pretty false && tsc --noEmit -p tsconfig.node.json --pretty false",
+    "test:mobile-ui": "node scripts/verify-mobile-ui.mjs"
   },
   "dependencies": {
     "react": "18.3.1",

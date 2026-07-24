@@ -3,6 +3,7 @@ import { useVersionGuard, type VersionGuardController } from "./providers/useVer
 import { useWorldSave, type WorldSaveController } from "./providers/useWorldSave";
 import type { GameSession } from "../world/state/types";
 import { NeonShell } from "./layout/NeonShell";
+import { MobileExperience } from "./mobile/MobileExperience";
 import type { EventCategory, WorldEvent } from "../core/events/types";
 import {
   advanceGameTime,
@@ -783,6 +784,20 @@ export default function App() {
 
   return (
     <div className={rootClass}>
+      <MobileExperience
+        session={session}
+        actions={quickActions}
+        plans={plans}
+        onAction={(action) => executeAction(action as ActionDefinition)}
+        onTravel={travel}
+        onSelectPerson={selectPerson}
+        onOpenSettings={() => openWindow("settings")}
+        onAdvance={advance}
+        onApproachBuilding={approachBuilding}
+        onEnterBuilding={enterBuilding}
+        onApproachVehicle={approachVehicle}
+        onEnterVehicle={enterVehicle}
+      />
       <NeonShell
         className={activeWindow ? "has-active-window" : ""}
         topbar={topbar}

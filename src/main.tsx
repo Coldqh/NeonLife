@@ -5,6 +5,7 @@ import "./ui/theme/tokens.css";
 import "./ui/theme/global.css";
 import "./ui/theme/components.css";
 import "./ui/theme/responsive.css";
+import "./ui/theme/mobile-experience.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
