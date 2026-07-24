@@ -1,33 +1,34 @@
 :root {
   color-scheme: dark;
-  --bg-0: #04070a;
-  --bg-1: #070c11;
-  --bg-2: #0a1118;
-  --bg-3: #0e1821;
-  --panel: rgba(9, 17, 24, 0.92);
-  --panel-solid: #0a1219;
-  --panel-hover: #101e29;
-  --line: rgba(84, 196, 231, 0.18);
-  --line-strong: rgba(80, 219, 255, 0.43);
-  --cyan: #4bdcff;
-  --cyan-soft: #a7efff;
-  --cyan-dim: #1b6d7d;
-  --white: #eefbff;
-  --muted: #78909b;
-  --muted-2: #4f6670;
-  --green: #55efa8;
-  --yellow: #ffc85a;
-  --red: #ff6478;
-  --purple: #bd75ff;
-  --shadow-cyan: 0 0 24px rgba(38, 199, 241, 0.11);
-  --shadow-deep: 0 22px 80px rgba(0, 0, 0, 0.5);
-  --radius-xs: 2px;
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --topbar-h: 66px;
-  --sidebar-w: 190px;
-  --context-w: 320px;
-  --mobile-nav-h: 72px;
-  --font-ui: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  --nl-bg: #050914;
+  --nl-bg-deep: #030711;
+  --nl-surface: #0b1320;
+  --nl-surface-2: #0e1827;
+  --nl-surface-3: #121e2f;
+  --nl-text: #f4f6fb;
+  --nl-muted: #9aa5b9;
+  --nl-muted-2: #6d788d;
+  --nl-line: rgba(147, 162, 189, 0.16);
+  --nl-line-soft: rgba(147, 162, 189, 0.09);
+  --nl-accent: #ff334d;
+  --nl-accent-soft: rgba(255, 51, 77, 0.14);
+  --nl-blue: #35aaf7;
+  --nl-green: #40d58a;
+  --nl-amber: #ffb43a;
+  --nl-danger: #ff5e69;
+  --nl-radius: 16px;
+  --nl-radius-sm: 12px;
+  --nl-gutter: 20px;
+  --nl-header-h: 76px;
+  --nl-nav-h: 78px;
+  --nl-content-max: 1440px;
+  --nl-font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --nl-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+}
+
+.high-contrast {
+  --nl-text: #ffffff;
+  --nl-muted: #bac3d4;
+  --nl-line: rgba(210, 220, 238, 0.32);
+  --nl-line-soft: rgba(210, 220, 238, 0.17);
 }

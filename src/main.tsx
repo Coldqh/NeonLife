@@ -3,9 +3,12 @@ import ReactDOM from "react-dom/client";
 import App from "./app/App";
 import "./ui/theme/tokens.css";
 import "./ui/theme/global.css";
-import "./ui/theme/components.css";
-import "./ui/theme/responsive.css";
-import "./ui/theme/mobile-experience.css";
+import "./ui/theme/app-shell.css";
+import "./ui/theme/screens.css";
+import "./ui/theme/map.css";
+import "./ui/theme/nearby.css";
+import "./ui/theme/transit.css";
+import "./ui/theme/overlays.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
@@ -27,15 +30,12 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
     void navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" })
       .then((registration) => {
         void registration.update();
-
         window.setInterval(() => {
           if (navigator.onLine) void registration.update();
         }, 5 * 60_000);
-
         registration.addEventListener("updatefound", () => {
           const installing = registration.installing;
           if (!installing) return;
-
           installing.addEventListener("statechange", () => {
             if (installing.state === "installed" && navigator.serviceWorker.controller) {
               installing.postMessage({ type: "SKIP_WAITING" });

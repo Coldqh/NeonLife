@@ -1,0 +1,15 @@
+docs/MOBILE_VISUAL_SYSTEM.md
+public/ui/place-cafe.webp
+public/ui/vehicle-01.webp
+scripts/verify-mobile-ui.mjs
+src/app/layout/NeonShell.tsx
+src/app/mobile/MobileExperience.tsx
+src/app/workspaces/PopulationWorkspace.tsx
+src/app/workspaces/PressureWorkspace.tsx
+src/ui/components/Meter.tsx
+src/ui/components/Portrait.tsx
+src/ui/components/SystemPanel.tsx
+src/ui/components/WindowFrame.tsx
+src/ui/theme/components.css
+src/ui/theme/mobile-experience.css
+src/ui/theme/responsive.css

@@ -1,0 +1,231 @@
+.game-shell {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: var(--nl-header-h) minmax(0, 1fr) var(--nl-nav-h);
+  background: transparent;
+}
+
+.game-header {
+  position: relative;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 0 max(var(--nl-gutter), calc((100vw - var(--nl-content-max)) / 2 + var(--nl-gutter)));
+  border-bottom: 1px solid var(--nl-line);
+  background: rgba(5, 9, 20, .88);
+  backdrop-filter: blur(18px);
+}
+
+.game-header__brand {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.game-header__brand strong {
+  flex: 0 0 auto;
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 700;
+}
+
+.game-header__brand strong em {
+  color: var(--nl-accent);
+  font-style: normal;
+}
+
+.game-header__brand > span {
+  min-width: 0;
+  color: var(--nl-muted);
+  font-size: 13px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.game-header__facts {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 18px;
+  color: var(--nl-muted);
+  font-size: 13px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.game-header__facts > span,
+.game-header__facts > strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.game-header__facts > span i { font-style: normal; }
+.game-header__facts > span em { color: var(--nl-accent); font-style: normal; }
+.game-header__facts > strong { color: var(--nl-text); font-size: 15px; font-weight: 650; }
+.game-header__facts > button {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--nl-line);
+  border-radius: 11px;
+  background: var(--nl-surface);
+  color: var(--nl-muted);
+}
+
+.game-shell__content {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.primary-nav {
+  position: relative;
+  z-index: 25;
+  min-height: var(--nl-nav-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px max(var(--nl-gutter), calc((100vw - 560px) / 2));
+  border-top: 1px solid var(--nl-line);
+  background: rgba(5, 9, 20, .94);
+  backdrop-filter: blur(18px);
+}
+
+.primary-nav button {
+  min-width: 120px;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 0 18px;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--nl-muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.primary-nav button i { display: grid; place-items: center; }
+.primary-nav button.is-active { background: var(--nl-surface-2); color: var(--nl-text); }
+.primary-nav button.is-active:not(.primary-nav__map) { box-shadow: inset 0 -2px 0 var(--nl-accent); }
+.primary-nav__map {
+  min-width: 148px !important;
+  background: var(--nl-accent-soft) !important;
+  color: var(--nl-text) !important;
+  border: 1px solid rgba(255, 51, 77, .36);
+}
+.primary-nav__map.is-active { background: var(--nl-accent) !important; }
+
+.screen {
+  width: min(100%, var(--nl-content-max));
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 28px var(--nl-gutter) 36px;
+}
+
+.screen-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+
+.screen-heading > div:first-child > span {
+  color: var(--nl-accent);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.screen-heading h1 {
+  margin-top: 2px;
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 700;
+}
+
+.screen-heading p {
+  margin-top: 4px;
+  color: var(--nl-muted);
+  font-size: 15px;
+  line-height: 21px;
+}
+
+.segmented-control {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(100px, 1fr));
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--nl-surface);
+  border: 1px solid var(--nl-line);
+}
+
+.segmented-control button {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--nl-muted);
+  font-weight: 600;
+}
+
+.segmented-control button.is-active { background: var(--nl-surface-3); color: var(--nl-text); }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--nl-nav-h) + 18px);
+  z-index: 200;
+  max-width: min(520px, calc(100vw - 40px));
+  transform: translateX(-50%);
+  padding: 11px 16px;
+  border: 1px solid var(--nl-line);
+  border-radius: 12px;
+  background: rgba(13, 23, 37, .96);
+  box-shadow: var(--nl-shadow);
+  color: var(--nl-text);
+  font-size: 13px;
+  line-height: 18px;
+}
+.toast--good { border-color: rgba(64, 213, 138, .38); }
+.toast--warn { border-color: rgba(255, 180, 58, .45); }
+
+@media (max-width: 860px) {
+  :root { --nl-header-h: 86px; --nl-nav-h: 76px; }
+  .game-header {
+    align-items: flex-start;
+    gap: 10px;
+    padding: max(12px, env(safe-area-inset-top)) var(--nl-gutter) 10px;
+  }
+  .game-header__brand { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .game-header__brand strong { font-size: 22px; line-height: 28px; }
+  .game-header__brand > span { max-width: 48vw; font-size: 12px; line-height: 16px; }
+  .game-header__facts { gap: 9px; flex-wrap: wrap; max-width: 54vw; font-size: 12px; line-height: 16px; }
+  .game-header__facts > span:first-child { order: 1; }
+  .game-header__facts > span:nth-child(2) { order: 2; }
+  .game-header__facts > strong { order: 3; font-size: 13px; }
+  .game-header__facts > button { order: 4; width: 30px; height: 30px; }
+  .primary-nav { padding: 7px 14px calc(7px + env(safe-area-inset-bottom)); gap: 4px; }
+  .primary-nav button { min-width: 0; flex: 1; min-height: 54px; flex-direction: column; gap: 3px; padding: 4px 8px; font-size: 12px; }
+  .primary-nav__map { min-width: 0 !important; transform: translateY(-7px); }
+  .screen { padding: 20px var(--nl-gutter) 30px; }
+  .screen-heading { align-items: flex-start; flex-direction: column; gap: 14px; margin-bottom: 16px; }
+  .segmented-control { width: 100%; }
+}
+
+@media (max-width: 430px) {
+  .game-header__brand > span { max-width: 46vw; }
+  .game-header__facts > span:nth-child(2) { font-size: 11px; }
+  .game-header__facts { max-width: 56vw; }
+  .screen { padding-inline: 16px; }
+}
+
+.compact-mode .screen { padding-top: 18px; padding-bottom: 24px; }
+.compact-mode .screen-heading { margin-bottom: 14px; }
