@@ -1,9 +1,8 @@
 APPLY_PATCH.ps1
 CHANGELOG.md
-PATCH_0.30.0.md
+PATCH_0.30.1.md
 PATCH_FILES.txt
 README.md
-docs/ARCHITECTURE.md
 docs/MOBILE_VISUAL_SYSTEM.md
 package-lock.json
 package.json
@@ -12,12 +11,8 @@ public/ui/npc-01.webp
 public/ui/npc-02.webp
 public/ui/npc-03.webp
 public/ui/npc-04.webp
-public/ui/place-cafe.webp
 public/ui/player-portrait.webp
-public/ui/vehicle-01.webp
 public/version.json
 scripts/verify-mobile-ui.mjs
-src/app/App.tsx
 src/app/mobile/MobileExperience.tsx
-src/main.tsx
 src/ui/theme/mobile-experience.css
