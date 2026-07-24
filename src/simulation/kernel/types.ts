@@ -34,7 +34,7 @@ export type KernelResource =
   | "data-substrate-units"
   | "packaging-units";
 
-export type KernelAssetKind = "business-operation" | "housing-block" | "facility" | "district-land" | "infrastructure-node" | "infrastructure-link" | "production-facility" | "warehouse" | "medical-facility" | "cyberware-installation" | "surveillance-node";
+export type KernelAssetKind = "business-operation" | "housing-block" | "facility" | "district-land" | "infrastructure-node" | "infrastructure-link" | "production-facility" | "warehouse" | "medical-facility" | "cyberware-installation" | "surveillance-node" | "vehicle";
 export type KernelAssetStatus = "active" | "strained" | "restricted" | "offline";
 export type KernelContractKind = "employment" | "lease" | "supply" | "service" | "loan" | "utility" | "procurement" | "logistics" | "license" | "tax" | "public-service" | "insurance" | "medical-care" | "cyberware-finance" | "data-access";
 export type KernelContractStatus = "active" | "suspended" | "breached" | "ended";

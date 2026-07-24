@@ -47,7 +47,12 @@ import {
   enterBuildingUnit,
   leaveBuildingUnit,
   enterInteriorRoom,
-  leaveInteriorRoom
+  leaveInteriorRoom,
+  approachPhysicalVehicle,
+  enterPhysicalVehicle,
+  leavePhysicalVehicle,
+  drivePhysicalVehicleToLocation,
+  servicePhysicalVehicle
 } from "../gameplay/life/lifeSimulation";
 import { Icon, type IconName } from "../ui/components/Icons";
 import { PressureWorkspace } from "./workspaces/PressureWorkspace";
@@ -57,6 +62,7 @@ import { getActiveCourierOrder, type CourierOrder } from "../gameplay/jobs/couri
 import { getPerson, toKnownNpc } from "../people/network/humanNetwork";
 import type { PersonState } from "../people/network/types";
 import type { LocalActorState } from "../simulation/localScene/types";
+import { estimatePhysicalVehicleTravel, getPhysicalVehicle } from "../simulation/vehicles/physicalVehicleSystem";
 import { Meter } from "../ui/components/Meter";
 import { Portrait } from "../ui/components/Portrait";
 import { SystemPanel } from "../ui/components/SystemPanel";
@@ -85,6 +91,14 @@ interface BuildingAccessActions {
   onLeaveUnit: () => void;
   onEnterRoom: (roomId: string) => void;
   onLeaveRoom: () => void;
+}
+
+interface PhysicalVehicleActions {
+  onApproach: (vehicleId: string) => void;
+  onEnter: (vehicleId: string) => void;
+  onLeave: () => void;
+  onDrive: (locationId: string) => void;
+  onService: (vehicleId: string) => void;
 }
 
 interface ActionDefinition {
@@ -326,6 +340,26 @@ export default function App() {
 
   function leaveRoom(): void {
     setSession((current) => leaveInteriorRoom(current));
+  }
+
+  function approachVehicle(vehicleId: string): void {
+    setSession((current) => approachPhysicalVehicle(current, vehicleId));
+  }
+
+  function enterVehicle(vehicleId: string): void {
+    setSession((current) => enterPhysicalVehicle(current, vehicleId));
+  }
+
+  function leaveVehicle(): void {
+    setSession((current) => leavePhysicalVehicle(current));
+  }
+
+  function driveVehicle(locationId: string): void {
+    setSession((current) => drivePhysicalVehicleToLocation(current, locationId));
+  }
+
+  function serviceVehicle(vehicleId: string): void {
+    setSession((current) => servicePhysicalVehicle(current, vehicleId));
   }
 
   function buyFood(productId: string): void {
@@ -574,6 +608,14 @@ export default function App() {
     onLeaveRoom: leaveRoom
   };
 
+  const vehicleActions: PhysicalVehicleActions = {
+    onApproach: approachVehicle,
+    onEnter: enterVehicle,
+    onLeave: leaveVehicle,
+    onDrive: driveVehicle,
+    onService: serviceVehicle
+  };
+
   const workspace = activeNav === "life" ? (
     <LifeWorkspace
       session={session}
@@ -590,7 +632,7 @@ export default function App() {
       plans={plans}
     />
   ) : activeNav === "city" ? (
-    <PlacesWorkspace session={session} onTravel={travel} onOpenWindow={openWindow} buildingActions={buildingActions} />
+    <PlacesWorkspace session={session} onTravel={travel} onOpenWindow={openWindow} buildingActions={buildingActions} vehicleActions={vehicleActions} />
   ) : activeNav === "people" ? (
     <PeopleWorkspace session={session} onSelect={selectPerson} />
   ) : activeNav === "work" ? (
@@ -672,6 +714,7 @@ export default function App() {
             onBorrow={borrowFrom}
             onOpenWindow={openWindow}
             buildingActions={buildingActions}
+            vehicleActions={vehicleActions}
           />
         </WindowFrame>
       ) : null}
@@ -1141,8 +1184,8 @@ function ActionCard({ action, onAction, compact = false }: { action: ActionDefin
 }
 
 
-function PlacesWorkspace({ session, onTravel, onOpenWindow, buildingActions }: { session: GameSession; onTravel: (locationId: string) => void; onOpenWindow: (id: WindowId) => void; buildingActions: BuildingAccessActions }) {
-  const [tab, setTab] = useState<"routes" | "buildings" | "economy" | "population">("routes");
+function PlacesWorkspace({ session, onTravel, onOpenWindow, buildingActions, vehicleActions }: { session: GameSession; onTravel: (locationId: string) => void; onOpenWindow: (id: WindowId) => void; buildingActions: BuildingAccessActions; vehicleActions: PhysicalVehicleActions }) {
+  const [tab, setTab] = useState<"routes" | "vehicles" | "buildings" | "economy" | "population">("routes");
   const current = session.world.locations.find((location) => location.id === session.life.currentLocationId);
   const options = getTravelOptions(session);
   const strained = session.economy.businesses.filter((business) => business.status === "strained").length;
@@ -1164,6 +1207,7 @@ function PlacesWorkspace({ session, onTravel, onOpenWindow, buildingActions }: {
 
       <nav className="terminal-tabs city-tabs" aria-label="Разделы города">
         <button type="button" className={tab === "routes" ? "is-active" : ""} onClick={() => setTab("routes")}>МАРШРУТЫ</button>
+        <button type="button" className={tab === "vehicles" ? "is-active" : ""} onClick={() => setTab("vehicles")}>МАШИНЫ</button>
         <button type="button" className={tab === "buildings" ? "is-active" : ""} onClick={() => setTab("buildings")}>ЗДАНИЯ</button>
         <button type="button" className={tab === "economy" ? "is-active" : ""} onClick={() => setTab("economy")}>ЭКОНОМИКА</button>
         <button type="button" className={tab === "population" ? "is-active" : ""} onClick={() => setTab("population")}>НАСЕЛЕНИЕ</button>
@@ -1195,12 +1239,14 @@ function PlacesWorkspace({ session, onTravel, onOpenWindow, buildingActions }: {
                     <span>₵ {option.cost}</span>
                     {business ? <span className={`business-state business-state--${business.status}`}>{business.status.toUpperCase()} · ₵{business.priceIndex}%</span> : <span className={openByTime ? "ok-text" : "warning-text"}>{openByTime ? "OPEN" : "CLOSED"}</span>}
                   </div>
-                  <button type="button" disabled={session.player.balance < option.cost} onClick={() => onTravel(option.location.id)}>{!openByTime || !operational ? "GO / LIMITED" : "GO"}</button>
+                  <button type="button" disabled={session.player.balance < option.cost || session.localScene.playerPosition.state === "vehicle"} onClick={() => onTravel(option.location.id)}>{!openByTime || !operational ? "GO / LIMITED" : "GO"}</button>
                 </article>
               );
             })}
           </div>
         </>
+      ) : tab === "vehicles" ? (
+        <PhysicalVehiclesWorkspace session={session} actions={vehicleActions} />
       ) : tab === "buildings" ? (
         <BuildingAccessWorkspace session={session} actions={buildingActions} />
       ) : tab === "economy" ? (
@@ -1226,6 +1272,112 @@ function PlacesWorkspace({ session, onTravel, onOpenWindow, buildingActions }: {
   );
 }
 
+
+function physicalVehicleStateLabel(state: GameSession["vehicles"]["vehicles"][number]["state"]): string {
+  if (state === "parked") return "PARKED";
+  if (state === "moving") return "MOVING";
+  if (state === "occupied") return "OCCUPIED";
+  if (state === "service") return "ON DUTY";
+  return "DISABLED";
+}
+
+function PhysicalVehiclesWorkspace({ session, actions }: { session: GameSession; actions: PhysicalVehicleActions }) {
+  const playerControl = session.vehicles.player;
+  const currentVehicle = getPhysicalVehicle(session.vehicles, playerControl.currentVehicleId);
+  const currentLocation = session.world.locations.find((location) => location.id === session.life.currentLocationId);
+  const ownedIds = new Set(playerControl.ownedVehicleIds);
+  const visibleVehicles = session.vehicles.vehicles
+    .filter((vehicle) => vehicle.visible || ownedIds.has(vehicle.id) || vehicle.id === currentVehicle?.id)
+    .sort((left, right) => Number(right.id === currentVehicle?.id) - Number(left.id === currentVehicle?.id) || Number(ownedIds.has(right.id)) - Number(ownedIds.has(left.id)) || left.distanceToPlayerM - right.distanceToPlayerM)
+    .slice(0, 42);
+  const destinations = currentVehicle && playerControl.seat === "driver"
+    ? session.world.locations
+        .filter((location) => location.id !== session.life.currentLocationId)
+        .map((location) => ({
+          location,
+          estimate: estimatePhysicalVehicleTravel(
+            session.vehicles,
+            { metropolitan: session.metropolitan, mobility: session.mobility },
+            currentVehicle.id,
+            session.life.currentLocationId,
+            location.id
+          )
+        }))
+        .filter((item): item is { location: GameSession["world"]["locations"][number]; estimate: NonNullable<typeof item.estimate> } => Boolean(item.estimate))
+        .sort((left, right) => left.estimate.durationMinutes - right.estimate.durationMinutes)
+    : [];
+
+  return (
+    <div className="physical-vehicles-workspace">
+      <section className="vehicle-summary-grid">
+        <div><span>LOCAL VEHICLES</span><strong>{session.vehicles.totals.focusSectorVehicles}</strong><small>{session.vehicles.totals.visibleVehicles} visible · {session.vehicles.totals.nearbyVehicles} nearby</small></div>
+        <div><span>PARKING</span><strong>{session.vehicles.totals.occupiedParkingSpaces}</strong><small>{session.vehicles.totals.parkingNodes} physical nodes</small></div>
+        <div><span>PLAYER VEHICLE</span><strong>{currentVehicle?.plate ?? playerControl.ownedVehicleIds.length}</strong><small>{currentVehicle ? `${playerControl.seat?.toUpperCase()} · ${currentVehicle.modelName}` : "owned vehicles"}</small></div>
+        <div><span>DRIVEN</span><strong>{playerControl.distanceDrivenKm.toFixed(1)} KM</strong><small>{playerControl.tripsCompleted} trips · {playerControl.fuelConsumedL.toFixed(1)} L</small></div>
+      </section>
+
+      {currentVehicle ? (
+        <section className="current-vehicle-card">
+          <header>
+            <div><span>YOU ARE IN VEHICLE</span><strong>{currentVehicle.modelName}</strong><small>{currentVehicle.plate} · {playerControl.seat?.toUpperCase()} · condition {Math.round(currentVehicle.condition)}%</small></div>
+            <button type="button" className="button--danger" onClick={actions.onLeave}>ВЫЙТИ</button>
+          </header>
+          <div className="current-vehicle-metrics">
+            <div><span>FUEL</span><strong>{currentVehicle.fuelL}/{currentVehicle.fuelCapacityL} L</strong><i><b style={{ width: `${currentVehicle.fuelL / currentVehicle.fuelCapacityL * 100}%` }} /></i></div>
+            <div><span>CONDITION</span><strong>{Math.round(currentVehicle.condition)}%</strong><i><b style={{ width: `${currentVehicle.condition}%` }} /></i></div>
+            <div><span>ODOMETER</span><strong>{Math.round(currentVehicle.odometerKm).toLocaleString("ru-RU")} KM</strong><small>{currentVehicle.consumptionLPer100Km} L / 100 KM</small></div>
+          </div>
+          {playerControl.seat === "driver" ? (
+            <div className="vehicle-destination-list">
+              {destinations.map(({ location, estimate }) => {
+                const enoughFuel = currentVehicle.fuelL >= estimate.fuelUsedL;
+                return (
+                  <article key={location.id}>
+                    <div><span>{location.code}</span><strong>{location.name}</strong><small>{estimate.durationMinutes} min · {Math.round(estimate.distanceM / 100) / 10} km · traffic {estimate.congestionPercent}%</small></div>
+                    <div><span>{estimate.averageSpeedKph} KM/H</span><strong>−{estimate.fuelUsedL} L</strong></div>
+                    <button type="button" disabled={!enoughFuel || currentVehicle.condition < 18} onClick={() => actions.onDrive(location.id)}>{enoughFuel ? "ЕХАТЬ" : "НЕТ ТОПЛИВА"}</button>
+                  </article>
+                );
+              })}
+            </div>
+          ) : <div className="empty-terminal">Пассажирское место. Управление машиной недоступно.</div>}
+        </section>
+      ) : (
+        <section className="vehicle-presence-list">
+          <header><span>ACTIVE SECTOR / PHYSICAL VEHICLES</span><strong>{visibleVehicles.length} RECORDS</strong></header>
+          {visibleVehicles.map((vehicle) => {
+            const owned = ownedIds.has(vehicle.id);
+            const closeEnough = vehicle.distanceToPlayerM <= 6;
+            const canApproach = session.localScene.playerPosition.state === "outside" && vehicle.visible && vehicle.state !== "moving";
+            const canEnter = session.localScene.playerPosition.state === "outside" && closeEnough && (vehicle.access === "owned" || vehicle.access === "authorized" || (!vehicle.locked && vehicle.access === "public")) && vehicle.state !== "moving" && vehicle.state !== "disabled";
+            const canService = currentLocation?.type === "workshop" && closeEnough && owned;
+            return (
+              <article key={vehicle.id} className={`${owned ? "is-owned" : ""} ${closeEnough ? "is-near" : ""}`}>
+                <div className="vehicle-presence-list__identity">
+                  <span>{vehicle.plate}</span>
+                  <strong>{vehicle.modelName}</strong>
+                  <small>{vehicle.vehicleClass.toUpperCase()} · {physicalVehicleStateLabel(vehicle.state)} · {vehicle.distanceToPlayerM === Number.MAX_SAFE_INTEGER ? "OFF SECTOR" : `${Math.round(vehicle.distanceToPlayerM)} m`}</small>
+                </div>
+                <div className="vehicle-presence-list__metrics">
+                  <span className={vehicle.condition < 30 ? "warning-text" : ""}>COND {Math.round(vehicle.condition)}%</span>
+                  <span>FUEL {vehicle.fuelL}/{vehicle.fuelCapacityL} L</span>
+                  <small>{owned ? "PLAYER OWNED · KEY AVAILABLE" : `${vehicle.access.toUpperCase()} · ${vehicle.locked ? "LOCKED" : "UNLOCKED"}`}</small>
+                </div>
+                <div className="vehicle-presence-list__actions">
+                  {!closeEnough && canApproach ? <button type="button" onClick={() => actions.onApproach(vehicle.id)}>ПОДОЙТИ</button> : null}
+                  {canEnter ? <button type="button" className="button--primary" onClick={() => actions.onEnter(vehicle.id)}>СЕСТЬ</button> : null}
+                  {canService ? <button type="button" onClick={() => actions.onService(vehicle.id)}>СЕРВИС</button> : null}
+                  {!canEnter && closeEnough && !canService ? <button type="button" disabled>{vehicle.state === "disabled" ? "НЕИСПРАВНА" : "НЕТ ДОСТУПА"}</button> : null}
+                </div>
+              </article>
+            );
+          })}
+          {!visibleVehicles.length ? <div className="empty-terminal">Рядом нет материализованных машин. Войди на улицу или смени сектор.</div> : null}
+        </section>
+      )}
+    </div>
+  );
+}
 
 function accessDecisionLabel(decision: GameSession["buildingAccess"]["buildingEntries"][number]["publicDecision"]): string {
   if (decision === "authorized") return "ACCESS";
@@ -1741,7 +1893,8 @@ function WindowContent({
   onRequestExtension,
   onBorrow,
   onOpenWindow,
-  buildingActions
+  buildingActions,
+  vehicleActions
 }: {
   id: WindowId;
   settings: UiSettings;
@@ -1771,6 +1924,7 @@ function WindowContent({
   onBorrow: (personId: string) => void;
   onOpenWindow: (id: WindowId) => void;
   buildingActions: BuildingAccessActions;
+  vehicleActions: PhysicalVehicleActions;
 }) {
 
   if (id === "profile") {
@@ -1893,7 +2047,7 @@ function WindowContent({
   }
 
   if (id === "places") {
-    return <PlacesWorkspace session={session} onTravel={onTravel} onOpenWindow={onOpenWindow} buildingActions={buildingActions} />;
+    return <PlacesWorkspace session={session} onTravel={onTravel} onOpenWindow={onOpenWindow} buildingActions={buildingActions} vehicleActions={vehicleActions} />;
   }
 
   if (id === "home") {

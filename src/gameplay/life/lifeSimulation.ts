@@ -23,6 +23,14 @@ import { advanceMetropolitanMobilityState, synchronizeMetropolitanFromMobility }
 import { advanceLocalSceneState } from "../../simulation/localScene/localSceneSystem";
 import type { SpatialPositionState } from "../../simulation/localScene/types";
 import {
+  advancePhysicalVehiclesState,
+  estimatePhysicalVehicleTravel,
+  getPhysicalVehicle,
+  physicalVehiclePositionAtLocation,
+  playerVehiclePosition
+} from "../../simulation/vehicles/physicalVehicleSystem";
+import type { VehicleCommand } from "../../simulation/vehicles/types";
+import {
   advanceBuildingAccessState,
   findAccessDoor,
   recordAccessDenied,
@@ -95,6 +103,7 @@ interface ProgressOptions {
   activity?: string;
   targetLocationId?: string;
   playerPosition?: SpatialPositionState;
+  vehicleCommand?: VehicleCommand;
   suppressTimeEvent?: boolean;
   deliveryCompleted?: boolean;
   requestsCompleted?: number;
@@ -323,6 +332,20 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     mobility: mobilityState,
     playerPosition: options.playerPosition
   });
+  const vehiclesState = advancePhysicalVehiclesState(session.vehicles, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    activeLocationId: session.life.currentLocationId,
+    targetLocationId: targetLocation?.id,
+    playerPosition: localSceneState.playerPosition,
+    metropolitan: metropolitanState,
+    urban: urbanState,
+    mobility: mobilityState,
+    population: populationState,
+    organizations: dataAdvance.organizations,
+    command: options.vehicleCommand
+  });
 
   const generated: WorldEvent[] = [];
   if (options.title && options.category) {
@@ -456,6 +479,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     government: dataAdvance.government,
     health: healthAdvance.state,
     data: compactedDataState,
+    vehicles: vehiclesState,
     food: productionAdvance.food,
     drafts: kernelDrafts
   });
@@ -491,6 +515,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     mobility: mobilityState,
     localScene: localSceneState,
     buildingAccess: buildingAccessState,
+    vehicles: vehiclesState,
     district: infrastructurePulse,
     eventQueue: queued.queue,
     currentActivity: pressureAdvance.evicted
@@ -511,6 +536,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
 }
 
 export function travelToLocation(session: GameSession, locationId: string): GameSession {
+  if (session.localScene.playerPosition.state === "vehicle") return session;
   const option = getTravelOptions(session).find((item) => item.location.id === locationId);
   if (!option || session.player.balance < option.cost) return session;
   const open = isLocationOpen(option.location, session.timestamp + option.durationMinutes * 60_000);
@@ -591,7 +617,7 @@ function accessInput(session: GameSession) {
 }
 
 export function approachLocalBuilding(session: GameSession, buildingId: string): GameSession {
-  if (session.localScene.playerPosition.state === "inside") return session;
+  if (session.localScene.playerPosition.state !== "outside") return session;
   const local = session.localScene.buildings.find((item) => item.buildingId === buildingId);
   const position = buildingStreetPosition(session, buildingId, session.timestamp);
   if (!local || !position) return session;
@@ -611,7 +637,7 @@ export function approachLocalBuilding(session: GameSession, buildingId: string):
 export function enterLocalBuilding(session: GameSession, buildingId: string, entrance: "public" | "service" = "public"): GameSession {
   const local = session.localScene.buildings.find((item) => item.buildingId === buildingId);
   const building = session.urban.buildings.find((item) => item.id === buildingId);
-  if (!local || !building || session.localScene.playerPosition.state === "inside" || local.distanceToPlayerM > 20) return session;
+  if (!local || !building || session.localScene.playerPosition.state !== "outside" || local.distanceToPlayerM > 20) return session;
   const urban = ensureBuildingAccessDetail(
     session.urban,
     session.world.meta.seed,
@@ -767,6 +793,135 @@ export function leaveInteriorRoom(session: GameSession): GameSession {
     importance: 1,
     activity: "Внутри помещения",
     playerPosition: next
+  });
+}
+
+function physicalVehicleInput(session: GameSession, timestamp = session.timestamp, targetLocationId?: string, playerPosition: SpatialPositionState = session.localScene.playerPosition) {
+  return {
+    timestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    activeLocationId: session.life.currentLocationId,
+    targetLocationId,
+    playerPosition,
+    metropolitan: session.metropolitan,
+    urban: session.urban,
+    mobility: session.mobility,
+    population: session.population,
+    organizations: session.world.organizations
+  };
+}
+
+export function approachPhysicalVehicle(session: GameSession, vehicleId: string): GameSession {
+  if (session.localScene.playerPosition.state !== "outside") return session;
+  const vehicle = getPhysicalVehicle(session.vehicles, vehicleId);
+  if (!vehicle || !vehicle.visible || vehicle.state === "moving" || vehicle.position.sectorId !== session.localScene.playerPosition.sectorId) return session;
+  const minutes = Math.max(1, Math.min(12, Math.ceil(vehicle.distanceToPlayerM / 82)));
+  const position = playerVehiclePosition(vehicle, session.timestamp, "outside");
+  return progressLife(session, minutes, {
+    category: "personal",
+    title: `Подход к машине ${vehicle.plate}.`,
+    detail: `${vehicle.modelName} · ${Math.round(vehicle.distanceToPlayerM)} м · ${vehicle.state.toUpperCase()}`,
+    importance: 1,
+    fatigueDelta: minutes >= 8 ? 1 : 0,
+    activity: `У машины: ${vehicle.modelName} ${vehicle.plate}`,
+    playerPosition: position
+  });
+}
+
+export function enterPhysicalVehicle(session: GameSession, vehicleId: string): GameSession {
+  if (session.localScene.playerPosition.state !== "outside") return session;
+  const vehicle = getPhysicalVehicle(session.vehicles, vehicleId);
+  if (!vehicle || vehicle.distanceToPlayerM > 6 || vehicle.state === "moving" || vehicle.state === "disabled") return session;
+  const seat = vehicle.access === "owned" || vehicle.access === "authorized" ? "driver" as const : "passenger" as const;
+  if (seat === "passenger" && (vehicle.locked || vehicle.access !== "public")) return session;
+  if (seat === "driver" && !vehicle.playerCanDrive) return session;
+  const position = playerVehiclePosition(vehicle, session.timestamp, "vehicle");
+  return progressLife(session, 1, {
+    category: "personal",
+    title: `Посадка: ${vehicle.modelName}.`,
+    detail: `${vehicle.plate} · ${seat === "driver" ? "место водителя" : "пассажирское место"} · топливо ${vehicle.fuelL}/${vehicle.fuelCapacityL} л`,
+    importance: 1,
+    activity: `В машине: ${vehicle.modelName}`,
+    playerPosition: position,
+    vehicleCommand: { kind: "enter", vehicleId, seat }
+  });
+}
+
+export function leavePhysicalVehicle(session: GameSession): GameSession {
+  const vehicleId = session.vehicles.player.currentVehicleId;
+  const vehicle = getPhysicalVehicle(session.vehicles, vehicleId);
+  if (!vehicle || session.localScene.playerPosition.state !== "vehicle") return session;
+  const position = playerVehiclePosition(vehicle, session.timestamp, "outside");
+  return progressLife(session, 1, {
+    category: "personal",
+    title: `Выход из машины ${vehicle.plate}.`,
+    detail: `${vehicle.modelName} · машина припаркована`,
+    importance: 1,
+    activity: `У машины: ${vehicle.modelName} ${vehicle.plate}`,
+    playerPosition: position,
+    vehicleCommand: { kind: "exit", vehicleId: vehicle.id }
+  });
+}
+
+export function drivePhysicalVehicleToLocation(session: GameSession, locationId: string): GameSession {
+  const vehicleId = session.vehicles.player.currentVehicleId;
+  const vehicle = getPhysicalVehicle(session.vehicles, vehicleId);
+  if (!vehicle || session.vehicles.player.seat !== "driver" || session.localScene.playerPosition.state !== "vehicle") return session;
+  if (!vehicle.playerCanDrive || vehicle.condition < 18) return session;
+  const target = session.world.locations.find((location) => location.id === locationId);
+  if (!target || target.id === session.life.currentLocationId) return session;
+  const estimate = estimatePhysicalVehicleTravel(session.vehicles, physicalVehicleInput(session), vehicle.id, session.life.currentLocationId, target.id);
+  if (!estimate || vehicle.fuelL + 0.001 < estimate.fuelUsedL) return session;
+  const arrivalTimestamp = session.timestamp + estimate.durationMinutes * 60_000;
+  const position = physicalVehiclePositionAtLocation(
+    physicalVehicleInput(session, arrivalTimestamp, target.id),
+    vehicle.id,
+    target.id,
+    "vehicle"
+  );
+  const district = session.world.districts.find((item) => item.id === target.districtId);
+  return progressLife(session, estimate.durationMinutes, {
+    category: "personal",
+    title: `Прибытие на машине: ${target.name}.`,
+    detail: `${vehicle.modelName} ${vehicle.plate} · ${Math.round(estimate.distanceM / 100) / 10} км · ${estimate.averageSpeedKph} км/ч · топливо −${estimate.fuelUsedL} л · трафик ${estimate.congestionPercent}%`,
+    importance: estimate.congestionPercent >= 85 ? 2 : 1,
+    fatigueDelta: 1,
+    stressDelta: estimate.congestionPercent >= 75 ? 1 : 0,
+    activity: `В машине у ${target.name}`,
+    targetLocationId: target.id,
+    playerPosition: position,
+    vehicleCommand: {
+      kind: "drive",
+      vehicleId: vehicle.id,
+      destinationLocationId: target.id,
+      distanceM: estimate.distanceM,
+      durationMinutes: estimate.durationMinutes,
+      fuelUsedL: estimate.fuelUsedL
+    }
+  });
+}
+
+export function servicePhysicalVehicle(session: GameSession, vehicleId: string): GameSession {
+  if (session.localScene.playerPosition.state !== "outside") return session;
+  const currentLocation = session.world.locations.find((location) => location.id === session.life.currentLocationId);
+  const vehicle = getPhysicalVehicle(session.vehicles, vehicleId);
+  if (!vehicle || currentLocation?.type !== "workshop" || vehicle.distanceToPlayerM > 30 || vehicle.state === "moving") return session;
+  if (vehicle.access !== "owned" && vehicle.access !== "authorized") return session;
+  const fuelAddedL = Math.max(0, Math.round((vehicle.fuelCapacityL - vehicle.fuelL) * 10) / 10);
+  const conditionRestored = Math.max(0, Math.round((92 - vehicle.condition) * 10) / 10);
+  if (fuelAddedL <= 0 && conditionRestored <= 0) return session;
+  const cost = Math.max(12, Math.ceil(fuelAddedL * 3.2 + conditionRestored * 8.5));
+  if (session.player.balance < cost) return session;
+  return progressLife(session, 45, {
+    category: "personal",
+    title: `Обслуживание машины ${vehicle.plate}.`,
+    detail: `Топливо +${fuelAddedL} л · состояние +${conditionRestored}% · ₵ ${cost}`,
+    importance: 1,
+    balanceDelta: -cost,
+    activity: `Сервис завершён: ${vehicle.modelName}`,
+    playerPosition: session.localScene.playerPosition,
+    vehicleCommand: { kind: "service", vehicleId, fuelAddedL, conditionRestored }
   });
 }
 

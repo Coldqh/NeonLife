@@ -1,9 +1,9 @@
+APPLY_PATCH.ps1
 CHANGELOG.md
-PATCH_0.26.0.md
-PATCH_FILES.txt
+PATCH_0.27.0.md
 README.md
 docs/ARCHITECTURE.md
-docs/BUILDINGS_ACCESS.md
+docs/PHYSICAL_VEHICLES.md
 package-lock.json
 package.json
 public/sw.js
@@ -12,11 +12,12 @@ src/app/App.tsx
 src/core/saves/migrations.ts
 src/core/saves/types.ts
 src/gameplay/life/lifeSimulation.ts
-src/simulation/access/buildingAccessSystem.ts
-src/simulation/access/types.ts
+src/simulation/kernel/simulationKernel.ts
+src/simulation/kernel/types.ts
 src/simulation/localScene/localSceneSystem.ts
 src/simulation/localScene/types.ts
-src/simulation/urban/urbanSystem.ts
+src/simulation/vehicles/physicalVehicleSystem.ts
+src/simulation/vehicles/types.ts
 src/ui/theme/components.css
 src/world/generation/createWorld.ts
 src/world/state/types.ts
@@ -27,5 +28,7 @@ tests/lifecycleSimulationTest.ts
 tests/localSceneTest.ts
 tests/metropolitanMobilityTest.ts
 tests/metropolitanScaleTest.ts
+tests/physicalVehiclesTest.ts
 tests/urbanBuildingsDemographyTest.ts
-tsconfig.buildingaccesstest.json
+tsconfig.vehicletest.json
+PATCH_FILES.txt

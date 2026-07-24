@@ -12,7 +12,7 @@ const seed = "LOCAL-SCENE-25";
 let session = createWorldSession(seed);
 const initial = session.localScene;
 
-assert(session.schemaVersion === 24, "new world schema is not 24");
+assert(session.schemaVersion === 25, "new world schema is not 25");
 assert(initial.version === 1, "local scene version mismatch");
 assert(initial.focusSectorId === initial.playerPosition.sectorId, "player focus sector mismatch");
 assert(session.metropolitan.streaming.activeSectorIds.includes(initial.focusSectorId), "player is outside active streaming window");
@@ -80,7 +80,7 @@ const migrated = migrateEnvelope({
   payload: legacy
 }, "slot-1");
 assert(migrated, "migration returned null");
-assert(migrated.schemaVersion === 24, "migration schema mismatch");
+assert(migrated.schemaVersion === 25, "migration schema mismatch");
 assert(migrated.payload.localScene.version === 1, "migration did not create local scene");
 assert(migrated.payload.localScene.playerPosition.locationId === migrated.payload.life.currentLocationId, "migration lost player spatial position");
 assert(migrated.payload.localScene.actors.length > 0, "migration created empty local scene");

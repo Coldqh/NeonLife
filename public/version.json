@@ -1,7 +1,7 @@
 {
-  "version": "0.26.0",
-  "releasedAt": "2026-07-24T09:00:00Z",
+  "version": "0.27.0",
+  "releasedAt": "2026-07-24T12:00:00Z",
   "forceUpdate": true,
-  "title": "BUILDINGS & ACCESS",
-  "summary": "Lets the player approach and enter materialized buildings, use public or service entrances, move between floors, enter authorized units and traverse deterministic interior rooms."
+  "title": "PHYSICAL VEHICLES",
+  "summary": "Materializes persistent cars, taxis, service vehicles, trucks and buses in active sectors, gives the player an owned vehicle, and supports approach, boarding, driving, fuel use, wear, parking and service."
 }

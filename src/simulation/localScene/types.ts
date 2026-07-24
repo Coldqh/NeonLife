@@ -6,7 +6,7 @@ import type { MetropolitanState } from "../spatial/types";
 import type { UrbanFabricState } from "../urban/types";
 import type { LocationState } from "../../world/state/types";
 
-export type SpatialPresenceState = "outside" | "inside" | "in-transit";
+export type SpatialPresenceState = "outside" | "inside" | "in-transit" | "vehicle";
 export type LocalActorActivity = "home" | "work" | "commute" | "errand" | "rest" | "idle" | "school" | "medical";
 
 export interface SpatialPositionState {
@@ -19,6 +19,7 @@ export interface SpatialPositionState {
   roomId?: EntityId;
   floor?: number;
   transitRouteId?: EntityId;
+  vehicleId?: EntityId;
   state: SpatialPresenceState;
   updatedAt: number;
 }

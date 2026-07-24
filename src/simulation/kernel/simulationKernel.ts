@@ -10,6 +10,7 @@ import type { OrganizationAgreementState, OrganizationEcosystemState } from "../
 import type { GovernmentCrimeState } from "../government/types";
 import type { HealthCyberwareState } from "../health/types";
 import type { DataSurveillanceState } from "../data/types";
+import type { PhysicalVehiclesState } from "../vehicles/types";
 import type {
   KernelAccountState,
   KernelAssetState,
@@ -50,6 +51,7 @@ export interface KernelSyncInput {
   government?: GovernmentCrimeState;
   health?: HealthCyberwareState;
   data?: DataSurveillanceState;
+  vehicles?: PhysicalVehiclesState;
   food: FoodState;
   drafts?: KernelTransactionDraft[];
 }
@@ -401,6 +403,25 @@ function buildAssets(input: KernelSyncInput): KernelAssetState[] {
       updatedAt: input.timestamp
     });
   }
+  for (const vehicle of input.vehicles?.vehicles.filter((item) => item.persistent) ?? []) {
+    const location = vehicle.position.locationId ? input.locations.find((item) => item.id === vehicle.position.locationId) : undefined;
+    assets.push({
+      id: assetId("vehicle", vehicle.id),
+      kind: "vehicle",
+      name: `${vehicle.modelName} ${vehicle.plate}`,
+      ownerEntityId: vehicle.ownerEntityId ?? input.player.id,
+      controllerEntityId: vehicle.driverEntityId ?? vehicle.ownerEntityId ?? input.player.id,
+      locationId: vehicle.position.locationId,
+      districtId: location?.districtId,
+      status: vehicle.condition < 18 ? "offline" : vehicle.condition < 35 ? "strained" : "active",
+      condition: vehicle.condition,
+      capacity: vehicle.seats,
+      valuation: Math.max(500, Math.round((vehicle.vehicleClass === "truck" || vehicle.vehicleClass === "bus" ? 48_000 : vehicle.vehicleClass === "van" ? 18_000 : 12_000) * vehicle.condition / 100)),
+      resources: [],
+      updatedAt: input.timestamp
+    });
+  }
+
   return assets;
 }
 
