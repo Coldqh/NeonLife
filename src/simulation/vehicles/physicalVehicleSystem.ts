@@ -190,6 +190,7 @@ function plate(seed: string, id: string): string {
 
 function modelForSector(input: PhysicalVehiclesInput, sector: MetropolitanSectorState, slot: number): { model: VehicleModel; fleetMode: PhysicalVehicleEntityState["fleetMode"] } {
   const rng = new SeededRandom(`${input.seed}:vehicle-model:${sector.id}:${slot}`);
+  if (slot === 0 && sector.detailLevel === "active") return { model: MODELS.bus, fleetMode: "bus" };
   if (sector.landUse === "transport") {
     const roll = slot % 7;
     if (roll === 0) return { model: MODELS.bus, fleetMode: "bus" };

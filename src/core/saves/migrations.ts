@@ -28,6 +28,7 @@ import { normalizeMetropolitanMobilityState, synchronizeMetropolitanFromMobility
 import { normalizeLocalSceneState } from "../../simulation/localScene/localSceneSystem";
 import { normalizeBuildingAccessState } from "../../simulation/access/buildingAccessSystem";
 import { normalizePhysicalVehiclesState } from "../../simulation/vehicles/physicalVehicleSystem";
+import { normalizeTransitOperationsState } from "../../simulation/transit/transitOperationsSystem";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -650,6 +651,20 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     population,
     organizations
   });
+  const transit = normalizeTransitOperationsState(payload.transit, {
+    timestamp,
+    seed,
+    playerId: playerState.id,
+    activeLocationId: existingLocationId ?? housingLocation?.id ?? locations[0]?.id ?? "location-missing",
+    playerPosition: localScene.playerPosition,
+    locations,
+    districts,
+    people,
+    population,
+    metropolitan: mobilitySynchronizedMetropolitan,
+    mobility,
+    physicalVehicles: vehicles
+  });
   const kernel = advanceSimulationKernel(baseKernel, {
     timestamp,
     seed,
@@ -694,6 +709,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     localScene,
     buildingAccess,
     vehicles,
+    transit,
     currentActivity: `На месте: ${existingLocationName}`,
     world: {
       ...world,

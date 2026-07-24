@@ -52,7 +52,16 @@ import {
   enterPhysicalVehicle,
   leavePhysicalVehicle,
   drivePhysicalVehicleToLocation,
-  servicePhysicalVehicle
+  servicePhysicalVehicle,
+  boardTransitVehicle,
+  takeTransitSeat,
+  standInTransit,
+  yieldTransitSeat,
+  rideTransitToNextStop,
+  interactWithTransitPassenger,
+  usePhoneInTransit,
+  alightTransitVehicle,
+  skipTransitJourney
 } from "../gameplay/life/lifeSimulation";
 import { Icon, type IconName } from "../ui/components/Icons";
 import { PressureWorkspace } from "./workspaces/PressureWorkspace";
@@ -63,6 +72,8 @@ import { getPerson, toKnownNpc } from "../people/network/humanNetwork";
 import type { PersonState } from "../people/network/types";
 import type { LocalActorState } from "../simulation/localScene/types";
 import { estimatePhysicalVehicleTravel, getPhysicalVehicle } from "../simulation/vehicles/physicalVehicleSystem";
+import { getTransitBoardingVehicle, getTransitLegMinutes, getTransitRoute, getTransitStop, getTransitVehicle } from "../simulation/transit/transitOperationsSystem";
+import type { TransitPhoneActivity, TransitPriorityNeed } from "../simulation/transit/types";
 import { Meter } from "../ui/components/Meter";
 import { Portrait } from "../ui/components/Portrait";
 import { SystemPanel } from "../ui/components/SystemPanel";
@@ -99,6 +110,18 @@ interface PhysicalVehicleActions {
   onLeave: () => void;
   onDrive: (locationId: string) => void;
   onService: (vehicleId: string) => void;
+}
+
+interface TransitActions {
+  onBoard: () => void;
+  onTakeSeat: (seatId: string) => void;
+  onStand: () => void;
+  onYield: (passengerId: string) => void;
+  onAdvance: () => void;
+  onInteract: (passengerId: string) => void;
+  onPhone: (activity: TransitPhoneActivity) => void;
+  onAlight: () => void;
+  onSkip: () => void;
 }
 
 interface ActionDefinition {
@@ -362,6 +385,42 @@ export default function App() {
     setSession((current) => servicePhysicalVehicle(current, vehicleId));
   }
 
+  function boardTransit(): void {
+    setSession((current) => boardTransitVehicle(current));
+  }
+
+  function takeSeat(seatId: string): void {
+    setSession((current) => takeTransitSeat(current, seatId));
+  }
+
+  function standTransit(): void {
+    setSession((current) => standInTransit(current));
+  }
+
+  function yieldSeat(passengerId: string): void {
+    setSession((current) => yieldTransitSeat(current, passengerId));
+  }
+
+  function advanceTransit(): void {
+    setSession((current) => rideTransitToNextStop(current));
+  }
+
+  function interactTransit(passengerId: string): void {
+    setSession((current) => interactWithTransitPassenger(current, passengerId));
+  }
+
+  function useTransitPhone(activity: TransitPhoneActivity): void {
+    setSession((current) => usePhoneInTransit(current, activity));
+  }
+
+  function alightTransit(): void {
+    setSession((current) => alightTransitVehicle(current));
+  }
+
+  function skipTransit(): void {
+    setSession((current) => skipTransitJourney(current));
+  }
+
   function buyFood(productId: string): void {
     setSession((current) => buyFoodAtCurrentLocation(current, productId));
   }
@@ -616,6 +675,18 @@ export default function App() {
     onService: serviceVehicle
   };
 
+  const transitActions: TransitActions = {
+    onBoard: boardTransit,
+    onTakeSeat: takeSeat,
+    onStand: standTransit,
+    onYield: yieldSeat,
+    onAdvance: advanceTransit,
+    onInteract: interactTransit,
+    onPhone: useTransitPhone,
+    onAlight: alightTransit,
+    onSkip: skipTransit
+  };
+
   const workspace = activeNav === "life" ? (
     <LifeWorkspace
       session={session}
@@ -632,7 +703,7 @@ export default function App() {
       plans={plans}
     />
   ) : activeNav === "city" ? (
-    <PlacesWorkspace session={session} onTravel={travel} onOpenWindow={openWindow} buildingActions={buildingActions} vehicleActions={vehicleActions} />
+    <PlacesWorkspace session={session} onTravel={travel} onOpenWindow={openWindow} buildingActions={buildingActions} vehicleActions={vehicleActions} transitActions={transitActions} />
   ) : activeNav === "people" ? (
     <PeopleWorkspace session={session} onSelect={selectPerson} />
   ) : activeNav === "work" ? (
@@ -715,6 +786,7 @@ export default function App() {
             onOpenWindow={openWindow}
             buildingActions={buildingActions}
             vehicleActions={vehicleActions}
+            transitActions={transitActions}
           />
         </WindowFrame>
       ) : null}
@@ -1184,8 +1256,8 @@ function ActionCard({ action, onAction, compact = false }: { action: ActionDefin
 }
 
 
-function PlacesWorkspace({ session, onTravel, onOpenWindow, buildingActions, vehicleActions }: { session: GameSession; onTravel: (locationId: string) => void; onOpenWindow: (id: WindowId) => void; buildingActions: BuildingAccessActions; vehicleActions: PhysicalVehicleActions }) {
-  const [tab, setTab] = useState<"routes" | "vehicles" | "buildings" | "economy" | "population">("routes");
+function PlacesWorkspace({ session, onTravel, onOpenWindow, buildingActions, vehicleActions, transitActions }: { session: GameSession; onTravel: (locationId: string) => void; onOpenWindow: (id: WindowId) => void; buildingActions: BuildingAccessActions; vehicleActions: PhysicalVehicleActions; transitActions: TransitActions }) {
+  const [tab, setTab] = useState<"routes" | "transit" | "vehicles" | "buildings" | "economy" | "population">(session.transit.player.journey ? "transit" : "routes");
   const current = session.world.locations.find((location) => location.id === session.life.currentLocationId);
   const options = getTravelOptions(session);
   const strained = session.economy.businesses.filter((business) => business.status === "strained").length;
@@ -1207,6 +1279,7 @@ function PlacesWorkspace({ session, onTravel, onOpenWindow, buildingActions, veh
 
       <nav className="terminal-tabs city-tabs" aria-label="Разделы города">
         <button type="button" className={tab === "routes" ? "is-active" : ""} onClick={() => setTab("routes")}>МАРШРУТЫ</button>
+        <button type="button" className={tab === "transit" ? "is-active" : ""} onClick={() => setTab("transit")}>ТРАНЗИТ{session.transit.player.journey ? " · ACTIVE" : ""}</button>
         <button type="button" className={tab === "vehicles" ? "is-active" : ""} onClick={() => setTab("vehicles")}>МАШИНЫ</button>
         <button type="button" className={tab === "buildings" ? "is-active" : ""} onClick={() => setTab("buildings")}>ЗДАНИЯ</button>
         <button type="button" className={tab === "economy" ? "is-active" : ""} onClick={() => setTab("economy")}>ЭКОНОМИКА</button>
@@ -1239,12 +1312,14 @@ function PlacesWorkspace({ session, onTravel, onOpenWindow, buildingActions, veh
                     <span>₵ {option.cost}</span>
                     {business ? <span className={`business-state business-state--${business.status}`}>{business.status.toUpperCase()} · ₵{business.priceIndex}%</span> : <span className={openByTime ? "ok-text" : "warning-text"}>{openByTime ? "OPEN" : "CLOSED"}</span>}
                   </div>
-                  <button type="button" disabled={session.player.balance < option.cost || session.localScene.playerPosition.state === "vehicle"} onClick={() => onTravel(option.location.id)}>{!openByTime || !operational ? "GO / LIMITED" : "GO"}</button>
+                  <button type="button" disabled={session.player.balance < option.cost || session.localScene.playerPosition.state === "vehicle" || Boolean(session.transit.player.journey)} onClick={() => { onTravel(option.location.id); if (option.mode === "bus" || option.mode === "metro") setTab("transit"); }}>{option.mode === "bus" || option.mode === "metro" ? "К ОСТАНОВКЕ" : !openByTime || !operational ? "GO / LIMITED" : "GO"}</button>
                 </article>
               );
             })}
           </div>
         </>
+      ) : tab === "transit" ? (
+        <TransitOperationsWorkspace session={session} actions={transitActions} />
       ) : tab === "vehicles" ? (
         <PhysicalVehiclesWorkspace session={session} actions={vehicleActions} />
       ) : tab === "buildings" ? (
@@ -1267,6 +1342,164 @@ function PlacesWorkspace({ session, onTravel, onOpenWindow, buildingActions, veh
         </div>
       ) : (
         <PopulationWorkspace session={session} />
+      )}
+    </div>
+  );
+}
+
+
+function transitServiceLabel(status: GameSession["transit"]["routes"][number]["status"]): string {
+  if (status === "operational") return "ON TIME";
+  if (status === "delayed") return "DELAYED";
+  if (status === "crowded") return "CROWDED";
+  return "SUSPENDED";
+}
+
+function transitPriorityLabel(priority: TransitPriorityNeed): string {
+  if (priority === "elderly") return "ПОЖИЛОЙ";
+  if (priority === "injured") return "ТРАВМА";
+  if (priority === "disabled") return "ИНВАЛИДНОСТЬ";
+  if (priority === "carrying-child") return "С РЕБЁНКОМ";
+  return "ОБЫЧНЫЙ";
+}
+
+function TransitOperationsWorkspace({ session, actions }: { session: GameSession; actions: TransitActions }) {
+  const transit = session.transit;
+  const journey = transit.player.journey;
+  const segment = journey?.segments[journey.activeSegmentIndex];
+  const route = getTransitRoute(transit, segment?.routeId);
+  const currentStop = getTransitStop(transit, journey?.currentStopId);
+  const nextStop = getTransitStop(transit, journey?.nextStopId);
+  const destination = journey ? session.world.locations.find((item) => item.id === journey.destinationLocationId) : undefined;
+  const boardingVehicle = journey?.phase === "waiting" ? getTransitBoardingVehicle(transit) : null;
+  const vehicle = getTransitVehicle(transit, journey?.vehicleId) ?? boardingVehicle;
+  const cabin = transit.cabin;
+  const freeSeats = cabin?.seats.filter((seat) => seat.occupiedBy === null) ?? [];
+  const standingPriority = cabin?.passengers.filter((passenger) => passenger.standing && passenger.priorityNeed !== "none") ?? [];
+  const legMinutes = getTransitLegMinutes(transit);
+
+  if (!journey) {
+    return (
+      <div className="transit-operations-workspace">
+        <section className="transit-summary-grid">
+          <div><span>STOPS</span><strong>{transit.totals.stops}</strong><small>bus and rail nodes</small></div>
+          <div><span>ROUTES</span><strong>{transit.totals.routes}</strong><small>{transit.totals.delayedRoutes} delayed · {transit.totals.crowdedRoutes} crowded</small></div>
+          <div><span>VEHICLES</span><strong>{transit.totals.activeVehicles}</strong><small>{transit.totals.representedPassengers.toLocaleString("ru-RU")} passengers</small></div>
+          <div><span>PLAYER</span><strong>{transit.player.completedTrips}</strong><small>{transit.player.productivePhoneMinutes} productive minutes</small></div>
+        </section>
+        <section className="transit-route-directory">
+          <header><span>LIVE TRANSIT OPERATIONS</span><strong>SELECT DESTINATION IN ROUTES</strong></header>
+          {transit.routes.slice().sort((left, right) => left.mode.localeCompare(right.mode) || left.code.localeCompare(right.code)).slice(0, 18).map((item) => (
+            <article key={item.id} className={`transit-route-card transit-route-card--${item.status}`}>
+              <div><span>{item.code}</span><strong>{item.name}</strong><small>{item.mode.toUpperCase()} · {item.stopIds.length} stops · every {item.headwayMinutes} min</small></div>
+              <div><span>₵ {item.fare}</span><strong>{item.crowdingPercent}%</strong><small>CROWDING</small></div>
+              <div><span>{item.activeVehicles}/{item.scheduledVehicles}</span><strong>{item.averageDelayMinutes} MIN</strong><small>{transitServiceLabel(item.status)}</small></div>
+            </article>
+          ))}
+        </section>
+      </div>
+    );
+  }
+
+  if (journey.phase === "waiting") {
+    return (
+      <div className="transit-operations-workspace">
+        <section className="transit-waiting-card">
+          <span className="transit-phase">WAITING / {journey.activeSegmentIndex + 1} OF {journey.segments.length}</span>
+          <h2>{currentStop?.name ?? "TRANSIT STOP"}</h2>
+          <p>{route?.code} · {route?.name} · до {getTransitStop(transit, segment?.destinationStopId)?.name ?? destination?.name}</p>
+          <div className="transit-waiting-metrics">
+            <div><span>VEHICLE</span><strong>{boardingVehicle?.fleetNumber ?? "SEARCH"}</strong><small>{boardingVehicle?.crew.name ?? "оператор назначается"}</small></div>
+            <div><span>FARE</span><strong>₵ {segment?.fare ?? 0}</strong><small>{journey.farePaid ? `paid ₵ ${journey.farePaid}` : "not paid"}</small></div>
+            <div><span>SERVICE</span><strong>{route ? transitServiceLabel(route.status) : "UNKNOWN"}</strong><small>delay {route?.averageDelayMinutes ?? 0} min</small></div>
+            <div><span>DESTINATION</span><strong>{destination?.code ?? "NODE"}</strong><small>{destination?.name}</small></div>
+          </div>
+          <div className="transit-primary-actions">
+            <button type="button" className="button button--primary" disabled={!boardingVehicle || session.player.balance < (segment?.fare ?? 0)} onClick={actions.onBoard}>СЕСТЬ В {boardingVehicle?.fleetNumber ?? "ТРАНСПОРТ"}</button>
+            <button type="button" className="button button--ghost" onClick={actions.onSkip}>ПРОПУСТИТЬ ВСЮ ПОЕЗДКУ</button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  return (
+    <div className="transit-operations-workspace">
+      <section className={`transit-cabin-header transit-cabin-header--${journey.phase}`}>
+        <div>
+          <span>{journey.phase === "arrived" ? "ARRIVED" : `${route?.mode.toUpperCase()} / ONBOARD`}</span>
+          <h2>{vehicle?.fleetNumber ?? "TRANSIT"} · {route?.code}</h2>
+          <p>{currentStop?.name ?? "CURRENT STOP"}{nextStop ? ` → ${nextStop.name}` : ` · ${destination?.name ?? "DESTINATION"}`}</p>
+        </div>
+        <div className="transit-cabin-status">
+          <strong>{cabin?.totalPassengerCount ?? vehicle?.occupancy ?? 0}</strong>
+          <span>PASSENGERS</span>
+          <small>{cabin?.crowdingPercent ?? route?.crowdingPercent ?? 0}% crowding · driver {vehicle?.crew.name ?? "unknown"}</small>
+        </div>
+      </section>
+
+      {journey.phase === "arrived" ? (
+        <section className="transit-arrival-card">
+          <h3>{destination?.name ?? "DESTINATION"}</h3>
+          <p>Рейс прибыл. Можно выйти или промотать завершение.</p>
+          <button type="button" className="button button--primary" onClick={actions.onAlight}>ВЫЙТИ ИЗ ТРАНСПОРТА</button>
+        </section>
+      ) : (
+        <>
+          <section className="transit-seat-section">
+            <header>
+              <div><span>SALON / SEATS</span><strong>{journey.seatId ? "ТЫ СИДИШЬ" : "ТЫ СТОИШЬ"}</strong></div>
+              {journey.seatId ? <button type="button" onClick={actions.onStand}>ВСТАТЬ</button> : <small>{freeSeats.length} свободно</small>}
+            </header>
+            <div className="transit-seat-map">
+              {cabin?.seats.map((seat) => (
+                <button
+                  type="button"
+                  key={seat.id}
+                  className={`${seat.kind === "priority" ? "is-priority" : ""} ${seat.occupiedBy ? "is-occupied" : "is-free"} ${seat.occupiedBy === "player" ? "is-player" : ""}`}
+                  disabled={seat.occupiedBy !== null || Boolean(journey.seatId)}
+                  onClick={() => actions.onTakeSeat(seat.id)}
+                >
+                  <span>{seat.index + 1}</span>
+                  <small>{seat.occupiedBy === "player" ? "YOU" : seat.occupiedBy ? "BUSY" : seat.kind === "priority" ? "PRIORITY" : "FREE"}</small>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="transit-phone-actions">
+            <header><span>PHONE / USE THIS LEG</span><strong>{legMinutes} MIN TO NEXT STOP</strong></header>
+            <div>
+              <button type="button" onClick={() => actions.onPhone("messages")}><strong>СООБЩЕНИЯ</strong><small>снизить стресс</small></button>
+              <button type="button" onClick={() => actions.onPhone("job-board")}><strong>РАБОТА</strong><small>обновить заказы</small></button>
+              <button type="button" onClick={() => actions.onPhone("study")}><strong>УЧЁБА</strong><small>получить знания</small></button>
+              <button type="button" onClick={() => actions.onPhone("city-feed")}><strong>ГОРОД</strong><small>лента и маршрут</small></button>
+            </div>
+          </section>
+
+          <section className="transit-passenger-section">
+            <header><span>PASSENGERS IN THIS CAR</span><strong>{cabin?.passengers.length ?? 0} MATERIALIZED</strong></header>
+            {cabin?.lastInteraction ? <div className="transit-last-interaction">{cabin.lastInteraction}</div> : null}
+            <div className="transit-passenger-list">
+              {cabin?.passengers.slice(0, 14).map((passenger) => (
+                <article key={passenger.id} className={`${passenger.standing ? "is-standing" : "is-seated"} ${passenger.priorityNeed !== "none" ? "is-priority" : ""}`}>
+                  <div><strong>{passenger.name}</strong><small>{passenger.roleLabel} · AGE {passenger.age}</small></div>
+                  <div><span>{passenger.standing ? "STANDING" : `SEAT ${cabin.seats.find((seat) => seat.id === passenger.seatId)?.index !== undefined ? (cabin.seats.find((seat) => seat.id === passenger.seatId)?.index ?? 0) + 1 : ""}`}</span><small>{transitPriorityLabel(passenger.priorityNeed)} · {passenger.mood.toUpperCase()}</small></div>
+                  <div>
+                    {journey.seatId && passenger.standing && passenger.priorityNeed !== "none" ? <button type="button" onClick={() => actions.onYield(passenger.id)}>УСТУПИТЬ</button> : null}
+                    <button type="button" onClick={() => actions.onInteract(passenger.id)}>ЗАГОВОРИТЬ</button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <div className="transit-ride-actions">
+            <button type="button" className="button button--primary" onClick={actions.onAdvance}>ЕХАТЬ ДО СЛЕДУЮЩЕЙ · {legMinutes} MIN</button>
+            <button type="button" className="button button--ghost" onClick={actions.onSkip}>ПРОПУСТИТЬ ПОЕЗДКУ</button>
+          </div>
+          {standingPriority.length && journey.seatId ? <div className="transit-priority-notice">Рядом стоит пассажир, которому нужно место: {standingPriority[0].name}.</div> : null}
+        </>
       )}
     </div>
   );
@@ -1894,7 +2127,8 @@ function WindowContent({
   onBorrow,
   onOpenWindow,
   buildingActions,
-  vehicleActions
+  vehicleActions,
+  transitActions
 }: {
   id: WindowId;
   settings: UiSettings;
@@ -1925,6 +2159,7 @@ function WindowContent({
   onOpenWindow: (id: WindowId) => void;
   buildingActions: BuildingAccessActions;
   vehicleActions: PhysicalVehicleActions;
+  transitActions: TransitActions;
 }) {
 
   if (id === "profile") {
@@ -2047,7 +2282,7 @@ function WindowContent({
   }
 
   if (id === "places") {
-    return <PlacesWorkspace session={session} onTravel={onTravel} onOpenWindow={onOpenWindow} buildingActions={buildingActions} vehicleActions={vehicleActions} />;
+    return <PlacesWorkspace session={session} onTravel={onTravel} onOpenWindow={onOpenWindow} buildingActions={buildingActions} vehicleActions={vehicleActions} transitActions={transitActions} />;
   }
 
   if (id === "home") {

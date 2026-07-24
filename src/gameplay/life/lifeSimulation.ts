@@ -31,6 +31,19 @@ import {
 } from "../../simulation/vehicles/physicalVehicleSystem";
 import type { VehicleCommand } from "../../simulation/vehicles/types";
 import {
+  advanceTransitOperationsState,
+  estimateTransitJourney,
+  getTransitAdvancePosition,
+  getTransitBoardingVehicle,
+  getTransitCurrentFare,
+  getTransitDestinationPosition,
+  getTransitLegMinutes,
+  getTransitRemainingMinutes,
+  getTransitStop,
+  phoneActivityLabel
+} from "../../simulation/transit/transitOperationsSystem";
+import type { TransitCommand, TransitPhoneActivity } from "../../simulation/transit/types";
+import {
   advanceBuildingAccessState,
   findAccessDoor,
   recordAccessDenied,
@@ -104,6 +117,7 @@ interface ProgressOptions {
   targetLocationId?: string;
   playerPosition?: SpatialPositionState;
   vehicleCommand?: VehicleCommand;
+  transitCommand?: TransitCommand;
   suppressTimeEvent?: boolean;
   deliveryCompleted?: boolean;
   requestsCompleted?: number;
@@ -224,6 +238,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     seed: session.world.meta.seed,
     activeLocationId: session.life.currentLocationId,
     targetLocationId: options.targetLocationId,
+    focusSectorId: options.playerPosition?.sectorId,
     districts: session.world.districts,
     locations: session.world.locations,
     representedPopulationByDistrict: dataAdvance.population.lifecycle.representedPopulationByDistrict,
@@ -319,7 +334,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   const targetDistrict = targetLocation
     ? session.world.districts.find((district) => district.id === targetLocation.districtId)
     : undefined;
-  const localSceneState = advanceLocalSceneState(session.localScene, {
+  const provisionalLocalScene = advanceLocalSceneState(session.localScene, {
     timestamp: nextTimestamp,
     seed: session.world.meta.seed,
     activeLocationId: session.life.currentLocationId,
@@ -338,13 +353,41 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     playerId: session.player.id,
     activeLocationId: session.life.currentLocationId,
     targetLocationId: targetLocation?.id,
-    playerPosition: localSceneState.playerPosition,
+    playerPosition: provisionalLocalScene.playerPosition,
     metropolitan: metropolitanState,
     urban: urbanState,
     mobility: mobilityState,
     population: populationState,
     organizations: dataAdvance.organizations,
     command: options.vehicleCommand
+  });
+  const transitState = advanceTransitOperationsState(session.transit, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    activeLocationId: session.life.currentLocationId,
+    playerPosition: provisionalLocalScene.playerPosition,
+    locations: session.world.locations,
+    districts: session.world.districts,
+    people: peopleState,
+    population: populationState,
+    metropolitan: metropolitanState,
+    mobility: mobilityState,
+    physicalVehicles: vehiclesState,
+    command: options.transitCommand
+  });
+  const localSceneState = advanceLocalSceneState(provisionalLocalScene, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    activeLocationId: session.life.currentLocationId,
+    targetLocationId: targetLocation?.id,
+    locations: session.world.locations,
+    people: peopleState,
+    population: populationState,
+    metropolitan: metropolitanState,
+    urban: urbanState,
+    mobility: mobilityState,
+    playerPosition: transitState.player.position
   });
 
   const generated: WorldEvent[] = [];
@@ -516,6 +559,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     localScene: localSceneState,
     buildingAccess: buildingAccessState,
     vehicles: vehiclesState,
+    transit: transitState,
     district: infrastructurePulse,
     eventQueue: queued.queue,
     currentActivity: pressureAdvance.evicted
@@ -536,9 +580,11 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
 }
 
 export function travelToLocation(session: GameSession, locationId: string): GameSession {
-  if (session.localScene.playerPosition.state === "vehicle") return session;
+  if (session.localScene.playerPosition.state === "vehicle" || session.transit.player.journey) return session;
   const option = getTravelOptions(session).find((item) => item.location.id === locationId);
-  if (!option || session.player.balance < option.cost) return session;
+  if (!option) return session;
+  if (option.mode === "bus" || option.mode === "metro") return startTransitJourney(session, locationId);
+  if (session.player.balance < option.cost) return session;
   const open = isLocationOpen(option.location, session.timestamp + option.durationMinutes * 60_000);
   const progressed = progressLife(session, option.durationMinutes, {
     category: "personal",
@@ -567,6 +613,252 @@ export function travelToLocation(session: GameSession, locationId: string): Game
     jobs: { ...progressed.jobs, courier: risk.state },
     events: [incident, ...progressed.events].slice(0, 100)
   };
+}
+
+
+function transitInput(session: GameSession, timestamp = session.timestamp, playerPosition: SpatialPositionState = session.localScene.playerPosition) {
+  return {
+    timestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    activeLocationId: session.life.currentLocationId,
+    playerPosition,
+    locations: session.world.locations,
+    districts: session.world.districts,
+    people: session.people,
+    population: session.population,
+    metropolitan: session.metropolitan,
+    mobility: session.mobility,
+    physicalVehicles: session.vehicles
+  };
+}
+
+function transitStopPosition(session: GameSession, stopId: string, state: "outside" | "in-transit", timestamp: number, routeId?: string, vehicleId?: string): SpatialPositionState | null {
+  const stop = getTransitStop(session.transit, stopId);
+  if (!stop) return null;
+  return {
+    sectorId: stop.sectorId,
+    xM: stop.xM,
+    yM: stop.yM,
+    transitRouteId: routeId,
+    vehicleId,
+    state,
+    updatedAt: timestamp
+  };
+}
+
+export function startTransitJourney(session: GameSession, locationId: string): GameSession {
+  if (session.transit.player.journey || session.localScene.playerPosition.state === "vehicle") return session;
+  const option = getTravelOptions(session).find((item) => item.location.id === locationId);
+  if (!option || (option.mode !== "bus" && option.mode !== "metro")) return session;
+  const estimate = estimateTransitJourney(session.transit, transitInput(session), session.life.currentLocationId, locationId, option.mode)
+    ?? estimateTransitJourney(session.transit, transitInput(session), session.life.currentLocationId, locationId);
+  if (!estimate || session.player.balance < estimate.totalFare) return session;
+  const position = transitStopPosition(session, estimate.originStopId, "outside", session.timestamp);
+  const stop = getTransitStop(session.transit, estimate.originStopId);
+  if (!position || !stop) return session;
+  const firstRoute = session.transit.routes.find((route) => route.id === estimate.segments[0]?.routeId);
+  return progressLife(session, estimate.walkingMinutes + estimate.waitingMinutes, {
+    category: "personal",
+    title: `Ожидание транспорта: ${stop.name}.`,
+    detail: `${firstRoute?.code ?? option.routeCode} · пешком ${estimate.walkingMinutes} мин. · ожидание ${estimate.waitingMinutes} мин. · ${estimate.segments.length > 1 ? `${estimate.segments.length - 1} пересадка` : "прямой маршрут"}`,
+    importance: firstRoute?.status === "delayed" || firstRoute?.status === "crowded" ? 2 : 1,
+    fatigueDelta: estimate.walkingMinutes >= 12 ? 1 : 0,
+    stressDelta: estimate.waitingMinutes >= 15 ? 1 : 0,
+    activity: `На остановке: ${stop.name}`,
+    playerPosition: position,
+    transitCommand: {
+      kind: "begin",
+      destinationLocationId: locationId,
+      segments: estimate.segments,
+      expectedArrivalAt: estimate.expectedArrivalAt
+    }
+  });
+}
+
+export function boardTransitVehicle(session: GameSession): GameSession {
+  const journey = session.transit.player.journey;
+  if (!journey || journey.phase !== "waiting") return session;
+  const vehicle = getTransitBoardingVehicle(session.transit);
+  const fare = getTransitCurrentFare(session.transit);
+  if (!vehicle || session.player.balance < fare) return session;
+  const segment = journey.segments[journey.activeSegmentIndex];
+  const route = session.transit.routes.find((item) => item.id === segment.routeId);
+  const position = transitStopPosition(session, journey.currentStopId, "in-transit", session.timestamp, segment.routeId, vehicle.id);
+  if (!position) return session;
+  return progressLife(session, 2, {
+    category: "personal",
+    title: `Посадка: ${route?.code ?? "TRANSIT"} ${vehicle.fleetNumber}.`,
+    detail: `${vehicle.mode.toUpperCase()} · водитель ${vehicle.crew.name} · ₵ ${fare} · заполнение ${route?.crowdingPercent ?? 0}%`,
+    importance: route?.status === "crowded" ? 2 : 1,
+    balanceDelta: -fare,
+    fatigueDelta: 0,
+    activity: `В салоне ${vehicle.fleetNumber}`,
+    playerPosition: position,
+    transitCommand: { kind: "board", vehicleId: vehicle.id }
+  });
+}
+
+export function takeTransitSeat(session: GameSession, seatId: string): GameSession {
+  const journey = session.transit.player.journey;
+  const seat = session.transit.cabin?.seats.find((item) => item.id === seatId);
+  if (!journey || journey.phase !== "onboard" || !seat || seat.occupiedBy !== null) return session;
+  return progressLife(session, 1, {
+    category: "personal",
+    title: "Свободное место занято.",
+    detail: `${seat.kind === "priority" ? "Приоритетное" : "Обычное"} место · ряд ${seat.index + 1}`,
+    importance: 1,
+    fatigueDelta: -1,
+    activity: "Сидит в общественном транспорте",
+    playerPosition: session.transit.player.position,
+    transitCommand: { kind: "take-seat", seatId }
+  });
+}
+
+export function standInTransit(session: GameSession): GameSession {
+  const journey = session.transit.player.journey;
+  if (!journey?.seatId || journey.phase !== "onboard") return session;
+  return progressLife(session, 1, {
+    category: "personal",
+    title: "Место освобождено.",
+    detail: "Игрок продолжает поездку стоя.",
+    importance: 1,
+    activity: "Стоит в салоне",
+    playerPosition: session.transit.player.position,
+    transitCommand: { kind: "stand" }
+  });
+}
+
+export function yieldTransitSeat(session: GameSession, passengerId: string): GameSession {
+  const journey = session.transit.player.journey;
+  const passenger = session.transit.cabin?.passengers.find((item) => item.id === passengerId);
+  if (!journey?.seatId || journey.phase !== "onboard" || !passenger?.standing || passenger.priorityNeed === "none") return session;
+  return progressLife(session, 1, {
+    category: "contact",
+    title: `Место уступлено: ${passenger.name}.`,
+    detail: `${passenger.priorityNeed.toUpperCase()} · отношение пассажира улучшилось`,
+    importance: 1,
+    stressDelta: -1,
+    relationChanges: 1,
+    activity: "Стоит в салоне",
+    playerPosition: session.transit.player.position,
+    transitCommand: { kind: "yield-seat", passengerId }
+  });
+}
+
+export function rideTransitToNextStop(session: GameSession): GameSession {
+  const journey = session.transit.player.journey;
+  if (!journey || journey.phase !== "onboard") return session;
+  const minutes = getTransitLegMinutes(session.transit);
+  const position = getTransitAdvancePosition(session.transit, transitInput(session, session.timestamp + minutes * 60_000));
+  const nextStop = getTransitStop(session.transit, journey.nextStopId);
+  return progressLife(session, minutes, {
+    category: "personal",
+    title: `Следующая остановка: ${nextStop?.name ?? "маршрут продолжается"}.`,
+    detail: `${minutes} мин. · ${session.transit.cabin?.totalPassengerCount ?? 0} пассажиров`,
+    importance: 1,
+    fatigueDelta: journey.seatId ? -1 : 0,
+    activity: nextStop ? `У остановки: ${nextStop.name}` : "В пути",
+    playerPosition: position,
+    transitCommand: { kind: "advance" }
+  });
+}
+
+export function interactWithTransitPassenger(session: GameSession, passengerId: string): GameSession {
+  const journey = session.transit.player.journey;
+  const passenger = session.transit.cabin?.passengers.find((item) => item.id === passengerId);
+  if (!journey || journey.phase !== "onboard" || !passenger) return session;
+  const minutes = getTransitLegMinutes(session.transit);
+  const position = getTransitAdvancePosition(session.transit, transitInput(session, session.timestamp + minutes * 60_000));
+  let progressed = progressLife(session, minutes, {
+    category: "contact",
+    title: `Разговор в салоне: ${passenger.name}.`,
+    detail: `${passenger.roleLabel} · настроение ${passenger.mood.toUpperCase()} · разговор до следующей остановки`,
+    importance: 1,
+    stressDelta: passenger.mood === "friendly" ? -1 : passenger.mood === "irritated" ? 1 : 0,
+    relationChanges: passenger.activePersonId ? 1 : 0,
+    activity: `Разговор с ${passenger.name}`,
+    playerPosition: position,
+    transitCommand: { kind: "interact-advance", passengerId }
+  });
+  if (passenger.activePersonId) {
+    const people = recordPlayerAction(
+      progressed.people,
+      progressed.world.meta.seed,
+      passenger.activePersonId,
+      progressed.timestamp,
+      "Игрок поговорил с ним во время поездки в общественном транспорте.",
+      { trust: passenger.mood === "friendly" ? 2 : 1, irritation: passenger.mood === "irritated" ? 1 : 0, importance: 28, emotionalValue: passenger.mood === "friendly" ? 8 : 2 }
+    );
+    const contact = getPerson(people, passenger.activePersonId);
+    progressed = {
+      ...progressed,
+      people,
+      primaryContact: contact ? toKnownNpc(contact, progressed.world.locations, progressed.timestamp) : progressed.primaryContact,
+      world: { ...progressed.world, primaryContactId: contact?.id ?? progressed.world.primaryContactId }
+    };
+  }
+  return progressed;
+}
+
+export function usePhoneInTransit(session: GameSession, activity: TransitPhoneActivity): GameSession {
+  const journey = session.transit.player.journey;
+  if (!journey || journey.phase !== "onboard") return session;
+  const minutes = getTransitLegMinutes(session.transit);
+  const position = getTransitAdvancePosition(session.transit, transitInput(session, session.timestamp + minutes * 60_000));
+  const stressDelta = activity === "messages" ? -2 : activity === "city-feed" ? -1 : activity === "job-board" ? 0 : 1;
+  return progressLife(session, minutes, {
+    category: activity === "job-board" ? "work" : "personal",
+    title: `Телефон в дороге: ${phoneActivityLabel(activity)}.`,
+    detail: `${minutes} полезных минут · поездка продолжается до следующей остановки`,
+    importance: 1,
+    stressDelta,
+    activity: `Телефон: ${phoneActivityLabel(activity)}`,
+    playerPosition: position,
+    transitCommand: { kind: "phone-advance", activity, productiveMinutes: minutes }
+  });
+}
+
+export function alightTransitVehicle(session: GameSession): GameSession {
+  const journey = session.transit.player.journey;
+  if (!journey || journey.phase !== "arrived") return session;
+  const destination = session.world.locations.find((item) => item.id === journey.destinationLocationId);
+  const position = getTransitDestinationPosition(session.transit, transitInput(session, session.timestamp + 60_000));
+  if (!destination) return session;
+  return progressLife(session, 1, {
+    category: "personal",
+    title: `Выход: ${destination.name}.`,
+    detail: `${journey.segments.length > 1 ? `${journey.segments.length - 1} пересадка · ` : ""}${journey.interactions} разговоров · ${journey.phoneMinutes} мин. в телефоне`,
+    importance: 1,
+    fatigueDelta: journey.seatId ? 0 : 1,
+    activity: `На месте: ${destination.name}`,
+    targetLocationId: destination.id,
+    playerPosition: position,
+    transitCommand: { kind: "alight" }
+  });
+}
+
+export function skipTransitJourney(session: GameSession): GameSession {
+  const journey = session.transit.player.journey;
+  if (!journey) return session;
+  const destination = session.world.locations.find((item) => item.id === journey.destinationLocationId);
+  if (!destination) return session;
+  const minutes = getTransitRemainingMinutes(session.transit);
+  const remainingFare = Math.max(0, journey.segments.reduce((sum, segment) => sum + segment.fare, 0) - journey.farePaid);
+  if (session.player.balance < remainingFare) return session;
+  const position = getTransitDestinationPosition(session.transit, transitInput(session, session.timestamp + minutes * 60_000));
+  return progressLife(session, minutes, {
+    category: "personal",
+    title: `Поездка пропущена: ${destination.name}.`,
+    detail: `${minutes} мин. промотано · оставшаяся оплата ₵ ${remainingFare}`,
+    importance: 1,
+    balanceDelta: -remainingFare,
+    fatigueDelta: journey.seatId ? 0 : 1,
+    activity: `На месте: ${destination.name}`,
+    targetLocationId: destination.id,
+    playerPosition: position,
+    transitCommand: { kind: "skip" }
+  });
 }
 
 

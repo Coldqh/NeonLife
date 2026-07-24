@@ -62,7 +62,7 @@ const migrated = migrateEnvelope({
   payload: legacyPayload
 }, "slot-1");
 assert(migrated, "migration returned null");
-assert(migrated.schemaVersion === 25, "migration schema mismatch");
+assert(migrated.schemaVersion === 26, "migration schema mismatch");
 assert(migrated.payload.data.version === 1, "data state was not created during migration");
 assert(migrated.payload.data.identities.length === migrated.payload.population.residents.length, "migration did not create resident identities");
 assert(migrated.payload.kernel.assets.some((asset) => asset.kind === "surveillance-node"), "migration did not register surveillance assets");

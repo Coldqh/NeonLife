@@ -265,7 +265,7 @@ function roleLabel(input: LocalSceneInput, resident: BackgroundResident): string
 }
 
 function buildPlayerPosition(input: LocalSceneInput): SpatialPositionState {
-  if (input.playerPosition && (!input.targetLocationId || input.playerPosition.state === "vehicle")) {
+  if (input.playerPosition && (!input.targetLocationId || input.playerPosition.state === "vehicle" || input.playerPosition.locationId === input.targetLocationId)) {
     const sector = sectorById(input, input.playerPosition.sectorId);
     if (sector && input.metropolitan.streaming.activeSectorIds.includes(sector.id)) {
       return { ...input.playerPosition, updatedAt: input.timestamp };

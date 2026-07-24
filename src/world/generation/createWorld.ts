@@ -25,6 +25,7 @@ import { createMetropolitanMobilityState, synchronizeMetropolitanFromMobility } 
 import { createLocalSceneState } from "../../simulation/localScene/localSceneSystem";
 import { createBuildingAccessState } from "../../simulation/access/buildingAccessSystem";
 import { createPhysicalVehiclesState } from "../../simulation/vehicles/physicalVehicleSystem";
+import { createTransitOperationsState } from "../../simulation/transit/transitOperationsSystem";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
 import type {
@@ -390,6 +391,20 @@ export function createWorldSession(seed: string): GameSession {
     population,
     organizations
   });
+  const transitOperations = createTransitOperationsState({
+    timestamp: INITIAL_GAME_TIMESTAMP,
+    seed,
+    playerId: player.id,
+    activeLocationId: housing.id,
+    playerPosition: localScene.playerPosition,
+    locations,
+    districts,
+    people,
+    population,
+    metropolitan,
+    mobility,
+    physicalVehicles: vehicles
+  });
   const syncedKernel = advanceSimulationKernel(kernel, {
     timestamp: INITIAL_GAME_TIMESTAMP,
     seed,
@@ -433,6 +448,7 @@ export function createWorldSession(seed: string): GameSession {
     localScene,
     buildingAccess,
     vehicles,
+    transit: transitOperations,
     events: createInitialEvents({
       seed,
       districtName: lower.name,

@@ -17,7 +17,7 @@ function assert(condition: unknown, message: string): asserts condition {
 const seed = "PHYSICAL-VEHICLES-27";
 let session = createWorldSession(seed);
 
-assert(session.schemaVersion === 25, "new world schema is not 25");
+assert(session.schemaVersion === 26, "new world schema is not 26");
 assert(session.vehicles.version === 1, "physical vehicles version mismatch");
 assert(session.vehicles.vehicles.length > 0, "no vehicles materialized");
 assert(session.vehicles.parkingNodes.length > 0, "no parking nodes materialized");
@@ -113,7 +113,7 @@ const migrated = migrateEnvelope({
   payload: legacy
 }, "slot-1");
 assert(migrated, "migration returned null");
-assert(migrated.schemaVersion === 25, "migration schema mismatch");
+assert(migrated.schemaVersion === 26, "migration schema mismatch");
 assert(migrated.payload.vehicles.version === 1, "migration did not create physical vehicles");
 assert(migrated.payload.vehicles.player.ownedVehicleIds.length === 1, "migration lost starter vehicle ownership");
 

@@ -5655,7 +5655,7 @@ button:disabled {
 }
 
 .building-entry-list > article.is-near {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  background: color-mix(in srgb, var(--cyan) 8%, transparent);
 }
 
 .building-entry-list__identity,
@@ -5747,7 +5747,7 @@ button:disabled {
 
 .building-floor-controls article.is-current,
 .building-room-list article.is-current {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  background: color-mix(in srgb, var(--cyan) 10%, transparent);
 }
 
 .building-floor-controls article > div:first-child,
@@ -5884,7 +5884,7 @@ button:disabled {
 .current-vehicle-metrics i b {
   display: block;
   height: 100%;
-  background: var(--accent);
+  background: var(--cyan);
 }
 
 .vehicle-destination-list,
@@ -5930,7 +5930,7 @@ button:disabled {
 }
 
 .vehicle-presence-list article.is-near {
-  box-shadow: inset 3px 0 0 var(--accent);
+  box-shadow: inset 3px 0 0 var(--cyan);
 }
 
 .vehicle-presence-list__metrics {
@@ -5977,5 +5977,293 @@ button:disabled {
   .vehicle-presence-list > header {
     align-items: flex-start;
     flex-direction: column;
+  }
+}
+
+/* TRANSIT OPERATIONS */
+.transit-operations-workspace {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.transit-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.transit-summary-grid > div,
+.transit-waiting-metrics > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.transit-summary-grid strong,
+.transit-waiting-metrics strong {
+  font-size: 1.08rem;
+}
+
+.transit-route-directory,
+.transit-passenger-section,
+.transit-seat-section,
+.transit-phone-actions,
+.transit-waiting-card,
+.transit-arrival-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.012);
+}
+
+.transit-route-directory > header,
+.transit-passenger-section > header,
+.transit-phone-actions > header,
+.transit-seat-section > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.transit-route-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(110px, auto) minmax(130px, auto);
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.016);
+}
+
+.transit-route-card > div {
+  display: grid;
+  gap: 3px;
+}
+
+.transit-route-card > div:not(:first-child) {
+  text-align: right;
+}
+
+.transit-route-card--delayed,
+.transit-route-card--crowded {
+  box-shadow: inset 3px 0 0 var(--cyan);
+}
+
+.transit-route-card--suspended {
+  opacity: 0.52;
+}
+
+.transit-waiting-card h2,
+.transit-arrival-card h3,
+.transit-cabin-header h2 {
+  margin: 0;
+}
+
+.transit-phase {
+  width: max-content;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+}
+
+.transit-waiting-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.transit-primary-actions,
+.transit-ride-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.transit-cabin-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.transit-cabin-header > div:first-child,
+.transit-cabin-status {
+  display: grid;
+  gap: 4px;
+}
+
+.transit-cabin-status {
+  min-width: 170px;
+  text-align: right;
+}
+
+.transit-cabin-status strong {
+  font-size: 1.4rem;
+}
+
+.transit-seat-map {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(58px, 1fr));
+  gap: 6px;
+}
+
+.transit-seat-map button {
+  display: grid;
+  gap: 3px;
+  min-height: 54px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.transit-seat-map button.is-free:not(:disabled) {
+  box-shadow: inset 0 -2px 0 var(--cyan);
+}
+
+.transit-seat-map button.is-priority {
+  border-style: dashed;
+}
+
+.transit-seat-map button.is-occupied {
+  opacity: 0.48;
+}
+
+.transit-seat-map button.is-player {
+  opacity: 1;
+  border-color: var(--cyan);
+  box-shadow: inset 0 0 0 1px var(--cyan);
+}
+
+.transit-phone-actions > div {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.transit-phone-actions button {
+  display: grid;
+  gap: 4px;
+  min-height: 64px;
+  padding: 10px;
+  text-align: left;
+}
+
+.transit-last-interaction,
+.transit-priority-notice {
+  padding: 10px 12px;
+  border-left: 3px solid var(--cyan);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.transit-passenger-list {
+  display: grid;
+  gap: 6px;
+}
+
+.transit-passenger-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, auto) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.014);
+}
+
+.transit-passenger-list article > div {
+  display: grid;
+  gap: 3px;
+}
+
+.transit-passenger-list article > div:nth-child(2) {
+  text-align: right;
+}
+
+.transit-passenger-list article > div:last-child {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.transit-passenger-list article.is-standing {
+  box-shadow: inset 3px 0 0 rgba(255, 255, 255, 0.16);
+}
+
+.transit-passenger-list article.is-priority {
+  box-shadow: inset 3px 0 0 var(--cyan);
+}
+
+.transit-ride-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel-solid);
+}
+
+@media (max-width: 980px) {
+  .transit-summary-grid,
+  .transit-waiting-metrics,
+  .transit-phone-actions > div {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .transit-seat-map {
+    grid-template-columns: repeat(4, minmax(58px, 1fr));
+  }
+
+  .transit-route-card,
+  .transit-passenger-list article {
+    grid-template-columns: 1fr;
+  }
+
+  .transit-route-card > div:not(:first-child),
+  .transit-passenger-list article > div:nth-child(2) {
+    text-align: left;
+  }
+
+  .transit-passenger-list article > div:last-child {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 560px) {
+  .transit-summary-grid,
+  .transit-waiting-metrics,
+  .transit-phone-actions > div {
+    grid-template-columns: 1fr;
+  }
+
+  .transit-cabin-header,
+  .transit-route-directory > header,
+  .transit-passenger-section > header,
+  .transit-phone-actions > header,
+  .transit-seat-section > header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .transit-cabin-status {
+    min-width: 0;
+    text-align: left;
+  }
+
+  .transit-seat-map {
+    grid-template-columns: repeat(3, minmax(52px, 1fr));
+  }
+
+  .transit-primary-actions,
+  .transit-ride-actions {
+    display: grid;
   }
 }

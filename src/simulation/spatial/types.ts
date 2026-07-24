@@ -198,6 +198,7 @@ export interface MetropolitanAdvanceInput {
   seed: string;
   activeLocationId: EntityId;
   targetLocationId?: EntityId;
+  focusSectorId?: EntityId;
   districts: DistrictState[];
   locations: LocationState[];
   representedPopulationByDistrict: Record<string, number>;

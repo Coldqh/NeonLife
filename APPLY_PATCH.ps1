@@ -35,4 +35,4 @@ foreach ($relativePath in $files) {
     Copy-Item -Force -Path $source -Destination $destination
 }
 
-Write-Host "NEON LIFE v0.27.0 PHYSICAL VEHICLES applied to $ProjectRoot"
+Write-Host "NEON LIFE v0.28.0 TRANSIT OPERATIONS applied to $ProjectRoot"

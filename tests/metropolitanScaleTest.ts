@@ -82,7 +82,7 @@ const migrated = migrateEnvelope({
   payload: legacy
 }, "slot-1");
 assert(migrated, "migration returned null");
-assert(migrated.schemaVersion === 25, "migration schema mismatch");
+assert(migrated.schemaVersion === 26, "migration schema mismatch");
 assert(migrated.payload.metropolitan.version === 1, "metropolitan state was not created during migration");
 assert(migrated.payload.world.city.population >= 5_000_000, "legacy city was not expanded to metropolitan represented scale");
 assert(migrated.payload.metropolitan.totals.representedPopulation === migrated.payload.world.city.population, "metropolitan and world population diverged");

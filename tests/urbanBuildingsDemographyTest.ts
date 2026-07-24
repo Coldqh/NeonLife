@@ -110,7 +110,7 @@ const migrated = migrateEnvelope({
   payload: legacy
 }, "slot-1");
 assert(migrated, "migration returned null");
-assert(migrated.schemaVersion === 25, "migration schema mismatch");
+assert(migrated.schemaVersion === 26, "migration schema mismatch");
 assert(migrated.payload.urban.version === 1, "urban state was not created during migration");
 assert(migrated.payload.urban.catalogs.length === migrated.payload.metropolitan.sectors.length, "migration lost sector building indexes");
 assert(migrated.payload.urban.householdAddresses.length > 0, "migration did not assign detailed households to apartments");

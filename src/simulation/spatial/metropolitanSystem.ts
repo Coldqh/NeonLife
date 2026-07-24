@@ -542,7 +542,9 @@ export function advanceMetropolitanState(state: MetropolitanState, input: Metrop
   const focusPlacement = state.locations.find((item) => item.locationId === input.targetLocationId)
     ?? state.locations.find((item) => item.locationId === input.activeLocationId)
     ?? state.locations[0];
-  const focus = sectorsWithPopulation.find((sector) => sector.id === focusPlacement?.sectorId) ?? sectorsWithPopulation[0];
+  const focus = sectorsWithPopulation.find((sector) => sector.id === input.focusSectorId)
+    ?? sectorsWithPopulation.find((sector) => sector.id === focusPlacement?.sectorId)
+    ?? sectorsWithPopulation[0];
   let streaming = streamingState(state.config, focus, sectorsWithPopulation, state.streaming);
   let sectors = sectorsWithPopulation.map((sector) => {
     const detailLevel: SpatialDetailLevel = streaming.activeSectorIds.includes(sector.id) ? "active" : streaming.warmSectorIds.includes(sector.id) ? "warm" : "cold";

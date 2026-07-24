@@ -24,6 +24,7 @@ import type { MetropolitanMobilityState } from "../../simulation/mobility/types"
 import type { LocalSceneState } from "../../simulation/localScene/types";
 import type { BuildingAccessState } from "../../simulation/access/types";
 import type { PhysicalVehiclesState } from "../../simulation/vehicles/types";
+import type { TransitOperationsState } from "../../simulation/transit/types";
 
 export interface CityState {
   id: EntityId;
@@ -127,6 +128,7 @@ export interface GameSession {
   localScene: LocalSceneState;
   buildingAccess: BuildingAccessState;
   vehicles: PhysicalVehiclesState;
+  transit: TransitOperationsState;
   events: WorldEvent[];
   eventQueue: ScheduledWorldEvent[];
   currentActivity: string;
