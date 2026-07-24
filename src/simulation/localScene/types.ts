@@ -17,6 +17,7 @@ export interface SpatialPositionState {
   buildingId?: EntityId;
   unitId?: EntityId;
   roomId?: EntityId;
+  floor?: number;
   transitRouteId?: EntityId;
   state: SpatialPresenceState;
   updatedAt: number;
@@ -92,4 +93,5 @@ export interface LocalSceneInput {
   metropolitan: MetropolitanState;
   urban: UrbanFabricState;
   mobility: MetropolitanMobilityState;
+  playerPosition?: SpatialPositionState;
 }

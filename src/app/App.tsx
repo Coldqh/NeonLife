@@ -39,7 +39,15 @@ import {
   requestRentExtension,
   completePersonalRequest,
   sleepAtHome,
-  travelToLocation
+  travelToLocation,
+  approachLocalBuilding,
+  enterLocalBuilding,
+  leaveLocalBuilding,
+  moveInsideBuilding,
+  enterBuildingUnit,
+  leaveBuildingUnit,
+  enterInteriorRoom,
+  leaveInteriorRoom
 } from "../gameplay/life/lifeSimulation";
 import { Icon, type IconName } from "../ui/components/Icons";
 import { PressureWorkspace } from "./workspaces/PressureWorkspace";
@@ -67,6 +75,17 @@ const UI_SETTINGS_KEY = "neon-life/ui-settings/v1";
 type NavId = "life" | "city" | "people" | "work" | "network" | "inventory" | "health" | "home" | "messages" | "archive";
 type WindowId = "profile" | "contact" | "messages" | "courier" | "pressure" | "local" | "journal" | "food" | "places" | "home" | "settings" | "diagnostics";
 type MobileLifeTab = "now" | "plan" | "food" | "log";
+
+interface BuildingAccessActions {
+  onApproach: (buildingId: string) => void;
+  onEnter: (buildingId: string, entrance?: "public" | "service") => void;
+  onLeave: () => void;
+  onMoveFloor: (floor: number, method: "stairs" | "elevator") => void;
+  onEnterUnit: (unitId: string) => void;
+  onLeaveUnit: () => void;
+  onEnterRoom: (roomId: string) => void;
+  onLeaveRoom: () => void;
+}
 
 interface ActionDefinition {
   id: string;
@@ -275,6 +294,38 @@ export default function App() {
   function travel(locationId: string): void {
     setSession((current) => travelToLocation(current, locationId));
     setActionSheetOpen(false);
+  }
+
+  function approachBuilding(buildingId: string): void {
+    setSession((current) => approachLocalBuilding(current, buildingId));
+  }
+
+  function enterBuilding(buildingId: string, entrance: "public" | "service" = "public"): void {
+    setSession((current) => enterLocalBuilding(current, buildingId, entrance));
+  }
+
+  function leaveBuilding(): void {
+    setSession((current) => leaveLocalBuilding(current));
+  }
+
+  function moveFloor(floor: number, method: "stairs" | "elevator"): void {
+    setSession((current) => moveInsideBuilding(current, floor, method));
+  }
+
+  function enterUnit(unitId: string): void {
+    setSession((current) => enterBuildingUnit(current, unitId));
+  }
+
+  function leaveUnit(): void {
+    setSession((current) => leaveBuildingUnit(current));
+  }
+
+  function enterRoom(roomId: string): void {
+    setSession((current) => enterInteriorRoom(current, roomId));
+  }
+
+  function leaveRoom(): void {
+    setSession((current) => leaveInteriorRoom(current));
   }
 
   function buyFood(productId: string): void {
@@ -512,6 +563,17 @@ export default function App() {
     </aside>
   );
 
+  const buildingActions: BuildingAccessActions = {
+    onApproach: approachBuilding,
+    onEnter: enterBuilding,
+    onLeave: leaveBuilding,
+    onMoveFloor: moveFloor,
+    onEnterUnit: enterUnit,
+    onLeaveUnit: leaveUnit,
+    onEnterRoom: enterRoom,
+    onLeaveRoom: leaveRoom
+  };
+
   const workspace = activeNav === "life" ? (
     <LifeWorkspace
       session={session}
@@ -528,7 +590,7 @@ export default function App() {
       plans={plans}
     />
   ) : activeNav === "city" ? (
-    <PlacesWorkspace session={session} onTravel={travel} onOpenWindow={openWindow} />
+    <PlacesWorkspace session={session} onTravel={travel} onOpenWindow={openWindow} buildingActions={buildingActions} />
   ) : activeNav === "people" ? (
     <PeopleWorkspace session={session} onSelect={selectPerson} />
   ) : activeNav === "work" ? (
@@ -609,6 +671,7 @@ export default function App() {
             onRequestExtension={extendRent}
             onBorrow={borrowFrom}
             onOpenWindow={openWindow}
+            buildingActions={buildingActions}
           />
         </WindowFrame>
       ) : null}
@@ -1078,8 +1141,8 @@ function ActionCard({ action, onAction, compact = false }: { action: ActionDefin
 }
 
 
-function PlacesWorkspace({ session, onTravel, onOpenWindow }: { session: GameSession; onTravel: (locationId: string) => void; onOpenWindow: (id: WindowId) => void }) {
-  const [tab, setTab] = useState<"routes" | "economy" | "population">("routes");
+function PlacesWorkspace({ session, onTravel, onOpenWindow, buildingActions }: { session: GameSession; onTravel: (locationId: string) => void; onOpenWindow: (id: WindowId) => void; buildingActions: BuildingAccessActions }) {
+  const [tab, setTab] = useState<"routes" | "buildings" | "economy" | "population">("routes");
   const current = session.world.locations.find((location) => location.id === session.life.currentLocationId);
   const options = getTravelOptions(session);
   const strained = session.economy.businesses.filter((business) => business.status === "strained").length;
@@ -1101,6 +1164,7 @@ function PlacesWorkspace({ session, onTravel, onOpenWindow }: { session: GameSes
 
       <nav className="terminal-tabs city-tabs" aria-label="Разделы города">
         <button type="button" className={tab === "routes" ? "is-active" : ""} onClick={() => setTab("routes")}>МАРШРУТЫ</button>
+        <button type="button" className={tab === "buildings" ? "is-active" : ""} onClick={() => setTab("buildings")}>ЗДАНИЯ</button>
         <button type="button" className={tab === "economy" ? "is-active" : ""} onClick={() => setTab("economy")}>ЭКОНОМИКА</button>
         <button type="button" className={tab === "population" ? "is-active" : ""} onClick={() => setTab("population")}>НАСЕЛЕНИЕ</button>
         <button type="button" onClick={() => onOpenWindow("local")}>РАЙОН</button>
@@ -1137,6 +1201,8 @@ function PlacesWorkspace({ session, onTravel, onOpenWindow }: { session: GameSes
             })}
           </div>
         </>
+      ) : tab === "buildings" ? (
+        <BuildingAccessWorkspace session={session} actions={buildingActions} />
       ) : tab === "economy" ? (
         <div className="economy-business-list">
           {session.economy.businesses
@@ -1155,6 +1221,130 @@ function PlacesWorkspace({ session, onTravel, onOpenWindow }: { session: GameSes
         </div>
       ) : (
         <PopulationWorkspace session={session} />
+      )}
+    </div>
+  );
+}
+
+
+function accessDecisionLabel(decision: GameSession["buildingAccess"]["buildingEntries"][number]["publicDecision"]): string {
+  if (decision === "authorized") return "ACCESS";
+  if (decision === "open") return "OPEN";
+  if (decision === "closed") return "CLOSED";
+  if (decision === "locked") return "LOCKED";
+  return "NO ENTRY";
+}
+
+function BuildingAccessWorkspace({ session, actions }: { session: GameSession; actions: BuildingAccessActions }) {
+  const access = session.buildingAccess;
+  const position = session.localScene.playerPosition;
+  const activeBuilding = position.buildingId ? session.urban.buildings.find((item) => item.id === position.buildingId) : undefined;
+  const currentFloor = position.floor ?? 1;
+  const currentUnit = position.unitId ? session.urban.units.find((item) => item.id === position.unitId) : undefined;
+  const currentRoom = position.roomId ? access.rooms.find((item) => item.roomId === position.roomId) : undefined;
+  const floorUnits = access.units.filter((unit) => unit.floor === currentFloor).slice(0, 30);
+  const visibleFloors = access.floors.filter((floor, index, array) => Math.abs(floor.floor - currentFloor) <= 5 || index === 0 || index === array.length - 1);
+
+  return (
+    <div className="building-access-workspace">
+      <section className="building-access-summary">
+        <div><span>POSITION</span><strong>{activeBuilding?.addressCode ?? "STREET"}</strong><small>{access.player.level.toUpperCase()} · FLOOR {position.floor ?? "—"}</small></div>
+        <div><span>LOCAL BUILDINGS</span><strong>{access.totals.localBuildings}</strong><small>{access.totals.openEntrances} open · {access.totals.authorizedEntrances} authorized</small></div>
+        <div><span>ACCESS</span><strong>{access.totals.lockedEntrances} LOCKED</strong><small>{access.totals.deniedAttempts} denied attempts</small></div>
+        <div><span>VISITED</span><strong>{access.visitedBuildingIds.length}</strong><small>{access.visitedUnitIds.length} units · {access.totals.doorsOpened} doors opened</small></div>
+      </section>
+
+      {access.player.level === "street" ? (
+        <section className="building-entry-list">
+          <header><span>ACTIVE SECTOR / BUILDINGS</span><strong>PHYSICAL ENTRANCES</strong></header>
+          {access.buildingEntries.slice(0, 40).map((entry) => {
+            const building = session.urban.buildings.find((item) => item.id === entry.buildingId);
+            const closeEnough = entry.distanceToPlayerM <= 20;
+            const publicAvailable = entry.publicDecision === "open" || entry.publicDecision === "authorized";
+            const serviceAvailable = entry.serviceDecision === "open" || entry.serviceDecision === "authorized";
+            return (
+              <article key={entry.buildingId} className={closeEnough ? "is-near" : ""}>
+                <div className="building-entry-list__identity">
+                  <span>{entry.addressCode}</span>
+                  <strong>{entry.use.toUpperCase()}</strong>
+                  <small>{building?.floors ?? 0} floors · security {building?.security ?? 0}% · {Math.round(entry.distanceToPlayerM)} m</small>
+                </div>
+                <div className="building-entry-list__doors">
+                  <span className={publicAvailable ? "ok-text" : "warning-text"}>MAIN {accessDecisionLabel(entry.publicDecision)}</span>
+                  <small>{entry.publicReason}</small>
+                  <span className={serviceAvailable ? "ok-text" : "warning-text"}>SERVICE {accessDecisionLabel(entry.serviceDecision)}</span>
+                  <small>{entry.serviceReason}</small>
+                </div>
+                <div className="building-entry-list__actions">
+                  {!closeEnough ? <button type="button" onClick={() => actions.onApproach(entry.buildingId)}>ПОДОЙТИ</button> : null}
+                  {closeEnough && publicAvailable ? <button type="button" className="button--primary" onClick={() => actions.onEnter(entry.buildingId, "public")}>ВОЙТИ</button> : null}
+                  {closeEnough && !publicAvailable && serviceAvailable ? <button type="button" onClick={() => actions.onEnter(entry.buildingId, "service")}>СЛУЖЕБНЫЙ</button> : null}
+                  {closeEnough && !publicAvailable && !serviceAvailable ? <button type="button" disabled>ЗАКРЫТО</button> : null}
+                </div>
+              </article>
+            );
+          })}
+        </section>
+      ) : (
+        <div className="building-interior-layout">
+          <section className="building-interior-current">
+            <header>
+              <div><span>INSIDE BUILDING</span><strong>{activeBuilding?.addressCode ?? "UNKNOWN"}</strong><small>{activeBuilding?.use.toUpperCase()} · floor {currentFloor} · {access.player.level.toUpperCase()}</small></div>
+              <button type="button" className="button--danger" onClick={actions.onLeave}>ВЫЙТИ НА УЛИЦУ</button>
+            </header>
+            <div className="building-access-breadcrumbs">
+              <span>{activeBuilding?.addressCode}</span>
+              <b>F{currentFloor}</b>
+              {currentUnit ? <span>UNIT {currentUnit.unitNumber}</span> : null}
+              {currentRoom ? <span>{currentRoom.kind.toUpperCase()}</span> : null}
+            </div>
+            {position.roomId ? <button type="button" onClick={actions.onLeaveRoom}>ВЫЙТИ ИЗ КОМНАТЫ</button> : null}
+            {!position.roomId && position.unitId ? <button type="button" onClick={actions.onLeaveUnit}>ВЫЙТИ В КОРИДОР</button> : null}
+          </section>
+
+          {!position.unitId ? (
+            <section className="building-floor-controls">
+              <header><span>VERTICAL ACCESS</span><strong>{activeBuilding?.elevatorCount ?? 0} LIFTS · {activeBuilding?.stairwellCount ?? 0} STAIRS</strong></header>
+              <div>
+                {visibleFloors.map((floor) => (
+                  <article key={floor.floor} className={floor.floor === currentFloor ? "is-current" : ""}>
+                    <div><span>{floor.label}</span><strong>{floor.unitIds.length} UNITS</strong><small>{floor.occupiedActorCount} actors · {floor.accessible ? "accessible" : "blocked"}</small></div>
+                    {floor.floor !== currentFloor ? (
+                      <div>
+                        {floor.stairsAvailable ? <button type="button" disabled={!floor.accessible} onClick={() => actions.onMoveFloor(floor.floor, "stairs")}>ЛЕСТНИЦА</button> : null}
+                        {floor.elevatorAvailable ? <button type="button" disabled={!floor.accessible} onClick={() => actions.onMoveFloor(floor.floor, "elevator")}>ЛИФТ</button> : null}
+                      </div>
+                    ) : <strong>YOU ARE HERE</strong>}
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {!position.unitId ? (
+            <section className="building-unit-list">
+              <header><span>FLOOR {currentFloor}</span><strong>DOORS & UNITS</strong></header>
+              {floorUnits.map((unit) => (
+                <article key={unit.unitId}>
+                  <div><span>{unit.unitNumber}</span><strong>{unit.use.toUpperCase()}</strong><small>{unit.occupied ? `${unit.residentCount} residents` : "vacant"} · security {unit.security}%</small></div>
+                  <div><span className={unit.decision === "open" || unit.decision === "authorized" ? "ok-text" : "warning-text"}>{accessDecisionLabel(unit.decision)}</span><small>{unit.reason}</small></div>
+                  <button type="button" disabled={unit.decision !== "open" && unit.decision !== "authorized"} onClick={() => actions.onEnterUnit(unit.unitId)}>ВОЙТИ</button>
+                </article>
+              ))}
+              {!floorUnits.length ? <div className="empty-terminal">На этом этаже нет материализованных помещений.</div> : null}
+            </section>
+          ) : (
+            <section className="building-room-list">
+              <header><span>UNIT {currentUnit?.unitNumber ?? "UNKNOWN"}</span><strong>ROOMS</strong></header>
+              {access.rooms.map((room) => (
+                <article key={room.roomId} className={room.playerInside ? "is-current" : ""}>
+                  <div><span>{room.kind.toUpperCase()}</span><strong>{room.occupiedActorCount} ACTORS</strong><small>{room.playerInside ? "YOU ARE HERE" : "door open"}</small></div>
+                  {!position.roomId ? <button type="button" onClick={() => actions.onEnterRoom(room.roomId)}>ВОЙТИ</button> : null}
+                </article>
+              ))}
+            </section>
+          )}
+        </div>
       )}
     </div>
   );
@@ -1550,7 +1740,8 @@ function WindowContent({
   onPayObligation,
   onRequestExtension,
   onBorrow,
-  onOpenWindow
+  onOpenWindow,
+  buildingActions
 }: {
   id: WindowId;
   settings: UiSettings;
@@ -1579,6 +1770,7 @@ function WindowContent({
   onRequestExtension: () => void;
   onBorrow: (personId: string) => void;
   onOpenWindow: (id: WindowId) => void;
+  buildingActions: BuildingAccessActions;
 }) {
 
   if (id === "profile") {
@@ -1701,7 +1893,7 @@ function WindowContent({
   }
 
   if (id === "places") {
-    return <PlacesWorkspace session={session} onTravel={onTravel} onOpenWindow={onOpenWindow} />;
+    return <PlacesWorkspace session={session} onTravel={onTravel} onOpenWindow={onOpenWindow} buildingActions={buildingActions} />;
   }
 
   if (id === "home") {

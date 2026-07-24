@@ -13,9 +13,21 @@ import { advanceGovernmentCrime } from "../../simulation/government/governmentSy
 import { advanceHealthCyberware } from "../../simulation/health/healthSystem";
 import { advanceDataSurveillance } from "../../simulation/data/dataSystem";
 import { advanceMetropolitanState } from "../../simulation/spatial/metropolitanSystem";
-import { advanceUrbanFabricState, synchronizeMetropolitanFromUrban } from "../../simulation/urban/urbanSystem";
+import {
+  advanceUrbanFabricState,
+  ensureBuildingAccessDetail,
+  ensureUnitInteriorDetail,
+  synchronizeMetropolitanFromUrban
+} from "../../simulation/urban/urbanSystem";
 import { advanceMetropolitanMobilityState, synchronizeMetropolitanFromMobility } from "../../simulation/mobility/mobilitySystem";
 import { advanceLocalSceneState } from "../../simulation/localScene/localSceneSystem";
+import type { SpatialPositionState } from "../../simulation/localScene/types";
+import {
+  advanceBuildingAccessState,
+  findAccessDoor,
+  recordAccessDenied,
+  setAccessDoorOpen
+} from "../../simulation/access/buildingAccessSystem";
 import { canPrepare, consumeFood, discardSpoiledFood, purchaseFood } from "../food/foodSystem";
 import { calculateSleepRecovery, getHousingDaysLeft } from "../housing/housingSystem";
 import { getTravelOptions, isLocationOpen } from "../travel/travelSystem";
@@ -82,6 +94,7 @@ interface ProgressOptions {
   healthDelta?: number;
   activity?: string;
   targetLocationId?: string;
+  playerPosition?: SpatialPositionState;
   suppressTimeEvent?: boolean;
   deliveryCompleted?: boolean;
   requestsCompleted?: number;
@@ -223,12 +236,26 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     transportServiceLevel: governmentAdvance.infrastructure.networks.find((item) => item.kind === "transport")?.averageServiceLevel ?? 100,
     dataServiceLevel: governmentAdvance.infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100
   });
-  const urbanSynchronizedMetropolitan = synchronizeMetropolitanFromUrban(metropolitanAdvance.state, urbanAdvance.state);
+  let urbanState = urbanAdvance.state;
+  if (options.playerPosition?.buildingId) {
+    urbanState = ensureBuildingAccessDetail(
+      urbanState,
+      session.world.meta.seed,
+      nextTimestamp,
+      options.playerPosition.buildingId,
+      session.player.id,
+      session.life.housing.locationId
+    );
+    if (options.playerPosition.unitId) {
+      urbanState = ensureUnitInteriorDetail(urbanState, session.world.meta.seed, nextTimestamp, options.playerPosition.unitId);
+    }
+  }
+  const urbanSynchronizedMetropolitan = synchronizeMetropolitanFromUrban(metropolitanAdvance.state, urbanState);
   const mobilityState = advanceMetropolitanMobilityState(session.mobility, {
     timestamp: nextTimestamp,
     seed: session.world.meta.seed,
     metropolitan: urbanSynchronizedMetropolitan,
-    urban: urbanAdvance.state,
+    urban: urbanState,
     districts: session.world.districts,
     locations: session.world.locations,
     organizations: dataAdvance.organizations,
@@ -292,8 +319,9 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     people: peopleState,
     population: populationState,
     metropolitan: metropolitanState,
-    urban: urbanAdvance.state,
-    mobility: mobilityState
+    urban: urbanState,
+    mobility: mobilityState,
+    playerPosition: options.playerPosition
   });
 
   const generated: WorldEvent[] = [];
@@ -388,6 +416,16 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
       hunger: clamp(session.player.condition.hunger + baselineHunger + (options.hungerDelta ?? 0))
     }
   };
+  const buildingAccessState = advanceBuildingAccessState(session.buildingAccess, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    player: nextPlayer,
+    playerHomeLocationId: session.life.housing.locationId,
+    locations: session.world.locations,
+    population: populationState,
+    urban: urbanState,
+    localScene: localSceneState
+  });
   const kernelDrafts = [...populationAdvance.transactions, ...economyAdvance.transactions, ...infrastructureAdvance.transactions, ...productionAdvance.transactions, ...organizationAdvance.transactions, ...governmentAdvance.transactions, ...healthAdvance.transactions, ...dataAdvance.transactions];
   if ((options.balanceDelta ?? 0) !== 0) {
     const amount = Math.abs(options.balanceDelta ?? 0);
@@ -449,9 +487,10 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     health: healthAdvance.state,
     data: compactedDataState,
     metropolitan: metropolitanState,
-    urban: urbanAdvance.state,
+    urban: urbanState,
     mobility: mobilityState,
     localScene: localSceneState,
+    buildingAccess: buildingAccessState,
     district: infrastructurePulse,
     eventQueue: queued.queue,
     currentActivity: pressureAdvance.evicted
@@ -502,6 +541,233 @@ export function travelToLocation(session: GameSession, locationId: string): Game
     jobs: { ...progressed.jobs, courier: risk.state },
     events: [incident, ...progressed.events].slice(0, 100)
   };
+}
+
+
+function buildingStreetPosition(session: GameSession, buildingId: string, timestamp: number): SpatialPositionState | null {
+  const building = session.urban.buildings.find((item) => item.id === buildingId);
+  const sector = building ? session.metropolitan.sectors.find((item) => item.id === building.sectorId) : undefined;
+  if (!building || !sector) return null;
+  const xM = Math.max(sector.bounds.xM + 1, Math.min(sector.bounds.xM + sector.bounds.widthM - 1, building.bounds.xM + building.bounds.widthM / 2));
+  const yM = Math.max(sector.bounds.yM + 1, Math.min(sector.bounds.yM + sector.bounds.heightM - 1, building.bounds.yM - 2));
+  return {
+    sectorId: building.sectorId,
+    xM: Math.round(xM * 10) / 10,
+    yM: Math.round(yM * 10) / 10,
+    locationId: building.anchorLocationId ?? session.localScene.playerPosition.locationId ?? session.life.currentLocationId,
+    state: "outside",
+    updatedAt: timestamp
+  };
+}
+
+function buildingInteriorPosition(session: GameSession, buildingId: string, floor: number, timestamp: number, unitId?: string, roomId?: string): SpatialPositionState | null {
+  const building = session.urban.buildings.find((item) => item.id === buildingId);
+  if (!building) return null;
+  return {
+    sectorId: building.sectorId,
+    xM: Math.round((building.bounds.xM + building.bounds.widthM / 2) * 10) / 10,
+    yM: Math.round((building.bounds.yM + building.bounds.heightM / 2) * 10) / 10,
+    locationId: building.anchorLocationId ?? session.localScene.playerPosition.locationId ?? session.life.currentLocationId,
+    buildingId,
+    unitId,
+    roomId,
+    floor,
+    state: "inside",
+    updatedAt: timestamp
+  };
+}
+
+function accessInput(session: GameSession) {
+  return {
+    timestamp: session.timestamp,
+    seed: session.world.meta.seed,
+    player: session.player,
+    playerHomeLocationId: session.life.housing.locationId,
+    locations: session.world.locations,
+    population: session.population,
+    urban: session.urban,
+    localScene: session.localScene
+  };
+}
+
+export function approachLocalBuilding(session: GameSession, buildingId: string): GameSession {
+  if (session.localScene.playerPosition.state === "inside") return session;
+  const local = session.localScene.buildings.find((item) => item.buildingId === buildingId);
+  const position = buildingStreetPosition(session, buildingId, session.timestamp);
+  if (!local || !position) return session;
+  const minutes = Math.max(1, Math.min(15, Math.ceil(local.distanceToPlayerM / 78)));
+  const building = session.urban.buildings.find((item) => item.id === buildingId);
+  return progressLife(session, minutes, {
+    category: "personal",
+    title: `Подход к зданию ${building?.addressCode ?? buildingId.slice(-6).toUpperCase()}.`,
+    detail: `${building?.use.toUpperCase() ?? "BUILDING"} · пешком ${Math.round(local.distanceToPlayerM)} м`,
+    importance: 1,
+    fatigueDelta: minutes >= 8 ? 1 : 0,
+    activity: `У входа: ${building?.addressCode ?? "UNKNOWN BUILDING"}`,
+    playerPosition: position
+  });
+}
+
+export function enterLocalBuilding(session: GameSession, buildingId: string, entrance: "public" | "service" = "public"): GameSession {
+  const local = session.localScene.buildings.find((item) => item.buildingId === buildingId);
+  const building = session.urban.buildings.find((item) => item.id === buildingId);
+  if (!local || !building || session.localScene.playerPosition.state === "inside" || local.distanceToPlayerM > 20) return session;
+  const urban = ensureBuildingAccessDetail(
+    session.urban,
+    session.world.meta.seed,
+    session.timestamp,
+    buildingId,
+    session.player.id,
+    session.life.housing.locationId
+  );
+  const prepared: GameSession = { ...session, urban };
+  const access = advanceBuildingAccessState(session.buildingAccess, accessInput(prepared));
+  const entry = access.buildingEntries.find((item) => item.buildingId === buildingId);
+  const doorId = entrance === "service" ? entry?.serviceDoorId : entry?.publicDoorId;
+  const door = findAccessDoor(access, doorId);
+  if (!door || door.locked || door.decision === "closed" || door.decision === "unavailable") {
+    const denied = recordAccessDenied(access, session.timestamp);
+    return progressLife({ ...prepared, buildingAccess: denied }, 1, {
+      category: "personal",
+      title: "Вход закрыт.",
+      detail: `${building.addressCode} · ${door?.reason ?? "Нет доступного входа"}${door?.alarmed ? " · сигнализация активна" : ""}`,
+      importance: door?.alarmed ? 2 : 1,
+      activity: `У входа: ${building.addressCode}`,
+      playerPosition: buildingStreetPosition(prepared, buildingId, session.timestamp) ?? session.localScene.playerPosition
+    });
+  }
+  const opened = setAccessDoorOpen(access, door.id, true, session.timestamp);
+  const position = buildingInteriorPosition(prepared, buildingId, 1, session.timestamp);
+  if (!position) return session;
+  return progressLife({ ...prepared, buildingAccess: opened }, 2, {
+    category: "personal",
+    title: `Вход: ${building.addressCode}.`,
+    detail: `${door.label} · ${door.playerAuthorized ? "доступ подтверждён" : "дверь открыта"} · security ${building.security}%`,
+    importance: 1,
+    activity: `Внутри: ${building.addressCode} · этаж 1`,
+    playerPosition: position
+  });
+}
+
+export function leaveLocalBuilding(session: GameSession): GameSession {
+  const buildingId = session.localScene.playerPosition.buildingId;
+  if (!buildingId || session.localScene.playerPosition.state !== "inside") return session;
+  const building = session.urban.buildings.find((item) => item.id === buildingId);
+  const position = buildingStreetPosition(session, buildingId, session.timestamp);
+  if (!building || !position) return session;
+  return progressLife(session, 2, {
+    category: "personal",
+    title: `Выход: ${building.addressCode}.`,
+    detail: `${building.use.toUpperCase()} · улица`,
+    importance: 1,
+    activity: `У входа: ${building.addressCode}`,
+    playerPosition: position
+  });
+}
+
+export function moveInsideBuilding(session: GameSession, floor: number, method: "stairs" | "elevator"): GameSession {
+  const buildingId = session.localScene.playerPosition.buildingId;
+  const building = buildingId ? session.urban.buildings.find((item) => item.id === buildingId) : undefined;
+  if (!building || session.localScene.playerPosition.state !== "inside") return session;
+  const minimumFloor = building.basementLevels > 0 ? -building.basementLevels : 1;
+  if (floor === 0 || floor < minimumFloor || floor > building.floors) return session;
+  if (method === "elevator" && (building.elevatorCount <= 0 || building.utilityService < 25)) return session;
+  if (method === "stairs" && building.stairwellCount <= 0) return session;
+  const currentFloor = session.localScene.playerPosition.floor ?? 1;
+  const difference = Math.abs(floor - currentFloor);
+  const minutes = method === "elevator" ? Math.max(1, Math.ceil(difference / 10)) : Math.max(1, Math.ceil(difference / 2));
+  const position = buildingInteriorPosition(session, building.id, floor, session.timestamp);
+  if (!position) return session;
+  return progressLife(session, minutes, {
+    category: "personal",
+    title: `${method === "elevator" ? "Лифт" : "Лестница"}: этаж ${floor}.`,
+    detail: `${building.addressCode} · ${difference} этажей`,
+    importance: 1,
+    fatigueDelta: method === "stairs" && difference >= 4 ? 1 : 0,
+    activity: `Внутри: ${building.addressCode} · этаж ${floor}`,
+    playerPosition: position
+  });
+}
+
+export function enterBuildingUnit(session: GameSession, unitId: string): GameSession {
+  const buildingId = session.localScene.playerPosition.buildingId;
+  const unit = session.urban.units.find((item) => item.id === unitId);
+  if (!buildingId || !unit || unit.buildingId !== buildingId || unit.floor !== (session.localScene.playerPosition.floor ?? 1)) return session;
+  let urban = ensureUnitInteriorDetail(session.urban, session.world.meta.seed, session.timestamp, unitId);
+  const prepared: GameSession = { ...session, urban };
+  const access = advanceBuildingAccessState(session.buildingAccess, accessInput(prepared));
+  const unitAccess = access.units.find((item) => item.unitId === unitId);
+  const door = findAccessDoor(access, unitAccess?.doorId);
+  if (!unitAccess || !door || door.locked) {
+    const denied = recordAccessDenied(access, session.timestamp);
+    return progressLife({ ...prepared, buildingAccess: denied }, 1, {
+      category: "personal",
+      title: `Дверь ${unit.unitNumber} закрыта.`,
+      detail: `${unitAccess?.reason ?? "Нет доступа"}${door?.alarmed ? " · сигнализация активна" : ""}`,
+      importance: door?.alarmed ? 2 : 1,
+      activity: `Коридор · этаж ${unit.floor}`,
+      playerPosition: session.localScene.playerPosition
+    });
+  }
+  const opened = setAccessDoorOpen(access, door.id, true, session.timestamp);
+  const position = buildingInteriorPosition(prepared, buildingId, unit.floor, session.timestamp, unitId);
+  if (!position) return session;
+  return progressLife({ ...prepared, buildingAccess: opened }, 1, {
+    category: "personal",
+    title: `Вход в помещение ${unit.unitNumber}.`,
+    detail: `${unit.use.toUpperCase()} · ${unit.areaM2} м² · ${unitAccess.playerAuthorized ? "доступ подтверждён" : "дверь открыта"}`,
+    importance: 1,
+    activity: `Помещение ${unit.unitNumber} · этаж ${unit.floor}`,
+    playerPosition: position
+  });
+}
+
+export function leaveBuildingUnit(session: GameSession): GameSession {
+  const position = session.localScene.playerPosition;
+  if (!position.buildingId || !position.unitId) return session;
+  const unit = session.urban.units.find((item) => item.id === position.unitId);
+  const next = buildingInteriorPosition(session, position.buildingId, position.floor ?? unit?.floor ?? 1, session.timestamp);
+  if (!next) return session;
+  return progressLife(session, 1, {
+    category: "personal",
+    title: `Выход из помещения ${unit?.unitNumber ?? "UNKNOWN"}.`,
+    detail: `Коридор · этаж ${next.floor ?? 1}`,
+    importance: 1,
+    activity: `Коридор · этаж ${next.floor ?? 1}`,
+    playerPosition: next
+  });
+}
+
+export function enterInteriorRoom(session: GameSession, roomId: string): GameSession {
+  const position = session.localScene.playerPosition;
+  if (!position.buildingId || !position.unitId || position.roomId) return session;
+  const room = session.buildingAccess.rooms.find((item) => item.roomId === roomId && item.unitId === position.unitId);
+  if (!room || room.decision !== "open") return session;
+  const next = buildingInteriorPosition(session, position.buildingId, position.floor ?? room.floor, session.timestamp, position.unitId, roomId);
+  if (!next) return session;
+  return progressLife(session, 1, {
+    category: "personal",
+    title: `Комната: ${room.kind.replace(/-/g, " ").toUpperCase()}.`,
+    detail: `Помещение ${session.urban.units.find((item) => item.id === position.unitId)?.unitNumber ?? "UNKNOWN"}`,
+    importance: 1,
+    activity: room.kind.replace(/-/g, " ").toUpperCase(),
+    playerPosition: next
+  });
+}
+
+export function leaveInteriorRoom(session: GameSession): GameSession {
+  const position = session.localScene.playerPosition;
+  if (!position.buildingId || !position.unitId || !position.roomId) return session;
+  const next = buildingInteriorPosition(session, position.buildingId, position.floor ?? 1, session.timestamp, position.unitId);
+  if (!next) return session;
+  return progressLife(session, 1, {
+    category: "personal",
+    title: "Выход в помещение.",
+    detail: `Этаж ${next.floor ?? 1}`,
+    importance: 1,
+    activity: "Внутри помещения",
+    playerPosition: next
+  });
 }
 
 export function acceptCourierOrder(session: GameSession, orderId: string): GameSession {

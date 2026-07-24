@@ -12,7 +12,7 @@ const seed = "LOCAL-SCENE-25";
 let session = createWorldSession(seed);
 const initial = session.localScene;
 
-assert(session.schemaVersion === 23, "new world schema is not 23");
+assert(session.schemaVersion === 24, "new world schema is not 24");
 assert(initial.version === 1, "local scene version mismatch");
 assert(initial.focusSectorId === initial.playerPosition.sectorId, "player focus sector mismatch");
 assert(session.metropolitan.streaming.activeSectorIds.includes(initial.focusSectorId), "player is outside active streaming window");
@@ -69,18 +69,18 @@ assert(session.localScene.focusSectorId !== previousFocus || option.sameDistrict
 assert(session.localScene.actors.every((actor) => session.metropolitan.streaming.activeSectorIds.includes(actor.position.sectorId)), "travel left stale actors outside active sectors");
 
 const legacy = structuredClone(session) as any;
-legacy.schemaVersion = 22;
+legacy.schemaVersion = 23;
 delete legacy.localScene;
 const migrated = migrateEnvelope({
   slotId: "slot-1",
-  schemaVersion: 22,
+  schemaVersion: 23,
   createdAt: new Date(0).toISOString(),
   updatedAt: new Date(0).toISOString(),
   checksum: "legacy",
   payload: legacy
 }, "slot-1");
 assert(migrated, "migration returned null");
-assert(migrated.schemaVersion === 23, "migration schema mismatch");
+assert(migrated.schemaVersion === 24, "migration schema mismatch");
 assert(migrated.payload.localScene.version === 1, "migration did not create local scene");
 assert(migrated.payload.localScene.playerPosition.locationId === migrated.payload.life.currentLocationId, "migration lost player spatial position");
 assert(migrated.payload.localScene.actors.length > 0, "migration created empty local scene");

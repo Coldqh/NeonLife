@@ -1,7 +1,7 @@
 {
-  "version": "0.25.0",
-  "releasedAt": "2026-07-23T15:30:00Z",
+  "version": "0.26.0",
+  "releasedAt": "2026-07-24T09:00:00Z",
   "forceUpdate": true,
-  "title": "SPATIAL ACTORS & LOCAL SCENE",
-  "summary": "Materializes persistent physical actors, player position and nearby buildings inside the active city sector instead of exposing only aggregate population counters."
+  "title": "BUILDINGS & ACCESS",
+  "summary": "Lets the player approach and enter materialized buildings, use public or service entrances, move between floors, enter authorized units and traverse deterministic interior rooms."
 }

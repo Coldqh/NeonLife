@@ -20,9 +20,10 @@ import { createGovernmentCrimeState } from "../../simulation/government/governme
 import { createHealthCyberwareState } from "../../simulation/health/healthSystem";
 import { createDataSurveillanceState } from "../../simulation/data/dataSystem";
 import { createMetropolitanState } from "../../simulation/spatial/metropolitanSystem";
-import { createUrbanFabricState } from "../../simulation/urban/urbanSystem";
+import { createUrbanFabricState, ensureBuildingAccessDetail } from "../../simulation/urban/urbanSystem";
 import { createMetropolitanMobilityState, synchronizeMetropolitanFromMobility } from "../../simulation/mobility/mobilitySystem";
 import { createLocalSceneState } from "../../simulation/localScene/localSceneSystem";
+import { createBuildingAccessState } from "../../simulation/access/buildingAccessSystem";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
 import type {
@@ -323,7 +324,7 @@ export function createWorldSession(seed: string): GameSession {
     recentEventCount: 0,
     recentObservationCount: data.observations.length
   });
-  const urban = createUrbanFabricState({
+  const urbanBase = createUrbanFabricState({
     timestamp: INITIAL_GAME_TIMESTAMP,
     seed,
     activeLocationId: housing.id,
@@ -335,6 +336,10 @@ export function createWorldSession(seed: string): GameSession {
     transportServiceLevel: infrastructure.networks.find((item) => item.kind === "transport")?.averageServiceLevel ?? 100,
     dataServiceLevel: infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100
   });
+  const homeBuilding = urbanBase.buildings.find((building) => building.anchorLocationId === housing.id);
+  const urban = homeBuilding
+    ? ensureBuildingAccessDetail(urbanBase, seed, INITIAL_GAME_TIMESTAMP, homeBuilding.id, player.id, housing.id)
+    : urbanBase;
   const mobility = createMetropolitanMobilityState({
     timestamp: INITIAL_GAME_TIMESTAMP,
     seed,
@@ -361,6 +366,16 @@ export function createWorldSession(seed: string): GameSession {
     metropolitan,
     urban,
     mobility
+  });
+  const buildingAccess = createBuildingAccessState({
+    timestamp: INITIAL_GAME_TIMESTAMP,
+    seed,
+    player,
+    playerHomeLocationId: housing.id,
+    locations,
+    population,
+    urban,
+    localScene
   });
   const syncedKernel = advanceSimulationKernel(kernel, {
     timestamp: INITIAL_GAME_TIMESTAMP,
@@ -402,6 +417,7 @@ export function createWorldSession(seed: string): GameSession {
     urban,
     mobility,
     localScene,
+    buildingAccess,
     events: createInitialEvents({
       seed,
       districtName: lower.name,

@@ -5576,3 +5576,221 @@ button:disabled {
 .local-scene-workspace .local-scene-buildings > article:first-of-type {
   border-left-color: rgba(255, 204, 0, 0.58);
 }
+
+/* Buildings & Access */
+.building-access-workspace {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.building-access-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.building-access-summary > div,
+.building-interior-current,
+.building-floor-controls,
+.building-unit-list,
+.building-room-list,
+.building-entry-list {
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-raised);
+}
+
+.building-access-summary > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.building-access-summary span,
+.building-entry-list header span,
+.building-floor-controls header span,
+.building-unit-list header span,
+.building-room-list header span,
+.building-interior-current header span {
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: .11em;
+}
+
+.building-access-summary strong {
+  font-size: 16px;
+}
+
+.building-access-summary small,
+.building-entry-list small,
+.building-interior-layout small {
+  color: var(--text-muted);
+}
+
+.building-entry-list > header,
+.building-floor-controls > header,
+.building-unit-list > header,
+.building-room-list > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.building-entry-list > article {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.2fr) minmax(210px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.building-entry-list > article:last-child,
+.building-floor-controls article:last-child,
+.building-unit-list article:last-child,
+.building-room-list article:last-child {
+  border-bottom: 0;
+}
+
+.building-entry-list > article.is-near {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.building-entry-list__identity,
+.building-entry-list__doors {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.building-entry-list__identity > span,
+.building-entry-list__doors > span {
+  font-size: 10px;
+  letter-spacing: .08em;
+}
+
+.building-entry-list__identity strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.building-entry-list__actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.building-entry-list button,
+.building-interior-layout button {
+  min-height: 34px;
+  padding: 0 11px;
+}
+
+.building-interior-layout {
+  display: grid;
+  gap: 12px;
+}
+
+.building-interior-current {
+  padding: 13px;
+  display: grid;
+  gap: 10px;
+}
+
+.building-interior-current > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.building-interior-current > header > div {
+  display: grid;
+  gap: 3px;
+}
+
+.building-access-breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.building-access-breadcrumbs > * {
+  border: 1px solid var(--border-subtle);
+  padding: 5px 8px;
+  font-size: 10px;
+  letter-spacing: .06em;
+}
+
+.building-floor-controls > div,
+.building-unit-list,
+.building-room-list {
+  display: grid;
+}
+
+.building-floor-controls article,
+.building-unit-list article,
+.building-room-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 13px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.building-unit-list article {
+  grid-template-columns: minmax(150px, 1fr) minmax(150px, .8fr) auto;
+}
+
+.building-floor-controls article.is-current,
+.building-room-list article.is-current {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.building-floor-controls article > div:first-child,
+.building-unit-list article > div,
+.building-room-list article > div {
+  display: grid;
+  gap: 3px;
+}
+
+.building-floor-controls article > div:last-child {
+  display: flex;
+  gap: 6px;
+}
+
+@media (max-width: 900px) {
+  .building-access-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .building-entry-list > article,
+  .building-unit-list article {
+    grid-template-columns: 1fr;
+  }
+
+  .building-entry-list__actions {
+    justify-content: stretch;
+  }
+
+  .building-entry-list__actions button {
+    flex: 1;
+  }
+}
+
+@media (max-width: 560px) {
+  .building-access-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .building-interior-current > header,
+  .building-floor-controls article,
+  .building-room-list article {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+}

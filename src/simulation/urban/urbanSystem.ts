@@ -891,3 +891,113 @@ export function synchronizeMetropolitanFromUrban(metropolitan: MetropolitanState
     }
   };
 }
+
+function withAccessDetail(
+  state: UrbanFabricState,
+  timestamp: number,
+  units: BuildingUnitState[],
+  interiors: InteriorState[],
+  preferredBuildingId?: string,
+  preferredInteriorId?: string,
+  preferredUnitId?: string
+): UrbanFabricState {
+  const limitedUnits = units
+    .slice()
+    .sort((left, right) =>
+      Number(right.id === preferredUnitId) - Number(left.id === preferredUnitId)
+      || Number(right.buildingId === preferredBuildingId) - Number(left.buildingId === preferredBuildingId)
+      || Number(right.permanent) - Number(left.permanent)
+      || right.lastMaterializedAt - left.lastMaterializedAt
+    )
+    .slice(0, MAX_UNIT_CACHE);
+  const limitedInteriors = interiors
+    .slice()
+    .sort((left, right) =>
+      Number(right.id === preferredInteriorId) - Number(left.id === preferredInteriorId)
+      || Number(right.buildingId === preferredBuildingId) - Number(left.buildingId === preferredBuildingId)
+      || right.lastTouchedAt - left.lastTouchedAt
+    )
+    .slice(0, MAX_INTERIOR_CACHE);
+  return {
+    ...state,
+    units: limitedUnits,
+    interiors: limitedInteriors,
+    memory: memoryState(state.memory, state.buildings, limitedUnits, limitedInteriors, timestamp),
+    totals: urbanTotals(state.catalogs, state.buildings, limitedUnits, state.householdAddresses, limitedInteriors),
+    lastUpdatedAt: Math.max(state.lastUpdatedAt, timestamp)
+  };
+}
+
+export function ensureBuildingAccessDetail(
+  state: UrbanFabricState,
+  seed: string,
+  timestamp: number,
+  buildingId: string,
+  playerId?: string,
+  playerHomeLocationId?: string
+): UrbanFabricState {
+  const building = state.buildings.find((item) => item.id === buildingId);
+  if (!building) return state;
+  const existingIds = new Set(state.units.map((unit) => unit.id));
+  const units = state.units.map((unit) => unit.buildingId === buildingId ? { ...unit, lastMaterializedAt: timestamp } : unit);
+  const totalUnits = Math.max(1, building.residentialUnits + building.commercialUnits);
+  const targetUnits = Math.min(totalUnits, Math.max(12, Math.min(144, building.floors * 8)));
+  for (let ordinal = 0; ordinal < targetUnits; ordinal += 1) {
+    const candidate = buildUnit(seed, timestamp, building, ordinal);
+    if (!existingIds.has(candidate.id)) {
+      units.push(candidate);
+      existingIds.add(candidate.id);
+    }
+  }
+
+  if (playerId && playerHomeLocationId && building.anchorLocationId === playerHomeLocationId) {
+    const playerUnitId = createStableEntityId("building-unit", `${building.id}:player:${playerId}`);
+    if (!existingIds.has(playerUnitId)) {
+      const rng = new SeededRandom(`${seed}:player-home-unit:${building.id}:${playerId}`);
+      units.push({
+        id: playerUnitId,
+        buildingId: building.id,
+        sectorId: building.sectorId,
+        floor: 1,
+        unitNumber: "01-P1",
+        use: "apartment",
+        areaM2: rng.integer(18, 42),
+        roomCount: rng.integer(1, 2),
+        capacity: 1,
+        occupied: true,
+        residentIds: [playerId],
+        tenantEntityId: playerId,
+        ownerEntityId: building.ownerEntityId,
+        monthlyRent: 420,
+        condition: clamp(building.condition + rng.integer(-8, 5)),
+        security: clamp(building.security + rng.integer(-4, 7)),
+        interiorSeed: `${seed}:interior:${playerUnitId}:v1`,
+        lastMaterializedAt: timestamp,
+        permanent: true
+      });
+      existingIds.add(playerUnitId);
+    }
+  }
+
+  const lobbyId = createStableEntityId("interior", building.id);
+  const interiors = state.interiors.map((interior) => interior.id === lobbyId ? { ...interior, lastTouchedAt: timestamp } : interior);
+  if (!interiors.some((interior) => interior.id === lobbyId)) interiors.push(materializeInterior(seed, timestamp, building));
+  return withAccessDetail(state, timestamp, units, interiors, building.id, lobbyId);
+}
+
+export function ensureUnitInteriorDetail(
+  state: UrbanFabricState,
+  seed: string,
+  timestamp: number,
+  unitId: string
+): UrbanFabricState {
+  const unit = state.units.find((item) => item.id === unitId);
+  if (!unit) return state;
+  const building = state.buildings.find((item) => item.id === unit.buildingId);
+  if (!building) return state;
+  const interiorId = createStableEntityId("interior", unit.id);
+  const interiors = state.interiors.map((interior) => interior.id === interiorId ? { ...interior, lastTouchedAt: timestamp } : interior);
+  if (!interiors.some((interior) => interior.id === interiorId)) interiors.push(materializeInterior(seed, timestamp, building, unit));
+  const units = state.units.map((item) => item.id === unit.id ? { ...item, lastMaterializedAt: timestamp } : item);
+  return withAccessDetail(state, timestamp, units, interiors, building.id, interiorId, unit.id);
+}

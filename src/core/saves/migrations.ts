@@ -23,9 +23,10 @@ import { normalizeGovernmentCrimeState } from "../../simulation/government/gover
 import { normalizeHealthCyberwareState } from "../../simulation/health/healthSystem";
 import { normalizeDataSurveillanceState } from "../../simulation/data/dataSystem";
 import { normalizeMetropolitanState } from "../../simulation/spatial/metropolitanSystem";
-import { normalizeUrbanFabricState, synchronizeMetropolitanFromUrban } from "../../simulation/urban/urbanSystem";
+import { ensureBuildingAccessDetail, normalizeUrbanFabricState, synchronizeMetropolitanFromUrban } from "../../simulation/urban/urbanSystem";
 import { normalizeMetropolitanMobilityState, synchronizeMetropolitanFromMobility } from "../../simulation/mobility/mobilitySystem";
 import { normalizeLocalSceneState } from "../../simulation/localScene/localSceneSystem";
+import { normalizeBuildingAccessState } from "../../simulation/access/buildingAccessSystem";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -578,7 +579,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     recentEventCount: migratedEvents.length,
     recentObservationCount: data.observations.length
   });
-  const urban = normalizeUrbanFabricState(payload.urban, {
+  let urban = normalizeUrbanFabricState(payload.urban, {
     timestamp,
     seed,
     activeLocationId: existingLocationId ?? housingLocation?.id ?? locations[0]?.id ?? "location-missing",
@@ -590,6 +591,8 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     transportServiceLevel: infrastructure.networks.find((item) => item.kind === "transport")?.averageServiceLevel ?? 100,
     dataServiceLevel: infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100
   });
+  const homeBuilding = urban.buildings.find((building) => building.anchorLocationId === housingState.locationId);
+  if (homeBuilding) urban = ensureBuildingAccessDetail(urban, seed, timestamp, homeBuilding.id, playerState.id, housingState.locationId);
   const synchronizedMetropolitan = synchronizeMetropolitanFromUrban(metropolitan, urban);
   const mobility = normalizeMetropolitanMobilityState(payload.mobility, {
     timestamp,
@@ -623,6 +626,16 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     metropolitan: mobilitySynchronizedMetropolitan,
     urban,
     mobility
+  });
+  const buildingAccess = normalizeBuildingAccessState(payload.buildingAccess, {
+    timestamp,
+    seed,
+    player: playerState,
+    playerHomeLocationId: housingState.locationId,
+    locations,
+    population,
+    urban,
+    localScene
   });
   const kernel = advanceSimulationKernel(baseKernel, {
     timestamp,
@@ -665,6 +678,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     urban,
     mobility,
     localScene,
+    buildingAccess,
     currentActivity: `На месте: ${existingLocationName}`,
     world: {
       ...world,

@@ -91,6 +91,7 @@ function positionAtLocation(
     locationId,
     buildingId: building?.id,
     unitId: unit?.id,
+    floor: unit?.floor ?? (building ? 1 : undefined),
     state: building ? "inside" : "outside",
     updatedAt: input.timestamp
   };
@@ -264,6 +265,12 @@ function roleLabel(input: LocalSceneInput, resident: BackgroundResident): string
 }
 
 function buildPlayerPosition(input: LocalSceneInput): SpatialPositionState {
+  if (!input.targetLocationId && input.playerPosition) {
+    const sector = sectorById(input, input.playerPosition.sectorId);
+    if (sector && input.metropolitan.streaming.activeSectorIds.includes(sector.id)) {
+      return { ...input.playerPosition, updatedAt: input.timestamp };
+    }
+  }
   const locationId = input.targetLocationId ?? input.activeLocationId;
   const placement = placementForLocation(input, locationId) ?? input.metropolitan.locations[0];
   const fallbackSector = placement ? sectorById(input, placement.sectorId) : input.metropolitan.sectors[0];
@@ -278,6 +285,7 @@ function buildPlayerPosition(input: LocalSceneInput): SpatialPositionState {
     yM: Math.round(point.yM * 10) / 10,
     locationId,
     buildingId: building?.id,
+    floor: building ? 1 : undefined,
     state: building ? "inside" : "outside",
     updatedAt: input.timestamp
   };
@@ -346,6 +354,9 @@ function syntheticPosition(
       yM: point.yM,
       locationId: building?.anchorLocationId ?? playerPosition.locationId,
       buildingId: playerPosition.state === "inside" ? playerPosition.buildingId : undefined,
+      unitId: playerPosition.state === "inside" ? playerPosition.unitId : undefined,
+      roomId: playerPosition.state === "inside" ? playerPosition.roomId : undefined,
+      floor: playerPosition.state === "inside" ? playerPosition.floor : undefined,
       state: playerPosition.state === "inside" ? "inside" : activity === "commute" ? "in-transit" : "outside",
       updatedAt: input.timestamp
     };
@@ -359,6 +370,7 @@ function syntheticPosition(
       yM: point.yM,
       locationId: building.anchorLocationId,
       buildingId: building.id,
+      floor: 1,
       state: activity === "commute" ? "in-transit" : "inside",
       updatedAt: input.timestamp
     };
@@ -387,7 +399,9 @@ function createSyntheticActor(
   const position = syntheticPosition(input, sector, slot, activity, playerPosition);
   const actorDistance = distance(playerPosition, position);
   const sameBuilding = playerPosition.buildingId && position.buildingId === playerPosition.buildingId;
-  const spatiallyVisible = playerPosition.state === "inside" ? Boolean(sameBuilding) : position.state !== "inside";
+  const sameUnit = !playerPosition.unitId || position.unitId === playerPosition.unitId;
+  const sameFloor = playerPosition.floor === undefined || (position.floor ?? 1) === playerPosition.floor;
+  const spatiallyVisible = playerPosition.state === "inside" ? Boolean(sameBuilding && sameUnit && sameFloor) : position.state !== "inside";
   const visible = position.sectorId === playerPosition.sectorId && spatiallyVisible && actorDistance <= VISIBLE_DISTANCE_M;
   const nearby = visible && actorDistance <= NEARBY_DISTANCE_M;
   const location = position.locationId ? input.locations.find((item) => item.id === position.locationId) : undefined;
@@ -425,7 +439,9 @@ function materializeActors(input: LocalSceneInput, playerPosition: SpatialPositi
     const known = knownPersonFor(input, resident);
     const actorDistance = distance(playerPosition, placement.position);
     const sameBuilding = playerPosition.buildingId && placement.position.buildingId === playerPosition.buildingId;
-    const spatiallyVisible = playerPosition.state === "inside" ? Boolean(sameBuilding) : placement.position.state !== "inside";
+    const sameUnit = !playerPosition.unitId || placement.position.unitId === playerPosition.unitId;
+    const sameFloor = playerPosition.floor === undefined || (placement.position.floor ?? 1) === playerPosition.floor;
+    const spatiallyVisible = playerPosition.state === "inside" ? Boolean(sameBuilding && sameUnit && sameFloor) : placement.position.state !== "inside";
     const visible = placement.position.sectorId === playerPosition.sectorId && spatiallyVisible && actorDistance <= VISIBLE_DISTANCE_M;
     const nearby = visible && actorDistance <= NEARBY_DISTANCE_M;
     const location = placement.position.locationId ? input.locations.find((item) => item.id === placement.position.locationId) : undefined;
@@ -476,12 +492,20 @@ function materializeBuildings(input: LocalSceneInput, playerPosition: SpatialPos
   return input.urban.buildings
     .filter((building) => building.sectorId === playerPosition.sectorId)
     .map((building) => {
+      const sector = sectorById(input, building.sectorId);
       const buildingCenter = center(building.bounds);
+      const entrancePoint = sector
+        ? {
+            xM: clamp(buildingCenter.xM, sector.bounds.xM + 1, sector.bounds.xM + sector.bounds.widthM - 1),
+            yM: clamp(building.bounds.yM - 2, sector.bounds.yM + 1, sector.bounds.yM + sector.bounds.heightM - 1)
+          }
+        : buildingCenter;
+      const targetPoint = playerPosition.buildingId === building.id ? buildingCenter : entrancePoint;
       return {
         buildingId: building.id,
         addressCode: building.addressCode,
         use: building.use,
-        distanceToPlayerM: Math.round(Math.hypot(buildingCenter.xM - playerPosition.xM, buildingCenter.yM - playerPosition.yM) * 10) / 10,
+        distanceToPlayerM: Math.round(Math.hypot(targetPoint.xM - playerPosition.xM, targetPoint.yM - playerPosition.yM) * 10) / 10,
         publicEntrances: building.publicEntrances,
         serviceEntrances: building.serviceEntrances,
         security: building.security,
@@ -528,15 +552,18 @@ export function createLocalSceneState(input: LocalSceneInput): LocalSceneState {
   return buildState(input);
 }
 
-export function advanceLocalSceneState(_state: LocalSceneState, input: LocalSceneInput): LocalSceneState {
-  return buildState(input);
+export function advanceLocalSceneState(state: LocalSceneState, input: LocalSceneInput): LocalSceneState {
+  return buildState({
+    ...input,
+    playerPosition: input.playerPosition ?? (input.targetLocationId ? undefined : state.playerPosition)
+  });
 }
 
 export function normalizeLocalSceneState(value: unknown, input: LocalSceneInput): LocalSceneState {
   if (!value || typeof value !== "object") return buildState(input);
   const raw = value as Partial<LocalSceneState>;
   if (raw.version !== 1 || !Array.isArray(raw.actors) || !raw.playerPosition) return buildState(input);
-  return buildState(input);
+  return buildState({ ...input, playerPosition: raw.playerPosition });
 }
 
 export function getVisibleLocalActors(state: LocalSceneState): LocalActorState[] {
