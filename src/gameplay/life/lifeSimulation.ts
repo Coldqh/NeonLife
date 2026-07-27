@@ -27,7 +27,8 @@ import {
   estimatePhysicalVehicleTravel,
   getPhysicalVehicle,
   physicalVehiclePositionAtLocation,
-  playerVehiclePosition
+  playerVehiclePosition,
+  refreshPhysicalVehicleSpatialPresentation
 } from "../../simulation/vehicles/physicalVehicleSystem";
 import type { VehicleCommand } from "../../simulation/vehicles/types";
 import {
@@ -43,6 +44,7 @@ import {
   phoneActivityLabel
 } from "../../simulation/transit/transitOperationsSystem";
 import type { TransitCommand, TransitPhoneActivity } from "../../simulation/transit/types";
+import { advanceStreetTopologyState, alignUrbanFabricToStreetTopology, snapPhysicalVehicleParkingToStreetTopology, snapTransitStopsToStreetTopology } from "../../simulation/streets/streetTopologySystem";
 import {
   advanceVehicleCrimeState,
   appendVehicleCrimeObservations,
@@ -285,6 +287,16 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
       urbanState = ensureUnitInteriorDetail(urbanState, session.world.meta.seed, nextTimestamp, options.playerPosition.unitId);
     }
   }
+  const streetInput = {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    metropolitan: metropolitanAdvance.state,
+    urban: urbanState,
+    preferredSectorId: options.playerPosition?.sectorId
+  };
+  let streetsState = advanceStreetTopologyState(session.streets, streetInput);
+  urbanState = alignUrbanFabricToStreetTopology(urbanState, streetsState, streetInput);
+  streetsState = advanceStreetTopologyState(streetsState, { ...streetInput, urban: urbanState });
   const urbanSynchronizedMetropolitan = synchronizeMetropolitanFromUrban(metropolitanAdvance.state, urbanState);
   const mobilityState = advanceMetropolitanMobilityState(session.mobility, {
     timestamp: nextTimestamp,
@@ -358,7 +370,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     mobility: mobilityState,
     playerPosition: options.playerPosition
   });
-  const vehiclesState = advancePhysicalVehiclesState(session.vehicles, {
+  const vehiclesState = refreshPhysicalVehicleSpatialPresentation(snapPhysicalVehicleParkingToStreetTopology(advancePhysicalVehiclesState(session.vehicles, {
     timestamp: nextTimestamp,
     seed: session.world.meta.seed,
     playerId: session.player.id,
@@ -371,7 +383,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     population: populationState,
     organizations: dataAdvance.organizations,
     command: options.vehicleCommand
-  });
+  }), streetsState, { timestamp: nextTimestamp, seed: session.world.meta.seed, metropolitan: metropolitanState, urban: urbanState }), provisionalLocalScene.playerPosition, nextTimestamp);
   const crimeAdvance = advanceVehicleCrimeState(session.vehicleCrime, {
     timestamp: nextTimestamp,
     seed: session.world.meta.seed,
@@ -383,7 +395,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     organizations: dataAdvance.organizations
   });
   const crimeVehiclesState = synchronizeVehicleCrimeStatus(crimeAdvance.state, vehiclesState);
-  const transitState = advanceTransitOperationsState(session.transit, {
+  const transitState = snapTransitStopsToStreetTopology(advanceTransitOperationsState(session.transit, {
     timestamp: nextTimestamp,
     seed: session.world.meta.seed,
     playerId: session.player.id,
@@ -397,7 +409,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     mobility: mobilityState,
     physicalVehicles: crimeVehiclesState,
     command: options.transitCommand
-  });
+  }), streetsState, { timestamp: nextTimestamp, seed: session.world.meta.seed, metropolitan: metropolitanState, urban: urbanState });
   const localSceneState = advanceLocalSceneState(provisionalLocalScene, {
     timestamp: nextTimestamp,
     seed: session.world.meta.seed,
@@ -587,6 +599,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     data: crimeAdvance.data,
     metropolitan: metropolitanState,
     urban: urbanState,
+    streets: streetsState,
     mobility: mobilityState,
     localScene: localSceneState,
     buildingAccess: buildingAccessState,

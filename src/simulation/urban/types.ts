@@ -34,6 +34,11 @@ export interface BuildingState {
   districtId: EntityId;
   parcelCode: string;
   addressCode: string;
+  blockId?: EntityId;
+  parcelId?: EntityId;
+  primaryEntranceId?: EntityId;
+  streetName?: string;
+  streetNumber?: string;
   seed: string;
   bounds: MetricBounds;
   use: BuildingUse;

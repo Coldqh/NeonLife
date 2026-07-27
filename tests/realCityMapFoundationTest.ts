@@ -11,7 +11,7 @@ const seed = "real-city-map-foundation";
 const session = createWorldSession(seed);
 const metro = session.metropolitan;
 
-assert(session.schemaVersion === 28, "new world schema is not 28");
+assert(session.schemaVersion === 29, "new world schema is not 29");
 assert(metro.version === 2, "metropolitan schema was not upgraded");
 assert(metro.sectors.length === 1_512, "city sector count changed");
 assert(metro.mapDistricts.length >= 10, "map district layer is too coarse");

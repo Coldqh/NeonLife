@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointer
 import type { GameSession } from "../../world/state/types";
 import type { MapDistrictState, MetropolitanSectorState } from "../../simulation/spatial/types";
 import { getTravelOptions } from "../../gameplay/travel/travelSystem";
+import { getSectorStreetTopology } from "../../simulation/streets/streetTopologySystem";
 import { GlobalCityMap, type MapLayers, type MapPointSelection } from "../map/GlobalCityMap";
 import { LocalSectorMap } from "../map/LocalSectorMap";
 import { compactNumber, PLACE_ICONS } from "../shared/presentation";
@@ -89,6 +90,29 @@ export function MapScreen({
       return location ? [location] : [];
     }), [selectedSector.id, session.metropolitan.locations, session.world.locations]);
   const sectorStops = useMemo(() => session.transit.stops.filter((stop) => stop.sectorId === selectedSector.id), [selectedSector.id, session.transit.stops]);
+  const selectedTopology = useMemo(() => getSectorStreetTopology(session.streets, {
+    timestamp: session.timestamp,
+    seed: session.world.meta.seed,
+    metropolitan: session.metropolitan,
+    urban: session.urban,
+    preferredSectorId: selectedSector.id
+  }, selectedSector.id), [selectedSector.id, session.metropolitan, session.streets, session.timestamp, session.urban, session.world.meta.seed]);
+  const selectedParcel = useMemo(() => {
+    if (!selectedPoint) return null;
+    const containing = selectedTopology.parcels.find((parcel) => selectedPoint.xM >= parcel.bounds.xM
+      && selectedPoint.xM <= parcel.bounds.xM + parcel.bounds.widthM
+      && selectedPoint.yM >= parcel.bounds.yM
+      && selectedPoint.yM <= parcel.bounds.yM + parcel.bounds.heightM);
+    if (containing) return containing;
+    return selectedTopology.parcels.slice().sort((left, right) => {
+      const leftCenterX = left.bounds.xM + left.bounds.widthM / 2;
+      const leftCenterY = left.bounds.yM + left.bounds.heightM / 2;
+      const rightCenterX = right.bounds.xM + right.bounds.widthM / 2;
+      const rightCenterY = right.bounds.yM + right.bounds.heightM / 2;
+      return Math.hypot(selectedPoint.xM - leftCenterX, selectedPoint.yM - leftCenterY)
+        - Math.hypot(selectedPoint.xM - rightCenterX, selectedPoint.yM - rightCenterY);
+    })[0] ?? null;
+  }, [selectedPoint, selectedTopology.parcels]);
   const districtSectors = useMemo(() => selectedDistrict
     ? selectedDistrict.sectorIds.map((id) => session.metropolitan.sectors.find((sector) => sector.id === id)).filter((sector): sector is MetropolitanSectorState => Boolean(sector))
     : [], [selectedDistrict, session.metropolitan.sectors]);
@@ -212,11 +236,13 @@ export function MapScreen({
                 <button type="button" onClick={() => setMode(mode === "global" ? "local" : "global")}>{mode === "global" ? "Открыть сектор" : "Весь город"}</button>
               </header>
               <p>{landUseLabel(selectedSector.landUse)} · {selectedSector.detailLevel === "active" ? "активная детализация" : selectedSector.detailLevel === "warm" ? "тёплый сектор" : "фоновая симуляция"}</p>
-              {selectedPoint ? <div className="map-point"><span>Выбранная точка</span><strong>{Math.round(selectedPoint.xM / 10) * 10} · {Math.round(selectedPoint.yM / 10) * 10} м</strong></div> : null}
+              {selectedPoint ? <div className="map-point"><span>Выбранная точка</span><strong>{selectedParcel?.addressCode ?? `${Math.round(selectedPoint.xM / 10) * 10} · ${Math.round(selectedPoint.yM / 10) * 10} м`}</strong></div> : null}
               <dl className="sector-metrics">
                 <div><dt>Жители</dt><dd>{compactNumber(selectedSector.representedPopulation)}</dd></div>
                 <div><dt>Здания</dt><dd>{compactNumber(selectedSector.buildingEstimate)}</dd></div>
-                <div><dt>Трафик</dt><dd>{selectedSector.trafficLoad}%</dd></div>
+                <div><dt>Улицы</dt><dd>{selectedTopology.segments.length}</dd></div>
+                <div><dt>Кварталы</dt><dd>{selectedTopology.blocks.length}</dd></div>
+                <div><dt>Парковка</dt><dd>{selectedTopology.parkingZones.reduce((sum, zone) => sum + zone.capacity, 0)}</dd></div>
                 <div><dt>Остановки</dt><dd>{sectorStops.length}</dd></div>
               </dl>
 

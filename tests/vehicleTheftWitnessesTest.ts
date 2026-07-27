@@ -21,7 +21,7 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 let session = createWorldSession("VEHICLE-THEFT-WITNESSES-29");
-assert(session.schemaVersion === 28, "new world schema is not 28");
+assert(session.schemaVersion === 29, "new world schema is not 29");
 assert(session.vehicleCrime.version === 1, "vehicle crime state missing");
 session = leaveLocalBuilding(session);
 
@@ -133,7 +133,7 @@ const migrated = migrateEnvelope({
   payload: legacy
 }, "slot-1");
 assert(migrated, "migration returned null");
-assert(migrated.schemaVersion === 28, "migration schema mismatch");
+assert(migrated.schemaVersion === 29, "migration schema mismatch");
 assert(migrated.payload.vehicleCrime.version === 1, "migration did not create vehicle crime state");
 
 console.log(JSON.stringify({

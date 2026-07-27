@@ -280,6 +280,46 @@ function generatedBuilding(seed: string, timestamp: number, sector: Metropolitan
   };
 }
 
+function buildingBoundsOverlap(left: MetricBounds, right: MetricBounds, clearanceM = 2): boolean {
+  return left.xM < right.xM + right.widthM + clearanceM
+    && left.xM + left.widthM + clearanceM > right.xM
+    && left.yM < right.yM + right.heightM + clearanceM
+    && left.yM + left.heightM + clearanceM > right.yM;
+}
+
+function resolveBuildingPlacement(
+  building: BuildingState,
+  occupied: BuildingState[],
+  sector: MetropolitanSectorState,
+  seed: string
+): BuildingState | null {
+  if (!occupied.some((candidate) => buildingBoundsOverlap(building.bounds, candidate.bounds))) return building;
+  const margin = 8;
+  const maxX = sector.bounds.xM + sector.bounds.widthM - building.bounds.widthM - margin;
+  const maxY = sector.bounds.yM + sector.bounds.heightM - building.bounds.heightM - margin;
+  if (maxX < sector.bounds.xM + margin || maxY < sector.bounds.yM + margin) return null;
+  const rng = new SeededRandom(`${seed}:relocate-building:${building.id}:v1`);
+  const xSlots = Math.max(1, Math.floor((maxX - sector.bounds.xM - margin) / 25) + 1);
+  const ySlots = Math.max(1, Math.floor((maxY - sector.bounds.yM - margin) / 25) + 1);
+  const start = rng.integer(0, Math.max(0, xSlots * ySlots - 1));
+  const attempts = Math.min(xSlots * ySlots, 320);
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const slot = (start + attempt * 17) % (xSlots * ySlots);
+    const xSlot = slot % xSlots;
+    const ySlot = Math.floor(slot / xSlots);
+    const bounds: MetricBounds = {
+      xM: Math.min(maxX, sector.bounds.xM + margin + xSlot * 25),
+      yM: Math.min(maxY, sector.bounds.yM + margin + ySlot * 25),
+      widthM: building.bounds.widthM,
+      heightM: building.bounds.heightM
+    };
+    if (!occupied.some((candidate) => buildingBoundsOverlap(bounds, candidate.bounds))) {
+      return { ...building, bounds };
+    }
+  }
+  return null;
+}
+
 function materializeSectorBuildings(input: UrbanFabricInput, catalogs: SectorBuildingCatalogState[], existing: BuildingState[]): BuildingState[] {
   const activeIds = new Set(input.metropolitan.streaming.activeSectorIds);
   const warmIds = new Set(input.metropolitan.streaming.warmSectorIds);
@@ -293,12 +333,19 @@ function materializeSectorBuildings(input: UrbanFabricInput, catalogs: SectorBui
     const sector = input.metropolitan.sectors.find((item) => item.id === sectorId);
     const catalog = catalogs.find((item) => item.sectorId === sectorId);
     if (!sector || !catalog) continue;
-    const anchorCount = anchors.filter((building) => building.sectorId === sectorId).length;
+    const sectorAnchors = anchors.filter((building) => building.sectorId === sectorId);
+    const anchorCount = sectorAnchors.length;
     const target = Math.max(0, Math.min(catalog.buildingCount - anchorCount, 96));
-    for (let index = 0; index < target; index += 1) {
+    let accepted = 0;
+    for (let index = 0; index < Math.max(target, target * 3) && accepted < target; index += 1) {
       const candidate = generatedBuilding(input.seed, input.timestamp, sector, catalog, index, input.organizations, input.metropolitan.config.blockSizeM);
       const previous = cachedById.get(candidate.id);
-      generated.push(previous ? { ...candidate, ...previous, detailLevel: "active", lastMaterializedAt: input.timestamp } : candidate);
+      const merged = previous ? { ...candidate, ...previous, detailLevel: "active" as const, lastMaterializedAt: input.timestamp } : candidate;
+      const occupied = [...sectorAnchors, ...generated.filter((building) => building.sectorId === sectorId)];
+      const resolved = resolveBuildingPlacement(merged, occupied, sector, input.seed);
+      if (!resolved) continue;
+      generated.push(resolved);
+      accepted += 1;
       if (anchors.length + generated.length >= MAX_BUILDING_CACHE) break;
     }
     if (anchors.length + generated.length >= MAX_BUILDING_CACHE) break;

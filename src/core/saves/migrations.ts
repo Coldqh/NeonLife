@@ -27,9 +27,10 @@ import { ensureBuildingAccessDetail, normalizeUrbanFabricState, synchronizeMetro
 import { normalizeMetropolitanMobilityState, synchronizeMetropolitanFromMobility } from "../../simulation/mobility/mobilitySystem";
 import { normalizeLocalSceneState } from "../../simulation/localScene/localSceneSystem";
 import { normalizeBuildingAccessState } from "../../simulation/access/buildingAccessSystem";
-import { normalizePhysicalVehiclesState } from "../../simulation/vehicles/physicalVehicleSystem";
+import { normalizePhysicalVehiclesState, refreshPhysicalVehicleSpatialPresentation } from "../../simulation/vehicles/physicalVehicleSystem";
 import { normalizeTransitOperationsState } from "../../simulation/transit/transitOperationsSystem";
 import { normalizeVehicleCrimeState } from "../../simulation/crime/vehicleCrimeSystem";
+import { alignUrbanFabricToStreetTopology, normalizeStreetTopologyState, snapPhysicalVehicleParkingToStreetTopology, snapTransitStopsToStreetTopology } from "../../simulation/streets/streetTopologySystem";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -594,6 +595,9 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     transportServiceLevel: infrastructure.networks.find((item) => item.kind === "transport")?.averageServiceLevel ?? 100,
     dataServiceLevel: infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100
   });
+  const streetInput = { timestamp, seed, metropolitan, urban };
+  const streets = normalizeStreetTopologyState(payload.streets, streetInput);
+  urban = alignUrbanFabricToStreetTopology(urban, streets, streetInput);
   const homeBuilding = urban.buildings.find((building) => building.anchorLocationId === housingState.locationId);
   if (homeBuilding) urban = ensureBuildingAccessDetail(urban, seed, timestamp, homeBuilding.id, playerState.id, housingState.locationId);
   const synchronizedMetropolitan = synchronizeMetropolitanFromUrban(metropolitan, urban);
@@ -640,7 +644,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     urban,
     localScene
   });
-  const vehicles = normalizePhysicalVehiclesState(payload.vehicles, {
+  const vehicles = refreshPhysicalVehicleSpatialPresentation(snapPhysicalVehicleParkingToStreetTopology(normalizePhysicalVehiclesState(payload.vehicles, {
     timestamp,
     seed,
     playerId: playerState.id,
@@ -651,8 +655,8 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     mobility,
     population,
     organizations
-  });
-  const transit = normalizeTransitOperationsState(payload.transit, {
+  }), streets, { timestamp, seed, metropolitan: mobilitySynchronizedMetropolitan, urban }), localScene.playerPosition, timestamp);
+  const transit = snapTransitStopsToStreetTopology(normalizeTransitOperationsState(payload.transit, {
     timestamp,
     seed,
     playerId: playerState.id,
@@ -665,7 +669,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     metropolitan: mobilitySynchronizedMetropolitan,
     mobility,
     physicalVehicles: vehicles
-  });
+  }), streets, { timestamp, seed, metropolitan: mobilitySynchronizedMetropolitan, urban });
   const vehicleCrime = normalizeVehicleCrimeState(payload.vehicleCrime, timestamp);
   const kernel = advanceSimulationKernel(baseKernel, {
     timestamp,
@@ -707,6 +711,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     data,
     metropolitan: mobilitySynchronizedMetropolitan,
     urban,
+    streets,
     mobility,
     localScene,
     buildingAccess,

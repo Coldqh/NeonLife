@@ -40,7 +40,7 @@ check("Single shell is mounted", app.includes("<GameShell") && !app.includes("Ne
 check("Transit scene blocks the shell", app.includes("session.transit.player.journey") && app.includes("<TransitJourneyScreen"));
 check("Transit supports stops and cabin actions", transit.includes("currentStopId") && transit.includes("onAdvance") && transit.includes("onTakeSeat") && transit.includes("onInteract") && transit.includes("onPhone"));
 check("Global map supports drag", globalMap.includes("onPointerDown") && globalMap.includes("panX") && globalMap.includes("onWheel"));
-check("Local map uses real road graph", localMap.includes("metropolitan.roadLinks") && localMap.includes("urban.buildings"));
+check("Local map uses real road graph", localMap.includes("session.streets") && localMap.includes("topology.segments") && localMap.includes("session.urban.buildings"));
 check("Local map has no decorative fallback blocks", !localMap.includes("fallback") && !localMap.includes("STREET_NAMES"));
 check("Route planning lives on map", map.includes("route-panel") && map.includes("getTravelOptions") && map.includes("Начать маршрут"));
 check("Legacy styles are not imported", !/components\.css|responsive\.css|mobile-experience\.css/.test(main));

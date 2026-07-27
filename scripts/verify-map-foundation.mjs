@@ -14,7 +14,7 @@ const mapCss = read("src/ui/theme/map.css");
 const saveTypes = read("src/core/saves/types.ts");
 
 check("metropolitan state schema is version 2", types.includes("version: 2;") && system.includes("version: 2"));
-check("save schema is version 28", saveTypes.includes("SAVE_SCHEMA_VERSION = 28"));
+check("save schema is version 29", saveTypes.includes("SAVE_SCHEMA_VERSION = 29"));
 check("persistent map districts exist", types.includes("export interface MapDistrictState") && types.includes("mapDistricts: MapDistrictState[]"));
 check("every sector owns a map district id", types.includes("mapDistrictId: EntityId"));
 check("hardcoded three-region splitter removed", !system.includes("districtForSector") && !system.includes("districtBounds"));

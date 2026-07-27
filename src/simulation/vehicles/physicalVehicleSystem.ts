@@ -19,7 +19,7 @@ import type {
 
 const MAX_MATERIALIZED_VEHICLES = 240;
 const MAX_PARKING_NODES = 72;
-const VISIBLE_DISTANCE_M = 260;
+const VISIBLE_DISTANCE_M = 320;
 const NEARBY_DISTANCE_M = 36;
 const ENTER_DISTANCE_M = 6;
 
@@ -559,12 +559,12 @@ function playerControl(input: PhysicalVehiclesInput, previous?: PhysicalVehicles
   };
 }
 
-function decorateVehicles(input: PhysicalVehiclesInput, vehicles: PhysicalVehicleEntityState[], player: PlayerVehicleControlState): PhysicalVehicleEntityState[] {
-  const playerInside = input.playerPosition.state === "inside";
+function decorateVehicles(playerPosition: SpatialPositionState, timestamp: number, vehicles: PhysicalVehicleEntityState[], player: PlayerVehicleControlState): PhysicalVehicleEntityState[] {
+  const playerInside = playerPosition.state === "inside";
   return vehicles.map((vehicle) => {
-    const sameSector = vehicle.position.sectorId === input.playerPosition.sectorId;
+    const sameSector = vehicle.position.sectorId === playerPosition.sectorId;
     const current = player.currentVehicleId === vehicle.id;
-    const vehicleDistance = current ? 0 : sameSector ? distance(input.playerPosition, vehicle.position) : Number.MAX_SAFE_INTEGER;
+    const vehicleDistance = current ? 0 : sameSector ? distance(playerPosition, vehicle.position) : Number.MAX_SAFE_INTEGER;
     const visible = current || (!playerInside && sameSector && vehicleDistance <= VISIBLE_DISTANCE_M);
     const nearby = current || (visible && vehicleDistance <= NEARBY_DISTANCE_M);
     const accessAllowed = vehicle.access === "owned" || vehicle.access === "authorized" || vehicle.access === "public" || vehicle.hotwired;
@@ -579,7 +579,7 @@ function decorateVehicles(input: PhysicalVehiclesInput, vehicles: PhysicalVehicl
       nearby,
       playerCanEnter,
       playerCanDrive,
-      lastMaterializedAt: input.timestamp
+      lastMaterializedAt: timestamp
     };
   }).sort((left, right) => Number(right.id === player.currentVehicleId) - Number(left.id === player.currentVehicleId) || Number(right.visible) - Number(left.visible) || left.distanceToPlayerM - right.distanceToPlayerM || left.id.localeCompare(right.id));
 }
@@ -617,7 +617,7 @@ function buildState(input: PhysicalVehiclesInput, previous?: PhysicalVehiclesSta
   let player = playerControl(input, previous);
   const commanded = applyCommand(vehicles, player, input, input.command);
   player = commanded.player;
-  const decorated = decorateVehicles(input, commanded.vehicles, player).slice(0, MAX_MATERIALIZED_VEHICLES);
+  const decorated = decorateVehicles(input.playerPosition, input.timestamp, commanded.vehicles, player).slice(0, MAX_MATERIALIZED_VEHICLES);
   nodes = attachParkingOccupancy(nodes, decorated);
   const focusSectorId = input.playerPosition.sectorId;
   return {
@@ -641,6 +641,33 @@ function buildState(input: PhysicalVehiclesInput, previous?: PhysicalVehiclesSta
     },
     lastProcessedHour: Math.floor(input.timestamp / (60 * 60_000)),
     lastUpdatedAt: input.timestamp
+  };
+}
+
+export function refreshPhysicalVehicleSpatialPresentation(
+  state: PhysicalVehiclesState,
+  playerPosition: SpatialPositionState,
+  timestamp: number
+): PhysicalVehiclesState {
+  const vehicles = decorateVehicles(playerPosition, timestamp, state.vehicles, state.player).slice(0, MAX_MATERIALIZED_VEHICLES);
+  const parkingNodes = attachParkingOccupancy(state.parkingNodes, vehicles);
+  return {
+    ...state,
+    vehicles,
+    parkingNodes,
+    totals: {
+      materializedVehicles: vehicles.length,
+      focusSectorVehicles: vehicles.filter((vehicle) => vehicle.position.sectorId === playerPosition.sectorId).length,
+      parkedVehicles: vehicles.filter((vehicle) => vehicle.state === "parked").length,
+      movingVehicles: vehicles.filter((vehicle) => vehicle.state === "moving").length,
+      serviceVehicles: vehicles.filter((vehicle) => vehicle.state === "service").length,
+      disabledVehicles: vehicles.filter((vehicle) => vehicle.state === "disabled").length,
+      visibleVehicles: vehicles.filter((vehicle) => vehicle.visible).length,
+      nearbyVehicles: vehicles.filter((vehicle) => vehicle.nearby).length,
+      parkingNodes: parkingNodes.length,
+      occupiedParkingSpaces: parkingNodes.reduce((sum, node) => sum + node.occupiedVehicleIds.length, 0)
+    },
+    lastUpdatedAt: timestamp
   };
 }
 

@@ -1,7 +1,7 @@
 {
   "name": "neon-life",
   "private": true,
-  "version": "0.31.0",
+  "version": "0.32.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +11,8 @@
     "test:ui": "npm run test:ui:architecture && npm run test:ui:recovery",
     "test:ui:architecture": "node scripts/verify-ui-architecture.mjs",
     "test:ui:recovery": "node scripts/verify-ui-recovery.mjs",
-    "test:map": "node scripts/verify-map-foundation.mjs"
+    "test:map": "node scripts/verify-map-foundation.mjs",
+    "test:streets": "node scripts/verify-street-topology.mjs"
   },
   "dependencies": {
     "react": "18.3.1",

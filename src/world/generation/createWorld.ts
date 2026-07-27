@@ -24,9 +24,10 @@ import { createUrbanFabricState, ensureBuildingAccessDetail } from "../../simula
 import { createMetropolitanMobilityState, synchronizeMetropolitanFromMobility } from "../../simulation/mobility/mobilitySystem";
 import { createLocalSceneState } from "../../simulation/localScene/localSceneSystem";
 import { createBuildingAccessState } from "../../simulation/access/buildingAccessSystem";
-import { createPhysicalVehiclesState } from "../../simulation/vehicles/physicalVehicleSystem";
+import { createPhysicalVehiclesState, refreshPhysicalVehicleSpatialPresentation } from "../../simulation/vehicles/physicalVehicleSystem";
 import { createTransitOperationsState } from "../../simulation/transit/transitOperationsSystem";
 import { createVehicleCrimeState } from "../../simulation/crime/vehicleCrimeSystem";
+import { alignUrbanFabricToStreetTopology, createStreetTopologyState, snapPhysicalVehicleParkingToStreetTopology, snapTransitStopsToStreetTopology } from "../../simulation/streets/streetTopologySystem";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
 import type {
@@ -327,7 +328,7 @@ export function createWorldSession(seed: string): GameSession {
     recentEventCount: 0,
     recentObservationCount: data.observations.length
   });
-  const urbanBase = createUrbanFabricState({
+  const rawUrban = createUrbanFabricState({
     timestamp: INITIAL_GAME_TIMESTAMP,
     seed,
     activeLocationId: housing.id,
@@ -339,6 +340,9 @@ export function createWorldSession(seed: string): GameSession {
     transportServiceLevel: infrastructure.networks.find((item) => item.kind === "transport")?.averageServiceLevel ?? 100,
     dataServiceLevel: infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100
   });
+  const streetInput = { timestamp: INITIAL_GAME_TIMESTAMP, seed, metropolitan: metropolitanBase, urban: rawUrban };
+  const streets = createStreetTopologyState(streetInput);
+  const urbanBase = alignUrbanFabricToStreetTopology(rawUrban, streets, streetInput);
   const homeBuilding = urbanBase.buildings.find((building) => building.anchorLocationId === housing.id);
   const urban = homeBuilding
     ? ensureBuildingAccessDetail(urbanBase, seed, INITIAL_GAME_TIMESTAMP, homeBuilding.id, player.id, housing.id)
@@ -380,7 +384,7 @@ export function createWorldSession(seed: string): GameSession {
     urban,
     localScene
   });
-  const vehicles = createPhysicalVehiclesState({
+  const vehicles = refreshPhysicalVehicleSpatialPresentation(snapPhysicalVehicleParkingToStreetTopology(createPhysicalVehiclesState({
     timestamp: INITIAL_GAME_TIMESTAMP,
     seed,
     playerId: player.id,
@@ -391,9 +395,9 @@ export function createWorldSession(seed: string): GameSession {
     mobility,
     population,
     organizations
-  });
+  }), streets, { timestamp: INITIAL_GAME_TIMESTAMP, seed, metropolitan, urban }), localScene.playerPosition, INITIAL_GAME_TIMESTAMP);
   const vehicleCrime = createVehicleCrimeState(INITIAL_GAME_TIMESTAMP);
-  const transitOperations = createTransitOperationsState({
+  const transitOperations = snapTransitStopsToStreetTopology(createTransitOperationsState({
     timestamp: INITIAL_GAME_TIMESTAMP,
     seed,
     playerId: player.id,
@@ -406,7 +410,7 @@ export function createWorldSession(seed: string): GameSession {
     metropolitan,
     mobility,
     physicalVehicles: vehicles
-  });
+  }), streets, { timestamp: INITIAL_GAME_TIMESTAMP, seed, metropolitan, urban });
   const syncedKernel = advanceSimulationKernel(kernel, {
     timestamp: INITIAL_GAME_TIMESTAMP,
     seed,
@@ -446,6 +450,7 @@ export function createWorldSession(seed: string): GameSession {
     data,
     metropolitan,
     urban,
+    streets,
     mobility,
     localScene,
     buildingAccess,

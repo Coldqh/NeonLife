@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 import type { GameSession, LocationState } from "../../world/state/types";
 import type { MetropolitanSectorState } from "../../simulation/spatial/types";
+import { getSectorStreetTopology } from "../../simulation/streets/streetTopologySystem";
 import { PLACE_ICONS } from "../shared/presentation";
 
 interface CameraState {
@@ -37,13 +38,19 @@ export function LocalSectorMap({
     () => session.urban.buildings.filter((building) => building.sectorId === sector.id),
     [sector.id, session.urban.buildings]
   );
-  const nodeById = useMemo(() => new Map(session.metropolitan.roadNodes.map((node) => [node.id, node])), [session.metropolitan.roadNodes]);
-  const roads = useMemo(() => session.metropolitan.roadLinks.flatMap((link) => {
-    const from = nodeById.get(link.fromNodeId);
-    const to = nodeById.get(link.toNodeId);
-    if (!from || !to || (from.sectorId !== sector.id && to.sectorId !== sector.id)) return [];
-    return [{ link, from, to }];
-  }), [nodeById, sector.id, session.metropolitan.roadLinks]);
+  const topology = useMemo(() => getSectorStreetTopology(session.streets, {
+    timestamp: session.timestamp,
+    seed: session.world.meta.seed,
+    metropolitan: session.metropolitan,
+    urban: session.urban,
+    preferredSectorId: sector.id
+  }, sector.id), [sector.id, session.metropolitan, session.streets, session.timestamp, session.urban, session.world.meta.seed]);
+  const nodeById = useMemo(() => new Map(topology.intersections.map((node) => [node.id, node])), [topology.intersections]);
+  const roads = useMemo(() => topology.segments.flatMap((segment) => {
+    const from = nodeById.get(segment.fromIntersectionId);
+    const to = nodeById.get(segment.toIntersectionId);
+    return from && to ? [{ segment, from, to }] : [];
+  }), [nodeById, topology.segments]);
   const locations = useMemo(() => session.metropolitan.locations
     .filter((placement) => placement.sectorId === sector.id)
     .flatMap((placement) => {
@@ -145,8 +152,21 @@ export function LocalSectorMap({
           </pattern>
         </defs>
         <rect width="100" height="100" fill={`url(#sector-grid-${sector.id})`} />
-        {roads.map(({ link, from, to }) => (
-          <line key={link.id} x1={toX(from.xM)} y1={toY(from.yM)} x2={toX(to.xM)} y2={toY(to.yM)} className={`local-map__road local-map__road--${link.class}`} />
+        {topology.blocks.map((block) => (
+          <rect key={block.id} x={toX(block.bounds.xM)} y={toY(block.bounds.yM)} width={block.bounds.widthM / sector.bounds.widthM * 100} height={block.bounds.heightM / sector.bounds.heightM * 100} rx=".55" className={`local-map__block local-map__block--${block.landUse}`}><title>{block.code}</title></rect>
+        ))}
+        {topology.parkingZones.map((zone) => (
+          <rect key={zone.id} x={toX(zone.bounds.xM)} y={toY(zone.bounds.yM)} width={Math.max(.25, zone.bounds.widthM / sector.bounds.widthM * 100)} height={Math.max(.25, zone.bounds.heightM / sector.bounds.heightM * 100)} className="local-map__parking"><title>Парковка · {zone.occupiedEstimate}/{zone.capacity}</title></rect>
+        ))}
+        {roads.map(({ segment, from, to }) => (
+          <g key={segment.id} className={`local-map__street local-map__street--${segment.class}`}>
+            <line x1={toX(from.xM)} y1={toY(from.yM)} x2={toX(to.xM)} y2={toY(to.yM)} className="local-map__sidewalk" />
+            <line x1={toX(from.xM)} y1={toY(from.yM)} x2={toX(to.xM)} y2={toY(to.yM)} className="local-map__road" />
+            <title>{segment.name} · {segment.lanes} полосы · {segment.speedLimitKph} км/ч</title>
+          </g>
+        ))}
+        {topology.parcels.map((parcel) => (
+          <rect key={parcel.id} x={toX(parcel.bounds.xM)} y={toY(parcel.bounds.yM)} width={Math.max(.5, parcel.bounds.widthM / sector.bounds.widthM * 100)} height={Math.max(.5, parcel.bounds.heightM / sector.bounds.heightM * 100)} rx=".35" className={`local-map__parcel local-map__parcel--${parcel.kind}`}><title>{parcel.addressCode}</title></rect>
         ))}
         {buildings.map((building) => (
           <rect
@@ -158,6 +178,12 @@ export function LocalSectorMap({
             rx=".65"
             className={`local-map__building local-map__building--${building.use}`}
           ><title>{building.addressCode}</title></rect>
+        ))}
+        {topology.buildingEntrances.map((entrance) => (
+          <g key={entrance.id} className={`local-map__entrance local-map__entrance--${entrance.kind}`}>
+            <line x1={toX(entrance.xM)} y1={toY(entrance.yM)} x2={toX(entrance.walkwayTo.xM)} y2={toY(entrance.walkwayTo.yM)} />
+            <circle cx={toX(entrance.xM)} cy={toY(entrance.yM)} r=".7"><title>{entrance.kind === "public" ? "Главный вход" : "Служебный вход"}</title></circle>
+          </g>
         ))}
         {stops.map((stop) => (
           <g key={stop.id} transform={`translate(${toX(stop.xM)} ${toY(stop.yM)})`} className={`local-map__stop local-map__stop--${stop.mode}`}>
@@ -185,7 +211,7 @@ export function LocalSectorMap({
           <g transform={`translate(${playerX} ${playerY})`} className="local-map__player"><circle r="3.8" /><path d="M0-2.2 2 1.9 0 .9-2 1.9z" /></g>
         ) : null}
       </svg>
-      {!buildings.length && !roads.length ? <p className="local-map__empty">Сектор ещё не материализован. Отладочные кварталы не подставляются.</p> : null}
+      {!topology.segments.length ? <p className="local-map__empty">Уличная топология сектора недоступна.</p> : null}
       <div className="map-controls">
         <button type="button" disabled={camera.zoom >= 5} onClick={() => applyZoom(camera.zoom + .4)}>＋</button>
         <button type="button" disabled={camera.zoom <= 1} onClick={() => applyZoom(camera.zoom - .4)}>−</button>
