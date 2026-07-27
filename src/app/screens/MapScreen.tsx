@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { GameSession, LocationState } from "../../world/state/types";
 import type { MetropolitanSectorState } from "../../simulation/spatial/types";
 import { getTravelOptions } from "../../gameplay/travel/travelSystem";
@@ -29,6 +29,8 @@ function modeLabel(mode: ReturnType<typeof getTravelOptions>[number]["mode"]): s
   return "Такси";
 }
 
+interface SwipePoint { x: number; y: number }
+
 export function MapScreen({
   session,
   requestedLocationId,
@@ -43,7 +45,8 @@ export function MapScreen({
   const [mode, setMode] = useState<MapMode>("global");
   const [selectedSectorId, setSelectedSectorId] = useState(session.metropolitan.streaming.focusSectorId);
   const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
-  const [layers, setLayers] = useState<MapLayers>({ transit: true, traffic: true, districts: true });
+  const [layers, setLayers] = useState<MapLayers>({ transit: true, traffic: false, districts: true });
+  const swipe = useRef<SwipePoint | null>(null);
 
   useEffect(() => {
     if (!requestedLocationId) return;
@@ -75,14 +78,11 @@ export function MapScreen({
   const travelOption = selectedLocation
     ? getTravelOptions(session).find((option) => option.location.id === selectedLocation.id)
     : undefined;
+  const sectorStops = session.transit.stops.filter((stop) => stop.sectorId === selectedSector.id);
 
   function selectSector(sector: MetropolitanSectorState): void {
     setSelectedSectorId(sector.id);
     setSelectedLocationId(null);
-  }
-
-  function chooseLocation(location: LocationState): void {
-    setSelectedLocationId(location.id);
   }
 
   function beginTravel(): void {
@@ -90,8 +90,23 @@ export function MapScreen({
     onTravel(selectedLocation.id);
   }
 
+  function swipeStart(event: ReactPointerEvent<HTMLElement>): void {
+    if (event.target instanceof Element && event.target.closest("button, canvas, svg, input, [role='button']")) return;
+    swipe.current = { x: event.clientX, y: event.clientY };
+  }
+
+  function swipeEnd(event: ReactPointerEvent<HTMLElement>): void {
+    const start = swipe.current;
+    swipe.current = null;
+    if (!start) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.25) return;
+    setMode(dx < 0 ? "local" : "global");
+  }
+
   return (
-    <section className="screen map-screen" aria-labelledby="map-title">
+    <section className="screen map-screen" aria-labelledby="map-title" onPointerDown={swipeStart} onPointerUp={swipeEnd}>
       <header className="screen-heading map-screen__heading">
         <div>
           <span>{session.world.city.name}</span>
@@ -109,14 +124,19 @@ export function MapScreen({
           {mode === "global" ? (
             <>
               <GlobalCityMap session={session} selectedId={selectedSector.id} layers={layers} onSelect={selectSector} />
-              <div className="map-layers">
-                <button type="button" className={layers.districts ? "is-active" : ""} onClick={() => setLayers((value) => ({ ...value, districts: !value.districts }))}>Районы</button>
-                <button type="button" className={layers.transit ? "is-active" : ""} onClick={() => setLayers((value) => ({ ...value, transit: !value.transit }))}>Транспорт</button>
-                <button type="button" className={layers.traffic ? "is-active" : ""} onClick={() => setLayers((value) => ({ ...value, traffic: !value.traffic }))}>Трафик</button>
+              <div className="map-layers" aria-label="Слои карты">
+                <button type="button" className={layers.districts ? "is-active" : ""} aria-pressed={layers.districts} onClick={() => setLayers((value) => ({ ...value, districts: !value.districts }))}><i className="layer-dot layer-dot--district" />Районы</button>
+                <button type="button" className={layers.transit ? "is-active" : ""} aria-pressed={layers.transit} onClick={() => setLayers((value) => ({ ...value, transit: !value.transit }))}><i className="layer-dot layer-dot--transit" />Линии</button>
+                <button type="button" className={layers.traffic ? "is-active" : ""} aria-pressed={layers.traffic} onClick={() => setLayers((value) => ({ ...value, traffic: !value.traffic }))}><i className="layer-dot layer-dot--traffic" />Трафик</button>
+              </div>
+              <div className="map-legend" aria-label="Легенда карты">
+                {layers.districts ? <span><i className="layer-dot layer-dot--district" />границы и названия районов</span> : null}
+                {layers.transit ? <span><i className="layer-dot layer-dot--transit" />автобусные и рельсовые линии</span> : null}
+                {layers.traffic ? <span><i className="layer-dot layer-dot--traffic" />нагруженные дороги и сектора</span> : null}
               </div>
             </>
           ) : (
-            <LocalSectorMap session={session} sector={selectedSector} onLocation={chooseLocation} />
+            <LocalSectorMap session={session} sector={selectedSector} onLocation={(location) => setSelectedLocationId(location.id)} />
           )}
         </div>
 
@@ -126,11 +146,11 @@ export function MapScreen({
             <button type="button" onClick={() => setMode(mode === "global" ? "local" : "global")}>{mode === "global" ? "Открыть сектор" : "Весь город"}</button>
           </header>
           <p>{landUseLabel(selectedSector.landUse)} · {selectedSector.detailLevel === "active" ? "активная детализация" : selectedSector.detailLevel === "warm" ? "тёплый сектор" : "фоновая симуляция"}</p>
-          <dl>
+          <dl className="sector-metrics">
             <div><dt>Жители</dt><dd>{compactNumber(selectedSector.representedPopulation)}</dd></div>
             <div><dt>Здания</dt><dd>{compactNumber(selectedSector.buildingEstimate)}</dd></div>
             <div><dt>Трафик</dt><dd>{selectedSector.trafficLoad}%</dd></div>
-            <div><dt>Люди на улице</dt><dd>{selectedSector.crowdLoad}%</dd></div>
+            <div><dt>Остановки</dt><dd>{sectorStops.length}</dd></div>
           </dl>
 
           <section className="sector-places">
@@ -140,18 +160,18 @@ export function MapScreen({
                 type="button"
                 key={location.id}
                 className={selectedLocation?.id === location.id ? "is-selected" : ""}
-                onClick={() => chooseLocation(location)}
+                onClick={() => setSelectedLocationId(location.id)}
               >
                 <i>{PLACE_ICONS[location.type]}</i>
                 <span><strong>{location.name}</strong><small>{location.open ? "Открыто" : "Закрыто"} · безопасность {location.security}%</small></span>
               </button>
             ))}
-            {!sectorLocations.length ? <p className="empty-copy">В секторе нет крупных именованных точек. Физические здания появятся после материализации.</p> : null}
+            {!sectorLocations.length ? <p className="empty-copy">Крупных именованных точек нет. На локальной карте остаются реальные здания и дороги сектора.</p> : null}
           </section>
 
           {selectedLocation ? (
             <section className="route-panel">
-              <header><div><span>Маршрут</span><h3>{selectedLocation.name}</h3></div><button type="button" onClick={() => setSelectedLocationId(null)}>×</button></header>
+              <header><div><span>Маршрут</span><h3>{selectedLocation.name}</h3></div><button type="button" onClick={() => setSelectedLocationId(null)} aria-label="Закрыть маршрут">×</button></header>
               {selectedLocation.id === session.life.currentLocationId ? (
                 <p>Ты уже находишься здесь.</p>
               ) : travelOption ? (

@@ -14,11 +14,11 @@ export function PrimaryNavigation({ screen, onChange }: { screen: GameScreen; on
         <button
           type="button"
           key={item.id}
-          className={`${screen === item.id ? "is-active" : ""} ${item.id === "map" ? "primary-nav__map" : ""}`}
+          className={screen === item.id ? "is-active" : ""}
           aria-current={screen === item.id ? "page" : undefined}
           onClick={() => onChange(item.id)}
         >
-          <i><Icon name={item.icon} size={item.id === "map" ? 24 : 21} /></i>
+          <i><Icon name={item.icon} size={22} /></i>
           <span>{item.label}</span>
         </button>
       ))}

@@ -617,7 +617,9 @@ function advanceJourney(
       currentStopId: nextSegment.originStopId,
       nextStopId: nextSegment.stopIds[1],
       vehicleId: undefined,
-      seatId: undefined
+      seatId: undefined,
+      waitingMinutesTotal: Math.max(0, segment.transferMinutesAfter),
+      waitingMinutesRemaining: Math.max(0, segment.transferMinutesAfter)
     });
     return {
       player: {
@@ -667,7 +669,7 @@ function applyCommand(
     if (!first) return base;
     const journey: PlayerTransitJourneyState = updateJourneyStop({
       id: createStableEntityId("transit-journey", `${input.seed}:${input.playerId}:${input.timestamp}:${command.destinationLocationId}`),
-      phase: "waiting",
+      phase: command.walkingMinutes > 0 ? "walking" : "waiting",
       destinationLocationId: command.destinationLocationId,
       segments: command.segments,
       activeSegmentIndex: 0,
@@ -676,6 +678,10 @@ function applyCommand(
       nextStopId: first.stopIds[1],
       startedAt: input.timestamp,
       expectedArrivalAt: command.expectedArrivalAt,
+      walkingMinutesTotal: Math.max(0, command.walkingMinutes),
+      walkingMinutesRemaining: Math.max(0, command.walkingMinutes),
+      waitingMinutesTotal: Math.max(0, command.waitingMinutes),
+      waitingMinutesRemaining: Math.max(0, command.waitingMinutes),
       farePaid: 0,
       interactions: 0,
       yieldedSeats: 0,
@@ -684,7 +690,7 @@ function applyCommand(
     });
     return {
       ...base,
-      player: { ...player, journey, position: stopPosition(base.stops, input, first.originStopId, "outside") },
+      player: { ...player, journey, position: journey.phase === "walking" ? input.playerPosition : stopPosition(base.stops, input, first.originStopId, "outside") },
       cabin: undefined
     };
   }
@@ -692,8 +698,47 @@ function applyCommand(
   const journey = player.journey;
   if (!journey) return base;
 
+  if (command.kind === "cancel") {
+    return {
+      ...base,
+      player: { ...player, journey: undefined, position: input.playerPosition },
+      cabin: undefined
+    };
+  }
+
+  if (command.kind === "walk") {
+    if (journey.phase !== "walking") return base;
+    const minutes = Math.max(1, Math.min(journey.walkingMinutesRemaining, command.minutes));
+    const remaining = Math.max(0, journey.walkingMinutesRemaining - minutes);
+    const nextJourney = {
+      ...journey,
+      phase: remaining <= 0 ? "waiting" as const : "walking" as const,
+      walkingMinutesRemaining: remaining
+    };
+    return {
+      ...base,
+      player: {
+        ...player,
+        journey: nextJourney,
+        position: remaining <= 0 ? stopPosition(base.stops, input, journey.currentStopId, "outside") : input.playerPosition
+      },
+      cabin: undefined
+    };
+  }
+
+  if (command.kind === "wait") {
+    if (journey.phase !== "waiting" || journey.waitingMinutesRemaining <= 0) return base;
+    const minutes = Math.max(1, Math.min(journey.waitingMinutesRemaining, command.minutes));
+    const remaining = Math.max(0, journey.waitingMinutesRemaining - minutes);
+    return {
+      ...base,
+      player: { ...player, journey: { ...journey, waitingMinutesRemaining: remaining }, position: input.playerPosition },
+      cabin: undefined
+    };
+  }
+
   if (command.kind === "board") {
-    if (journey.phase !== "waiting") return base;
+    if (journey.phase !== "waiting" || journey.waitingMinutesRemaining > 0) return base;
     const segment = activeSegment(journey);
     const route = base.routes.find((item) => item.id === segment.routeId);
     const vehicle = base.vehicles.find((item) => item.id === command.vehicleId && item.routeId === segment.routeId)
@@ -827,9 +872,26 @@ function buildNetwork(input: TransitOperationsInput): { stops: TransitStopState[
   return { stops, routes, vehicles };
 }
 
+function normalizeJourneyState(journey: PlayerTransitJourneyState | undefined): PlayerTransitJourneyState | undefined {
+  if (!journey) return undefined;
+  const walkingMinutesTotal = Math.max(0, Number.isFinite(journey.walkingMinutesTotal) ? journey.walkingMinutesTotal : 0);
+  const walkingMinutesRemaining = Math.max(0, Math.min(walkingMinutesTotal, Number.isFinite(journey.walkingMinutesRemaining) ? journey.walkingMinutesRemaining : 0));
+  const waitingMinutesTotal = Math.max(0, Number.isFinite(journey.waitingMinutesTotal) ? journey.waitingMinutesTotal : 0);
+  const waitingMinutesRemaining = Math.max(0, Math.min(waitingMinutesTotal, Number.isFinite(journey.waitingMinutesRemaining) ? journey.waitingMinutesRemaining : 0));
+  const phase = journey.phase === "walking" && walkingMinutesRemaining <= 0 ? "waiting" : journey.phase;
+  return {
+    ...journey,
+    phase,
+    walkingMinutesTotal,
+    walkingMinutesRemaining,
+    waitingMinutesTotal,
+    waitingMinutesRemaining
+  };
+}
+
 function basePlayer(input: TransitOperationsInput, previous?: TransitOperationsState): TransitOperationsState["player"] {
   return {
-    journey: previous?.player.journey,
+    journey: normalizeJourneyState(previous?.player.journey),
     position: previous?.player.position ?? input.playerPosition,
     completedTrips: previous?.player.completedTrips ?? 0,
     completedTransfers: previous?.player.completedTransfers ?? 0,
@@ -911,7 +973,7 @@ export function getTransitRemainingMinutes(state: TransitOperationsState): numbe
   const journey = state.player.journey;
   if (!journey) return 0;
   if (journey.phase === "arrived") return 1;
-  let total = 0;
+  let total = journey.walkingMinutesRemaining + journey.waitingMinutesRemaining;
   for (let index = journey.activeSegmentIndex; index < journey.segments.length; index += 1) {
     const segment = journey.segments[index];
     const legs = Math.max(1, segment.stopIds.length - 1);
@@ -938,13 +1000,13 @@ export function getTransitDestinationPosition(state: TransitOperationsState, inp
 
 export function getTransitCurrentFare(state: TransitOperationsState): number {
   const journey = state.player.journey;
-  if (!journey || journey.phase !== "waiting") return 0;
+  if (!journey || journey.phase !== "waiting" || journey.waitingMinutesRemaining > 0) return 0;
   return activeSegment(journey).fare;
 }
 
 export function getTransitBoardingVehicle(state: TransitOperationsState): TransitVehicleOperationState | null {
   const journey = state.player.journey;
-  if (!journey || journey.phase !== "waiting") return null;
+  if (!journey || journey.phase !== "waiting" || journey.waitingMinutesRemaining > 0) return null;
   const segment = activeSegment(journey);
   return state.vehicles
     .filter((vehicle) => vehicle.routeId === segment.routeId && vehicle.status !== "out-of-service")

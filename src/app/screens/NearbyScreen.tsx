@@ -1,5 +1,5 @@
-import type { ChangeEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
+import type { ChangeEvent, PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { GameSession } from "../../world/state/types";
 import type { LocalActorState, LocalBuildingPresenceState } from "../../simulation/localScene/types";
 import type { PhysicalVehicleEntityState } from "../../simulation/vehicles/types";
@@ -11,12 +11,19 @@ interface SelectedEntity {
   id: string;
 }
 
+interface SwipeState {
+  pointerId: number;
+  x: number;
+  y: number;
+}
+
 const tabs: Array<{ id: NearbyMode; label: string; icon: string }> = [
   { id: "people", label: "Люди", icon: "♙" },
   { id: "places", label: "Здания", icon: "▦" },
   { id: "cars", label: "Машины", icon: "▰" },
   { id: "events", label: "События", icon: "◉" }
 ];
+const TAB_ORDER = tabs.map((tab) => tab.id);
 
 export function NearbyScreen({
   session,
@@ -42,6 +49,7 @@ export function NearbyScreen({
   const [mode, setMode] = useState<NearbyMode>("people");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<SelectedEntity | null>(null);
+  const swipeRef = useRef<SwipeState | null>(null);
   const normalizedQuery = query.trim().toLocaleLowerCase("ru-RU");
 
   const actors = useMemo(() => [...session.localScene.actors]
@@ -57,18 +65,42 @@ export function NearbyScreen({
     .sort((left, right) => left.distanceToPlayerM - right.distanceToPlayerM), [normalizedQuery, session.vehicles.vehicles]);
   const events = useMemo(() => session.events
     .filter((event) => event.category === "local" || event.category === "contact")
-    .slice(0, 30), [session.events]);
+    .filter((event) => !normalizedQuery || `${event.title} ${event.detail ?? ""}`.toLocaleLowerCase("ru-RU").includes(normalizedQuery))
+    .slice(0, 30), [normalizedQuery, session.events]);
 
   const selectedActor = selected?.type === "person" ? actors.find((actor) => actor.id === selected.id) : undefined;
   const selectedBuilding = selected?.type === "building" ? buildings.find((building) => building.buildingId === selected.id) : undefined;
   const selectedVehicle = selected?.type === "vehicle" ? vehicles.find((vehicle) => vehicle.id === selected.id) : undefined;
   const selectionExists = Boolean(selectedActor || selectedBuilding || selectedVehicle);
+
   useEffect(() => {
     if (selected && !selectionExists) setSelected(null);
   }, [selected, selectionExists]);
+
   const buildingAccess = selectedBuilding
     ? session.buildingAccess.buildingEntries.find((entry) => entry.buildingId === selectedBuilding.buildingId)
     : undefined;
+
+  function changeMode(next: NearbyMode): void {
+    setMode(next);
+    setSelected(null);
+  }
+
+  function pointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
+    swipeRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+  }
+
+  function pointerUp(event: ReactPointerEvent<HTMLDivElement>): void {
+    const start = swipeRef.current;
+    swipeRef.current = null;
+    if (!start || start.pointerId !== event.pointerId) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    if (Math.abs(dx) < 58 || Math.abs(dx) < Math.abs(dy) * 1.25) return;
+    const index = TAB_ORDER.indexOf(mode);
+    const next = TAB_ORDER[dx < 0 ? index + 1 : index - 1];
+    if (next) changeMode(next);
+  }
 
   function choosePerson(actor: LocalActorState): void {
     setSelected({ type: "person", id: actor.id });
@@ -83,47 +115,37 @@ export function NearbyScreen({
     setSelected({ type: "vehicle", id: vehicle.id });
   }
 
-  function approachBuilding(building: LocalBuildingPresenceState): void {
-    onApproachBuilding(building.buildingId);
-    notify(`Ты подошёл к ${building.addressCode}`, "good");
-  }
-
-  function enterBuilding(building: LocalBuildingPresenceState): void {
-    onEnterBuilding(building.buildingId);
-    notify(`Вход: ${building.addressCode}`);
-  }
-
-  function approachVehicle(vehicle: PhysicalVehicleEntityState): void {
-    onApproachVehicle(vehicle.id);
-    notify(`Ты подошёл к ${vehicle.modelName}`, "good");
-  }
-
-  function enterVehicle(vehicle: PhysicalVehicleEntityState): void {
-    onEnterVehicle(vehicle.id);
-    notify(`Посадка: ${vehicle.modelName}`);
-  }
-
   return (
     <section className="screen nearby-screen" aria-labelledby="nearby-title">
       <header className="screen-heading nearby-screen__heading">
-        <div><span>Активный сектор</span><h1 id="nearby-title">Рядом</h1><p>Физические люди, здания, машины и события вокруг игрока.</p></div>
-        <label className="nearby-search"><span>Поиск</span><input value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} placeholder="Имя, адрес, номер..." /></label>
+        <div><span>Активный сектор</span><h1 id="nearby-title">Рядом</h1><p>Физические объекты вокруг игрока.</p></div>
+        <label className="nearby-search"><span className="sr-only">Поиск</span><input value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} placeholder="Имя, адрес, номер…" /></label>
       </header>
 
-      <div className="nearby-tabs">
+      <div className="nearby-tabs" role="tablist" aria-label="Категории объектов">
         {tabs.map((tab) => {
           const count = tab.id === "people" ? actors.length : tab.id === "places" ? buildings.length : tab.id === "cars" ? vehicles.length : events.length;
-          return <button type="button" key={tab.id} className={mode === tab.id ? "is-active" : ""} onClick={() => { setMode(tab.id); setSelected(null); }}><i>{tab.icon}</i><span>{tab.label}</span><b>{count}</b></button>;
+          return (
+            <button type="button" role="tab" aria-selected={mode === tab.id} key={tab.id} className={mode === tab.id ? "is-active" : ""} onClick={() => changeMode(tab.id)}>
+              <i>{tab.icon}</i><span>{tab.label}</span><b>{count}</b>
+            </button>
+          );
         })}
       </div>
 
-      <div className={`nearby-layout ${selected ? "has-selection" : ""}`}>
-        <div className="nearby-list">
+      <div
+        className={`nearby-layout ${selected ? "has-selection" : ""}`}
+        data-no-swipe
+        onPointerDown={pointerDown}
+        onPointerUp={pointerUp}
+        onPointerCancel={() => { swipeRef.current = null; }}
+      >
+        <div className="nearby-list" role="tabpanel">
           {mode === "people" ? actors.map((actor) => (
             <button type="button" key={actor.id} className={selectedActor?.id === actor.id ? "is-selected" : ""} onClick={() => choosePerson(actor)}>
-              <img src={personPortrait(actor.id)} alt={`Портрет ${actor.name}`} />
+              <img src={personPortrait(actor.id)} alt="" />
               <span><strong>{actor.name}</strong><small>{actor.roleLabel}</small><em>{actorActivityIcon(actor)} {actor.activityLabel}</em></span>
-              <aside><strong>{Math.round(actor.distanceToPlayerM)} м</strong><small>{actor.interactable ? "доступен" : "далеко"}</small></aside>
+              <aside><strong>{Math.round(actor.distanceToPlayerM)} м</strong><small>{actor.interactable ? "рядом" : "далеко"}</small></aside>
             </button>
           )) : null}
           {mode === "places" ? buildings.map((building) => (
@@ -143,9 +165,7 @@ export function NearbyScreen({
           {mode === "events" ? events.map((event) => (
             <article className="event-row" key={event.id}><i>◉</i><span><strong>{event.title}</strong><small>{event.detail ?? "Без подробностей"}</small></span><time>{new Date(event.timestamp).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</time></article>
           )) : null}
-          {((mode === "people" && !actors.length) || (mode === "places" && !buildings.length) || (mode === "cars" && !vehicles.length) || (mode === "events" && !events.length)) ? (
-            <p className="empty-copy">Подходящих объектов нет.</p>
-          ) : null}
+          {((mode === "people" && !actors.length) || (mode === "places" && !buildings.length) || (mode === "cars" && !vehicles.length) || (mode === "events" && !events.length)) ? <p className="empty-copy">Подходящих объектов нет.</p> : null}
         </div>
 
         {selected ? (
@@ -153,7 +173,7 @@ export function NearbyScreen({
             <button type="button" className="entity-inspector__close" onClick={() => setSelected(null)} aria-label="Закрыть">×</button>
             {selectedActor ? (
               <>
-                <header><img src={personPortrait(selectedActor.id)} alt={`Портрет ${selectedActor.name}`} /><div><h2>{selectedActor.name}</h2><strong>{selectedActor.roleLabel}</strong><span>{actorActivityIcon(selectedActor)} {selectedActor.activityLabel}</span></div></header>
+                <header><img src={personPortrait(selectedActor.id)} alt="" /><div><h2>{selectedActor.name}</h2><strong>{selectedActor.roleLabel}</strong><span>{actorActivityIcon(selectedActor)} {selectedActor.activityLabel}</span></div></header>
                 <dl>
                   <div><dt>Расстояние</dt><dd>{Math.round(selectedActor.distanceToPlayerM)} м</dd></div>
                   <div><dt>Возраст</dt><dd>{selectedActor.age}</dd></div>
@@ -161,7 +181,7 @@ export function NearbyScreen({
                   <div><dt>Знакомство</dt><dd>{selectedActor.knownToPlayer ? "Известен" : "Незнакомец"}</dd></div>
                 </dl>
                 <div className="entity-actions">
-                  <button type="button" onClick={() => { onAdvance(2, `Наблюдение: ${selectedActor.name}`); notify(`Ты наблюдал за ${selectedActor.name}`); }}>Наблюдать · 2 мин.</button>
+                  <button type="button" onClick={() => { onAdvance(2, `Наблюдение: ${selectedActor.name}`); notify(`Наблюдение заняло 2 минуты`); }}>Наблюдать · 2 мин.</button>
                   {selectedActor.destinationLocationId ? <button type="button" onClick={() => onRouteTo(selectedActor.destinationLocationId!)}>Показать цель на карте</button> : null}
                 </div>
               </>
@@ -176,8 +196,8 @@ export function NearbyScreen({
                   <div><dt>Статус</dt><dd>{selectedBuilding.playerInside ? "Игрок внутри" : "Снаружи"}</dd></div>
                 </dl>
                 <div className="entity-actions">
-                  <button type="button" onClick={() => approachBuilding(selectedBuilding)}>Подойти</button>
-                  {selectedBuilding.distanceToPlayerM <= 12 && buildingAccess && !["locked", "closed", "unavailable"].includes(buildingAccess.publicDecision) ? <button type="button" onClick={() => enterBuilding(selectedBuilding)}>Войти</button> : null}
+                  <button type="button" onClick={() => onApproachBuilding(selectedBuilding.buildingId)}>Подойти</button>
+                  {selectedBuilding.distanceToPlayerM <= 12 && buildingAccess && !["locked", "closed", "unavailable"].includes(buildingAccess.publicDecision) ? <button type="button" onClick={() => onEnterBuilding(selectedBuilding.buildingId)}>Войти</button> : null}
                 </div>
               </>
             ) : null}
@@ -191,8 +211,8 @@ export function NearbyScreen({
                   <div><dt>Законность</dt><dd>{selectedVehicle.legalStatus}</dd></div>
                 </dl>
                 <div className="entity-actions">
-                  <button type="button" onClick={() => approachVehicle(selectedVehicle)}>Подойти</button>
-                  {selectedVehicle.playerCanEnter && selectedVehicle.distanceToPlayerM <= 12 ? <button type="button" onClick={() => enterVehicle(selectedVehicle)}>Сесть</button> : null}
+                  <button type="button" onClick={() => onApproachVehicle(selectedVehicle.id)}>Подойти</button>
+                  {selectedVehicle.playerCanEnter && selectedVehicle.distanceToPlayerM <= 12 ? <button type="button" onClick={() => onEnterVehicle(selectedVehicle.id)}>Сесть</button> : null}
                 </div>
               </>
             ) : null}

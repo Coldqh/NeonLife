@@ -10,7 +10,7 @@ import type { PhysicalVehiclesState } from "../vehicles/types";
 export type TransitMode = "bus" | "metro";
 export type TransitServiceStatus = "operational" | "delayed" | "crowded" | "suspended";
 export type TransitVehicleStatus = "in-service" | "boarding" | "delayed" | "out-of-service";
-export type TransitJourneyPhase = "waiting" | "onboard" | "arrived";
+export type TransitJourneyPhase = "walking" | "waiting" | "onboard" | "arrived";
 export type TransitSeatKind = "standard" | "priority";
 export type TransitPriorityNeed = "none" | "elderly" | "injured" | "disabled" | "carrying-child";
 export type TransitPhoneActivity = "messages" | "job-board" | "study" | "city-feed";
@@ -135,6 +135,10 @@ export interface PlayerTransitJourneyState {
   seatId?: EntityId;
   startedAt: number;
   expectedArrivalAt: number;
+  walkingMinutesTotal: number;
+  walkingMinutesRemaining: number;
+  waitingMinutesTotal: number;
+  waitingMinutesRemaining: number;
   farePaid: number;
   interactions: number;
   yieldedSeats: number;
@@ -178,7 +182,9 @@ export interface TransitOperationsState {
 }
 
 export type TransitCommand =
-  | { kind: "begin"; destinationLocationId: EntityId; segments: TransitJourneySegmentState[]; expectedArrivalAt: number }
+  | { kind: "begin"; destinationLocationId: EntityId; segments: TransitJourneySegmentState[]; expectedArrivalAt: number; walkingMinutes: number; waitingMinutes: number }
+  | { kind: "walk"; minutes: number }
+  | { kind: "wait"; minutes: number }
   | { kind: "board"; vehicleId: EntityId }
   | { kind: "take-seat"; seatId: EntityId }
   | { kind: "stand" }
@@ -187,7 +193,8 @@ export type TransitCommand =
   | { kind: "interact-advance"; passengerId: EntityId }
   | { kind: "phone-advance"; activity: TransitPhoneActivity; productiveMinutes: number }
   | { kind: "alight" }
-  | { kind: "skip" };
+  | { kind: "skip" }
+  | { kind: "cancel" };
 
 export interface TransitOperationsInput {
   timestamp: number;

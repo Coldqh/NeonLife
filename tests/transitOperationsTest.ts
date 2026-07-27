@@ -2,6 +2,8 @@ import { migrateEnvelope } from "../src/core/saves/migrations";
 import {
   alightTransitVehicle,
   boardTransitVehicle,
+  waitTransitJourney,
+  walkTransitJourney,
   interactWithTransitPassenger,
   skipTransitJourney,
   rideTransitToNextStop,
@@ -12,6 +14,7 @@ import {
 } from "../src/gameplay/life/lifeSimulation";
 import { estimateTransitJourney, getTransitBoardingVehicle } from "../src/simulation/transit/transitOperationsSystem";
 import { createWorldSession } from "../src/world/generation/createWorld";
+import { reconcileLoadedTransitJourney } from "../src/gameplay/transit/reconcileTransitJourney";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -39,6 +42,7 @@ let session = createWorldSession(seed);
 
 assert(session.schemaVersion === 27, "new world schema is not 27");
 assert(session.transit.version === 1, "transit operations version mismatch");
+assert(!session.transit.player.journey, "fresh world unexpectedly starts in transit");
 assert(session.transit.stops.length >= 30, "too few physical stops");
 assert(session.transit.routes.some((route) => route.mode === "bus"), "bus routes missing");
 assert(session.transit.routes.some((route) => route.mode === "metro"), "metro routes missing");
@@ -55,10 +59,25 @@ assert(localEstimate.segments[0].stopIds.length >= 3, "local route has no interi
 
 const originalLocationId = session.life.currentLocationId;
 session = travelToLocation(session, localTarget.id);
-assert(session.transit.player.journey?.phase === "waiting", "travel did not create a waiting transit journey");
+assert(session.transit.player.journey, "travel did not create a transit journey");
+assert(["walking", "waiting"].includes(session.transit.player.journey.phase), "travel started in an invalid pre-boarding phase");
 assert(session.life.currentLocationId === originalLocationId, "player teleported before boarding");
+const balanceBeforePrematureBoard = session.player.balance;
+const prematureBoard = boardTransitVehicle(session);
+assert(prematureBoard.player.balance === balanceBeforePrematureBoard, "fare was charged before the vehicle arrived");
+assert(prematureBoard.transit.player.journey?.phase !== "onboard", "player boarded before walking and waiting were complete");
+while (session.transit.player.journey?.phase === "walking") {
+  session = walkTransitJourney(session, session.transit.player.journey.walkingMinutesRemaining);
+}
+assert(session.transit.player.journey?.phase === "waiting", "walking did not reach the stop");
 assert(session.localScene.playerPosition.state === "outside", "waiting player is not at the stop");
+while (session.transit.player.journey?.phase === "waiting" && session.transit.player.journey.waitingMinutesRemaining > 0) {
+  session = waitTransitJourney(session, session.transit.player.journey.waitingMinutesRemaining);
+}
 assert(getTransitBoardingVehicle(session.transit), "no concrete vehicle arrived for boarding");
+
+const stalePreBoard = reconcileLoadedTransitJourney(structuredClone(session));
+assert(!stalePreBoard.transit.player.journey, "unboarded journey was not cleared during boot reconciliation");
 
 const balanceBeforeBoarding = session.player.balance;
 session = boardTransitVehicle(session);

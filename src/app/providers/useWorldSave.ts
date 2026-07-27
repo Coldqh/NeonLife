@@ -18,6 +18,7 @@ import {
 } from "../../core/saves/types";
 import { createWorldSession } from "../../world/generation/createWorld";
 import type { GameSession } from "../../world/state/types";
+import { reconcileLoadedTransitJourney } from "../../gameplay/transit/reconcileTransitJourney";
 
 const LEGACY_SESSION_KEY = "neon-life/demo-session/v1";
 
@@ -151,7 +152,11 @@ export function useWorldSave(): WorldSaveController {
 
   const loadOrCreate = useCallback(async (database: IDBDatabase, slotId: SaveSlotId): Promise<GameSession> => {
     const loaded = await loadSession(database, slotId);
-    if (loaded) return loaded;
+    if (loaded) {
+      const reconciled = reconcileLoadedTransitJourney(loaded);
+      if (reconciled !== loaded) await saveSession(database, slotId, reconciled);
+      return reconciled;
+    }
     const fresh = slotId === "slot-1" ? migrateLegacySession(slotId) ?? createWorldSession(createSeedForSlot(slotId)) : createWorldSession(createSeedForSlot(slotId));
     await saveSession(database, slotId, fresh);
     return fresh;

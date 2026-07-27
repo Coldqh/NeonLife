@@ -691,27 +691,86 @@ export function startTransitJourney(session: GameSession, locationId: string): G
   const stop = getTransitStop(session.transit, estimate.originStopId);
   if (!position || !stop) return session;
   const firstRoute = session.transit.routes.find((route) => route.id === estimate.segments[0]?.routeId);
-  return progressLife(session, estimate.walkingMinutes + estimate.waitingMinutes, {
+  return progressLife(session, 0, {
     category: "personal",
-    title: `Ожидание транспорта: ${stop.name}.`,
+    title: `Маршрут построен: ${stop.name}.`,
     detail: `${firstRoute?.code ?? option.routeCode} · пешком ${estimate.walkingMinutes} мин. · ожидание ${estimate.waitingMinutes} мин. · ${estimate.segments.length > 1 ? `${estimate.segments.length - 1} пересадка` : "прямой маршрут"}`,
     importance: firstRoute?.status === "delayed" || firstRoute?.status === "crowded" ? 2 : 1,
-    fatigueDelta: estimate.walkingMinutes >= 12 ? 1 : 0,
-    stressDelta: estimate.waitingMinutes >= 15 ? 1 : 0,
-    activity: `На остановке: ${stop.name}`,
-    playerPosition: position,
+    fatigueDelta: 0,
+    stressDelta: 0,
+    activity: estimate.walkingMinutes > 0 ? `Идёт к остановке: ${stop.name}` : `На остановке: ${stop.name}`,
+    playerPosition: estimate.walkingMinutes > 0 ? session.localScene.playerPosition : position,
     transitCommand: {
       kind: "begin",
       destinationLocationId: locationId,
       segments: estimate.segments,
-      expectedArrivalAt: estimate.expectedArrivalAt
+      expectedArrivalAt: estimate.expectedArrivalAt,
+      walkingMinutes: estimate.walkingMinutes,
+      waitingMinutes: estimate.waitingMinutes
     }
+  });
+}
+
+export function walkTransitJourney(session: GameSession, requestedMinutes = 1): GameSession {
+  const journey = session.transit.player.journey;
+  if (!journey || journey.phase !== "walking" || journey.walkingMinutesRemaining <= 0) return session;
+  const stop = getTransitStop(session.transit, journey.currentStopId);
+  if (!stop) return session;
+  const minutes = Math.max(1, Math.min(journey.walkingMinutesRemaining, requestedMinutes));
+  const ratio = minutes / Math.max(1, journey.walkingMinutesRemaining);
+  const current = session.localScene.playerPosition;
+  const position: SpatialPositionState = {
+    sectorId: ratio >= 1 ? stop.sectorId : current.sectorId,
+    xM: Math.round((current.xM + (stop.xM - current.xM) * ratio) * 10) / 10,
+    yM: Math.round((current.yM + (stop.yM - current.yM) * ratio) * 10) / 10,
+    state: "outside",
+    updatedAt: session.timestamp + minutes * 60_000
+  };
+  return progressLife(session, minutes, {
+    category: "personal",
+    title: ratio >= 1 ? `Ты дошёл до остановки ${stop.name}.` : `Путь к остановке ${stop.name}.`,
+    detail: ratio >= 1 ? `Ожидание рейса: ${journey.waitingMinutesRemaining} мин.` : `Осталось ${journey.walkingMinutesRemaining - minutes} мин. пешком`,
+    importance: 1,
+    fatigueDelta: minutes >= 8 ? 1 : 0,
+    activity: ratio >= 1 ? `На остановке: ${stop.name}` : `Идёт к остановке: ${stop.name}`,
+    playerPosition: position,
+    transitCommand: { kind: "walk", minutes }
+  });
+}
+
+export function waitTransitJourney(session: GameSession, requestedMinutes = 1): GameSession {
+  const journey = session.transit.player.journey;
+  if (!journey || journey.phase !== "waiting" || journey.waitingMinutesRemaining <= 0) return session;
+  const minutes = Math.max(1, Math.min(journey.waitingMinutesRemaining, requestedMinutes));
+  const stop = getTransitStop(session.transit, journey.currentStopId);
+  return progressLife(session, minutes, {
+    category: "personal",
+    title: journey.waitingMinutesRemaining - minutes <= 0 ? "Транспорт подошёл." : `Ожидание: ${stop?.name ?? "остановка"}.`,
+    detail: journey.waitingMinutesRemaining - minutes <= 0 ? "Можно садиться." : `До прибытия около ${journey.waitingMinutesRemaining - minutes} мин.`,
+    importance: 1,
+    activity: `На остановке: ${stop?.name ?? "транспорт"}`,
+    playerPosition: session.localScene.playerPosition,
+    transitCommand: { kind: "wait", minutes }
+  });
+}
+
+export function cancelTransitJourney(session: GameSession): GameSession {
+  const journey = session.transit.player.journey;
+  if (!journey || journey.phase === "onboard" || journey.phase === "arrived") return session;
+  return progressLife(session, 1, {
+    category: "personal",
+    title: "Маршрут отменён.",
+    detail: "Ты остаёшься в текущей точке.",
+    importance: 1,
+    activity: "Маршрут отменён",
+    playerPosition: session.localScene.playerPosition,
+    transitCommand: { kind: "cancel" }
   });
 }
 
 export function boardTransitVehicle(session: GameSession): GameSession {
   const journey = session.transit.player.journey;
-  if (!journey || journey.phase !== "waiting") return session;
+  if (!journey || journey.phase !== "waiting" || journey.waitingMinutesRemaining > 0) return session;
   const vehicle = getTransitBoardingVehicle(session.transit);
   const fare = getTransitCurrentFare(session.transit);
   if (!vehicle || session.player.balance < fare) return session;

@@ -286,3 +286,46 @@
   .map-layers { left: 10px; bottom: 10px; }
   .map-controls { right: 10px; bottom: 10px; }
 }
+
+.map-legend {
+  position: absolute;
+  left: 14px;
+  top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: calc(100% - 96px);
+  pointer-events: none;
+}
+.map-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: rgba(5, 10, 19, .82);
+  color: var(--nl-muted);
+  font-size: 11px;
+  line-height: 15px;
+}
+.layer-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  display: inline-block;
+  border-radius: 50%;
+  background: var(--nl-muted);
+}
+.layer-dot--district { background: #aebbd0; }
+.layer-dot--transit { background: var(--nl-blue); }
+.layer-dot--traffic { background: var(--nl-amber); }
+.local-map__stop circle { fill: #07111f; stroke: var(--nl-blue); stroke-width: .55; }
+.local-map__stop--bus circle { stroke: var(--nl-amber); }
+.local-map__stop text { fill: #fff; font-size: 2.6px; font-weight: 700; pointer-events: none; }
+
+@media (max-width: 560px) {
+  .map-legend { display: none; }
+  .map-layers { overflow-x: auto; flex-wrap: nowrap; max-width: calc(100% - 66px); scrollbar-width: none; }
+  .map-layers::-webkit-scrollbar { display: none; }
+  .map-layers button { flex: 0 0 auto; }
+}

@@ -43,7 +43,13 @@ export function playerOccupation(session: GameSession): string {
 
 export function currentActivity(session: GameSession): string {
   const position = session.localScene.playerPosition;
-  if (session.transit.player.journey) return session.transit.player.journey.phase === "waiting" ? "Ожидает транспорт" : "В общественном транспорте";
+  if (session.transit.player.journey) {
+    const phase = session.transit.player.journey.phase;
+    if (phase === "walking") return "Идёт к остановке";
+    if (phase === "waiting") return "Ожидает рейс";
+    if (phase === "arrived") return "Прибыл к назначению";
+    return "В общественном транспорте";
+  }
   if (position.state === "vehicle") return "В машине";
   if (position.state === "inside") return "Внутри здания";
   return session.currentActivity || "На улице";

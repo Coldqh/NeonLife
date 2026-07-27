@@ -12,6 +12,9 @@ const phoneActions: Array<{ id: TransitPhoneActivity; label: string; detail: str
 
 export function TransitJourneyScreen({
   session,
+  onWalk,
+  onWait,
+  onCancel,
   onBoard,
   onTakeSeat,
   onStand,
@@ -23,6 +26,9 @@ export function TransitJourneyScreen({
   onSkip
 }: {
   session: GameSession;
+  onWalk: (minutes: number) => void;
+  onWait: (minutes: number) => void;
+  onCancel: () => void;
   onBoard: () => void;
   onTakeSeat: (seatId: string) => void;
   onStand: () => void;
@@ -36,43 +42,93 @@ export function TransitJourneyScreen({
   const journey = session.transit.player.journey;
   if (!journey) return null;
   const segment = journey.segments[journey.activeSegmentIndex];
-  const route = getTransitRoute(session.transit, segment?.routeId);
+  if (!segment) return null;
+  const route = getTransitRoute(session.transit, segment.routeId);
   const vehicle = getTransitVehicle(session.transit, journey.vehicleId) ?? getTransitBoardingVehicle(session.transit);
   const currentStop = getTransitStop(session.transit, journey.currentStopId);
   const nextStop = getTransitStop(session.transit, journey.nextStopId);
   const destination = session.world.locations.find((location) => location.id === journey.destinationLocationId);
   const cabin = session.transit.cabin;
-  const progress = segment ? Math.round(journey.currentStopOffset / Math.max(1, segment.stopIds.length - 1) * 100) : 0;
+  const legProgress = Math.round(journey.currentStopOffset / Math.max(1, segment.stopIds.length - 1) * 100);
+  const walkingProgress = journey.walkingMinutesTotal > 0
+    ? Math.round((journey.walkingMinutesTotal - journey.walkingMinutesRemaining) / journey.walkingMinutesTotal * 100)
+    : 100;
+  const waitingReady = journey.waitingMinutesRemaining <= 0;
 
   return (
     <div className="transit-scene" role="dialog" aria-modal="true" aria-label="Поездка в общественном транспорте">
       <header className="transit-scene__header">
-        <div><span>{route?.mode === "metro" ? "Метро" : "Автобус"}</span><h1>{route?.code ?? "Маршрут"}</h1><p>{route?.name ?? "Городской транспорт"}</p></div>
-        <div><span>Назначение</span><strong>{destination?.name ?? "Город"}</strong><small>{journey.activeSegmentIndex + 1} / {journey.segments.length} сегмент</small></div>
+        <div>
+          <span>{route?.mode === "metro" ? "Метро" : "Автобус"}</span>
+          <h1>{route?.code ?? "Маршрут"}</h1>
+          <p>{route?.name ?? "Городской транспорт"}</p>
+        </div>
+        <div>
+          <span>Назначение</span>
+          <strong>{destination?.name ?? "Город"}</strong>
+          <small>{journey.activeSegmentIndex + 1} из {journey.segments.length} участков</small>
+        </div>
       </header>
 
-      <section className="transit-progress">
-        <div className="transit-progress__line"><i style={{ width: `${progress}%` }} /></div>
-        <div><span><small>Сейчас</small><strong>{currentStop?.name ?? "Остановка"}</strong></span><span><small>Дальше</small><strong>{nextStop?.name ?? (journey.phase === "arrived" ? "Прибытие" : "Маршрут")}</strong></span></div>
-        <ol>
-          {segment?.stopIds.map((stopId, index) => {
-            const stop = getTransitStop(session.transit, stopId);
-            return <li key={stopId} className={index < journey.currentStopOffset ? "is-passed" : index === journey.currentStopOffset ? "is-current" : ""}><i /><span>{stop?.name ?? stopId}</span></li>;
-          })}
-        </ol>
-      </section>
+      {journey.phase === "walking" ? (
+        <section className="transit-approach">
+          <div className="transit-progress__line"><i style={{ width: `${walkingProgress}%` }} /></div>
+          <span>Путь к остановке</span>
+          <h2>{currentStop?.name ?? "Остановка"}</h2>
+          <p>Осталось {journey.walkingMinutesRemaining} мин. · маршрут не проматывается автоматически</p>
+          <div className="transit-approach__actions">
+            <button type="button" className="secondary-button" onClick={() => onWalk(1)}>Идти 1 мин.</button>
+            <button type="button" className="primary-button" onClick={() => onWalk(journey.walkingMinutesRemaining)}>Дойти до остановки</button>
+            <button type="button" className="text-button" onClick={onCancel}>Отменить маршрут</button>
+          </div>
+        </section>
+      ) : null}
+
+      {journey.phase !== "walking" ? (
+        <section className="transit-progress">
+          <div className="transit-progress__line"><i style={{ width: `${legProgress}%` }} /></div>
+          <div>
+            <span><small>Сейчас</small><strong>{currentStop?.name ?? "Остановка"}</strong></span>
+            <span><small>Дальше</small><strong>{nextStop?.name ?? (journey.phase === "arrived" ? "Прибытие" : "Маршрут")}</strong></span>
+          </div>
+          <ol aria-label="Остановки текущего участка">
+            {segment.stopIds.map((stopId, index) => {
+              const stop = getTransitStop(session.transit, stopId);
+              return (
+                <li key={stopId} className={index < journey.currentStopOffset ? "is-passed" : index === journey.currentStopOffset ? "is-current" : ""}>
+                  <i />
+                  <span>{stop?.name ?? stopId}</span>
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      ) : null}
 
       {journey.phase === "waiting" ? (
         <section className="transit-waiting">
-          <article><span>Подходит транспорт</span><strong>{vehicle ? `${vehicle.fleetNumber} · ${vehicle.crew.name}` : "Рейс ожидается"}</strong><p>{route?.status ?? "operational"} · задержка {route?.averageDelayMinutes ?? 0} мин. · заполнение {route?.crowdingPercent ?? 0}%</p></article>
-          <div><button type="button" className="primary-button" disabled={!vehicle} onClick={onBoard}>Сесть в транспорт</button><button type="button" className="secondary-button" onClick={onSkip}>Промотать всю поездку</button></div>
+          <article>
+            <span>{waitingReady ? "Рейс подошёл" : journey.activeSegmentIndex > 0 ? "Пересадка" : "Ожидание рейса"}</span>
+            <strong>{currentStop?.name ?? "Остановка"}</strong>
+            <p>{waitingReady ? `${vehicle?.fleetNumber ?? "Транспорт"} · можно садиться` : `До прибытия около ${journey.waitingMinutesRemaining} мин.`}</p>
+            <small>{route?.status ?? "operational"} · задержка {route?.averageDelayMinutes ?? 0} мин. · заполнение {route?.crowdingPercent ?? 0}%</small>
+          </article>
+          <div>
+            {!waitingReady ? <button type="button" className="secondary-button" onClick={() => onWait(1)}>Ждать 1 мин.</button> : null}
+            {!waitingReady ? <button type="button" className="primary-button" onClick={() => onWait(journey.waitingMinutesRemaining)}>Дождаться рейса</button> : null}
+            {waitingReady ? <button type="button" className="primary-button" disabled={!vehicle} onClick={onBoard}>Сесть в транспорт</button> : null}
+            <button type="button" className="text-button" onClick={onCancel}>Отменить маршрут</button>
+          </div>
         </section>
       ) : null}
 
       {journey.phase === "onboard" && cabin ? (
         <div className="transit-cabin-layout">
           <section className="transit-cabin">
-            <header><div><span>Салон</span><h2>{vehicle?.fleetNumber ?? "Транспорт"}</h2></div><strong>{cabin.totalPassengerCount} пассажиров · {cabin.crowdingPercent}%</strong></header>
+            <header>
+              <div><span>Салон</span><h2>{vehicle?.fleetNumber ?? "Транспорт"}</h2></div>
+              <strong>{cabin.totalPassengerCount} пассажиров · {cabin.crowdingPercent}%</strong>
+            </header>
             <div className="seat-grid" aria-label="Места в салоне">
               {cabin.seats.map((seat) => (
                 <button
@@ -88,7 +144,7 @@ export function TransitJourneyScreen({
             <div className="cabin-actions">
               {journey.seatId ? <button type="button" onClick={onStand}>Встать</button> : <span>Ты стоишь</span>}
               <button type="button" className="primary-button" onClick={onAdvance}>До следующей остановки</button>
-              <button type="button" onClick={onSkip}>Промотать поездку</button>
+              <button type="button" onClick={onSkip}>Промотать остаток</button>
             </div>
           </section>
 

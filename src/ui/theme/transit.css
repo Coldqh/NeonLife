@@ -189,3 +189,23 @@
   .transit-passengers article { grid-template-columns: 44px minmax(0, 1fr); }
   .transit-passengers article > div { grid-column: 2; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+.transit-approach {
+  width: min(700px, 100%);
+  margin: 26px auto 0;
+  padding: 22px;
+  border: 1px solid var(--nl-line);
+  border-radius: var(--nl-radius);
+  background: var(--nl-surface);
+  text-align: center;
+}
+.transit-approach > span { display: block; margin-top: 16px; color: var(--nl-accent); font-size: 13px; line-height: 18px; }
+.transit-approach h2 { margin-top: 3px; font-size: 22px; line-height: 28px; }
+.transit-approach p { margin-top: 6px; color: var(--nl-muted); }
+.transit-approach__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 18px; }
+.text-button { min-height: 40px; padding: 0 12px; background: transparent; color: var(--nl-muted); }
+
+@media (max-width: 560px) {
+  .transit-approach__actions { display: grid; }
+  .transit-scene { padding-top: max(18px, calc(env(safe-area-inset-top) + 10px)); }
+}

@@ -18,6 +18,7 @@ import {
   approachLocalBuilding,
   approachPhysicalVehicle,
   boardTransitVehicle,
+  cancelTransitJourney,
   drivePhysicalVehicleToLocation,
   enterLocalBuilding,
   enterPhysicalVehicle,
@@ -30,6 +31,8 @@ import {
   standInTransit,
   takeTransitSeat,
   travelToLocation,
+  waitTransitJourney,
+  walkTransitJourney,
   usePhoneInTransit,
   yieldTransitSeat
 } from "../gameplay/life/lifeSimulation";
@@ -117,6 +120,9 @@ export default function App() {
   const transitOverlay = session.transit.player.journey ? (
     <TransitJourneyScreen
       session={session}
+      onWalk={(minutes) => setSession((current) => walkTransitJourney(current, minutes))}
+      onWait={(minutes) => setSession((current) => waitTransitJourney(current, minutes))}
+      onCancel={() => setSession((current) => cancelTransitJourney(current))}
       onBoard={() => setSession((current) => boardTransitVehicle(current))}
       onTakeSeat={(seatId) => setSession((current) => takeTransitSeat(current, seatId))}
       onStand={() => setSession((current) => standInTransit(current))}
