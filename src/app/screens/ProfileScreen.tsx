@@ -7,74 +7,128 @@ function housingTypeLabel(type: GameSession["life"]["housing"]["type"]): string 
   return "Квартира";
 }
 
-function positionLabel(session: GameSession): string {
-  const position = session.localScene.playerPosition;
-  if (position.state === "inside") return "Внутри здания";
-  if (position.state === "vehicle") return "В машине";
-  if (position.state === "in-transit") return "В общественном транспорте";
-  return "На улице";
+function formatDate(timestamp: number): string {
+  if (!Number.isFinite(timestamp)) return "дата неизвестна";
+  return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", year: "numeric" }).format(new Date(timestamp));
 }
 
-export function ProfileScreen({ session, onLeaveBuilding, onLeaveVehicle }: { session: GameSession; onLeaveBuilding: () => void; onLeaveVehicle: () => void }) {
+function livedDays(session: GameSession): number {
+  const createdAt = new Date(session.world.meta.createdAt).getTime();
+  if (!Number.isFinite(createdAt)) return 1;
+  return Math.max(1, Math.floor((session.timestamp - createdAt) / 86_400_000) + 1);
+}
+
+export function ProfileScreen({ session }: { session: GameSession }) {
   const player = session.player;
-  const location = currentLocation(session);
-  const home = session.world.locations.find((item) => item.id === session.life.housing.locationId);
+  const homeLocation = session.world.locations.find((item) => item.id === session.life.housing.locationId);
+  const homeBuilding = session.urban.buildings.find((building) => building.anchorLocationId === homeLocation?.id);
+  const activeLocation = currentLocation(session);
+  const activeBuilding = session.localScene.playerPosition.buildingId
+    ? session.urban.buildings.find((building) => building.id === session.localScene.playerPosition.buildingId)
+    : undefined;
+  const activeSector = session.metropolitan.sectors.find((sector) => sector.id === session.localScene.playerPosition.sectorId);
   const ownedVehicle = session.vehicles.vehicles.find((item) => item.id === session.vehicles.player.ownedVehicleIds[0]);
-  const currentVehicle = session.vehicles.vehicles.find((item) => item.id === session.vehicles.player.currentVehicleId);
-  const position = session.localScene.playerPosition;
-  const sector = session.metropolitan.sectors.find((item) => item.id === position.sectorId);
-  const building = position.buildingId ? session.urban.buildings.find((item) => item.id === position.buildingId) : undefined;
+  const occupation = playerOccupation(session);
+  const playerCases = session.government.cases.filter((item) => item.suspectResidentIds?.includes(player.id));
+  const completedWork = session.jobs.courier.completedDeliveries;
+  const failedWork = session.jobs.courier.failedDeliveries;
+  const days = livedDays(session);
 
   return (
     <section className="screen profile-screen" aria-labelledby="profile-title">
-      <header className="screen-heading profile-screen__heading">
-        <div><span>Персонаж</span><h1 id="profile-title">Профиль</h1><p>Только реальные данные текущего мира.</p></div>
+      <header className="profile-heading">
+        <div>
+          <span>Личное досье</span>
+          <h1 id="profile-title">Профиль</h1>
+        </div>
+        <p>Факты, имущество и история текущего персонажа.</p>
       </header>
 
       <article className="profile-hero">
-        <img src={asset("player-portrait.webp")} alt={`Портрет ${player.name}`} />
-        <div className="profile-hero__identity">
-          <span>{playerOccupation(session)}</span>
+        <div className="profile-portrait">
+          <img src={asset("player-portrait.webp")} alt={`Портрет ${player.name}`} />
+          <span aria-hidden="true" />
+        </div>
+        <div className="profile-identity">
+          <span>{occupation}</span>
           <h2>{player.name}</h2>
           <p>{player.age} лет · {player.origin}</p>
-          <strong><i />{currentActivity(session)}</strong>
+          <strong>{currentActivity(session)}</strong>
         </div>
-        <div className="profile-hero__place">
-          <span>Сейчас</span>
-          <strong>{location?.name ?? sector?.code ?? player.sector}</strong>
-          <p>{districtName(session)} · {sector?.code ?? "сектор не определён"}</p>
+        <div className="profile-location">
+          <span>Район</span>
+          <strong>{districtName(session)}</strong>
+          <p>{activeBuilding?.addressCode ?? activeLocation?.name ?? activeSector?.code ?? "Текущее место не определено"}</p>
         </div>
       </article>
 
-      <section className="profile-grid" aria-label="Факты персонажа">
-        <article className="profile-card">
-          <header><span>Текущее положение</span><strong>{positionLabel(session)}</strong></header>
-          <dl>
-            <div><dt>Место</dt><dd>{building?.addressCode ?? location?.name ?? "Улица"}</dd></div>
-            {building ? <div><dt>Этаж</dt><dd>{position.floor ?? 1}</dd></div> : null}
-            {currentVehicle ? <div><dt>Машина</dt><dd>{currentVehicle.modelName} · {currentVehicle.plate}</dd></div> : null}
-          </dl>
-          {building ? <button type="button" onClick={onLeaveBuilding}>Выйти из здания</button> : null}
-          {currentVehicle ? <button type="button" onClick={onLeaveVehicle}>Выйти из машины</button> : null}
-        </article>
+      <section className="profile-section" aria-labelledby="profile-life-title">
+        <header>
+          <div>
+            <span>Текущая жизнь</span>
+            <h2 id="profile-life-title">Основа</h2>
+          </div>
+        </header>
+        <div className="profile-facts">
+          <article>
+            <span>Работа</span>
+            <strong>{occupation}</strong>
+            <p>{occupation === "Без постоянной работы" ? "Постоянный работодатель отсутствует" : "Текущая занятость персонажа"}</p>
+          </article>
+          <article>
+            <span>Жильё</span>
+            <strong>{homeBuilding?.addressCode ?? homeLocation?.name ?? "Нет адреса"}</strong>
+            <p>{housingTypeLabel(session.life.housing.type)} · оплачено ещё {player.housingDaysLeft} дн.</p>
+          </article>
+          <article>
+            <span>Статус</span>
+            <strong>{currentActivity(session)}</strong>
+            <p>{districtName(session)} · {session.world.city.name}</p>
+          </article>
+        </div>
+      </section>
 
-        <article className="profile-card">
-          <header><span>Жильё</span><strong>{home?.name ?? "Нет постоянного адреса"}</strong></header>
-          <dl>
-            <div><dt>Тип</dt><dd>{housingTypeLabel(session.life.housing.type)}</dd></div>
-            <div><dt>Оплачено</dt><dd>{player.housingDaysLeft} дн.</dd></div>
-            <div><dt>Район</dt><dd>{home ? districtName(session, home.districtId) : "—"}</dd></div>
-          </dl>
-        </article>
+      <section className="profile-section" aria-labelledby="profile-property-title">
+        <header>
+          <div>
+            <span>Собственность</span>
+            <h2 id="profile-property-title">Имущество</h2>
+          </div>
+        </header>
+        <div className="property-list">
+          <article>
+            <i aria-hidden="true">⌂</i>
+            <div>
+              <strong>{homeLocation?.name ?? "Жильё не назначено"}</strong>
+              <span>{homeBuilding?.addressCode ?? housingTypeLabel(session.life.housing.type)}</span>
+            </div>
+            <em>{player.housingDaysLeft > 0 ? "Активно" : "Просрочено"}</em>
+          </article>
+          <article>
+            <i aria-hidden="true">◇</i>
+            <div>
+              <strong>{ownedVehicle?.modelName ?? "Личной машины нет"}</strong>
+              <span>{ownedVehicle ? `${ownedVehicle.plate} · ${ownedVehicle.state === "parked" ? "припаркована" : ownedVehicle.state === "moving" ? "в движении" : "недоступна"}` : "Транспорт не зарегистрирован"}</span>
+            </div>
+            <em>{ownedVehicle ? `${Math.round(ownedVehicle.condition)}%` : "—"}</em>
+          </article>
+        </div>
+      </section>
 
-        <article className="profile-card profile-card--wide">
-          <header><span>Личный транспорт</span><strong>{ownedVehicle?.modelName ?? "Нет машины"}</strong></header>
-          <dl>
-            <div><dt>Номер</dt><dd>{ownedVehicle?.plate ?? "—"}</dd></div>
-            <div><dt>Ключи</dt><dd>{session.vehicles.player.keyVehicleIds.length}</dd></div>
-            <div><dt>Статус</dt><dd>{ownedVehicle ? (ownedVehicle.state === "parked" ? "Припаркована" : ownedVehicle.state === "moving" ? "В движении" : "Недоступна") : "—"}</dd></div>
-          </dl>
-        </article>
+      <section className="profile-section" aria-labelledby="profile-history-title">
+        <header>
+          <div>
+            <span>История мира</span>
+            <h2 id="profile-history-title">След</h2>
+          </div>
+        </header>
+        <div className="profile-history">
+          <article><strong>{days}</strong><span>дней прожито</span></article>
+          <article><strong>{completedWork}</strong><span>работ завершено</span></article>
+          <article><strong>{failedWork}</strong><span>работ сорвано</span></article>
+          <article><strong>{playerCases.length}</strong><span>дел связано</span></article>
+        </div>
+        <p className="profile-created">Мир создан {formatDate(new Date(session.world.meta.createdAt).getTime())}</p>
       </section>
     </section>
   );

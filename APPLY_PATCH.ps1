@@ -60,4 +60,4 @@ if (Test-Path $deleteList) {
     }
 }
 
-Write-Host "NEON LIFE v0.32.0 PERSISTENT STREET TOPOLOGY applied to $ProjectRoot"
+Write-Host "NEON LIFE v0.32.1 MAP PROFILE TOPOLOGY RECOVERY applied to $ProjectRoot"

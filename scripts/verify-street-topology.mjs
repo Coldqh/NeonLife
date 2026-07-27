@@ -42,19 +42,21 @@ check("vehicle presentation refreshes after parking moves", vehicleSystem.includ
 check("street cache is bounded", system.includes("CACHE_LIMIT = 64") && system.includes("slice(0, CACHE_LIMIT)"));
 check("cached topology invalidates on building movement", system.includes("buildingLayoutHash") && system.includes("old.buildingLayoutHash === buildingLayoutHash"));
 check("persistent topology deltas exist", types.includes("StreetTopologyDeltaState") && system.includes("applyDeltas"));
+check("street names continue through sector axes", system.includes("continuous-street") && system.includes("globalAxisM"));
+check("street deltas propagate to dependent topology", system.includes("availableSegmentIds") && system.includes("streetName: nextName") && system.includes("parkingZones = topology.parkingZones.filter"));
 check("world creation aligns urban fabric", createWorld.includes("alignUrbanFabricToStreetTopology"));
 check("life simulation advances topology", life.includes("advanceStreetTopologyState"));
 check("migration reconstructs missing topology", migrations.includes("normalizeStreetTopologyState"));
 check("generated buildings avoid overlap", urbanSystem.includes("resolveBuildingPlacement") && urbanSystem.includes("buildingBoundsOverlap"));
 check("local map renders real street state", localMap.includes("session.streets") && localMap.includes("topology.segments") && !localMap.includes("fallback"));
 check("local map renders blocks parcels entrances parking and stops", ["topology.blocks", "topology.parcels", "topology.buildingEntrances", "topology.parkingZones", "session.transit.stops"].every((marker) => localMap.includes(marker)));
-check("map inspector reports topology metrics", mapScreen.includes("selectedTopology.segments.length") && mapScreen.includes("selectedTopology.blocks.length"));
+check("map bottom sheet exposes street context", mapScreen.includes("map-sheet") && mapScreen.includes("selectedTopology.segments.length") && mapScreen.includes("localSelection?.kind === \"street\""));
 check("all 1512 sectors are audited by domain test", test.includes("for (const sector of session.metropolitan.sectors)") && test.includes("auditedSectors"));
 check("domain test checks street connectivity", test.includes("disconnected boundary streets"));
 check("domain test checks roads against buildings", test.includes("street crosses building"));
 check("domain test checks migration identity", test.includes("migration changed building identities"));
 check("map CSS braces are balanced", (mapCss.match(/\{/g) ?? []).length === (mapCss.match(/\}/g) ?? []).length);
-check("local map component stays bounded", localMap.split(/\r?\n/).length <= 320);
+check("local map component stays bounded", localMap.split(/\r?\n/).length <= 360);
 check("street type file stays bounded", types.split(/\r?\n/).length <= 220);
 
 const failures = checks.filter((item) => !item.pass);

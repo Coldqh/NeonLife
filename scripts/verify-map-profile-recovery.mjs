@@ -1,0 +1,49 @@
+import fs from "node:fs";
+import path from "node:path";
+
+const root = process.cwd();
+const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
+const checks = [];
+const check = (name, pass) => checks.push({ name, pass: Boolean(pass) });
+
+const profile = read("src/app/screens/ProfileScreen.tsx");
+const mapScreen = read("src/app/screens/MapScreen.tsx");
+const localMap = read("src/app/map/LocalSectorMap.tsx");
+const mapCss = read("src/ui/theme/map.css");
+const screenCss = read("src/ui/theme/screens.css");
+const app = read("src/app/App.tsx");
+const streets = read("src/simulation/streets/streetTopologySystem.ts");
+const life = read("src/gameplay/life/lifeSimulation.ts");
+
+check("profile is a dossier, not a position debugger", profile.includes("Личное досье") && profile.includes("Собственность") && profile.includes("История мира"));
+check("profile removes spatial exit actions", !profile.includes("onLeaveBuilding") && !profile.includes("onLeaveVehicle") && !profile.includes("Количество ключей"));
+check("profile uses only real session data", !profile.includes("Псевдо") && !profile.includes("fake") && profile.includes("session.jobs.courier.completedDeliveries"));
+check("app no longer wires profile exit actions", app.includes("<ProfileScreen session={session} />") && !app.includes("onLeaveBuilding={()"));
+check("map is a full stage", mapScreen.includes("map-stage") && mapCss.includes('.game-shell[data-screen="map"] .game-shell__content { overflow: hidden; }'));
+check("map uses city district sector breadcrumb", ["Город", "openDistrict", "openSector", "map-breadcrumb"].every((marker) => mapScreen.includes(marker)));
+check("map inspector became bottom sheet", mapScreen.includes("map-sheet") && !mapScreen.includes("map-inspector") && !mapCss.includes(".map-inspector"));
+check("layers moved to dedicated overlay", mapScreen.includes("map-layer-overlay") && mapScreen.includes("setLayersOpen(true)"));
+check("local map selects buildings", localMap.includes('kind: "building"') && localMap.includes("onSelect({ kind: \"building\", building })"));
+check("local map selects stops", localMap.includes('kind: "stop"') && localMap.includes("onSelect({ kind: \"stop\", stop })"));
+check("local map selects streets", localMap.includes('kind: "street"') && localMap.includes("onSelect({ kind: \"street\", segment })"));
+check("local map selects arbitrary points", localMap.includes('kind: "point"') && localMap.includes("localCoordinates"));
+check("local map labels main streets", localMap.includes("local-map__street-label") && mapCss.includes(".local-map__street-label"));
+check("route card is compact and honest", mapScreen.includes("route-card__line") && mapScreen.includes("Маршрут к этой точке сейчас недоступен"));
+check("global map click creates explicit point selection", mapScreen.includes('setLocalSelection({ kind: "point"') && !mapScreen.includes('localSelection?.kind === "point" || selectedPoint'));
+check("continuous names use global axes", streets.includes("continuous-street") && streets.includes("globalAxisM"));
+check("topology generator version changed", streets.includes("TOPOLOGY_VERSION = 2"));
+check("street rename updates parcel addresses", streets.includes("streetName: nextName") && streets.includes("addressCode: `${nextName}"));
+check("street removal removes dependent topology", streets.includes("availableSegmentIds") && streets.includes("buildingEntrances = topology.buildingEntrances.filter") && streets.includes("parkingZones = topology.parkingZones.filter"));
+check("life simulation detects topology geometry", life.includes("streetGeometryChanged") && life.includes("geometryChanged"));
+check("parking snap is dirty driven", life.includes("parkingNetworkChanged") && life.includes("? snapPhysicalVehicleParkingToStreetTopology"));
+check("transit snap is dirty driven", life.includes("transitNetworkChanged") && life.includes("? snapTransitStopsToStreetTopology"));
+check("map CSS braces are balanced", (mapCss.match(/\{/g) ?? []).length === (mapCss.match(/\}/g) ?? []).length);
+check("screen CSS braces are balanced", (screenCss.match(/\{/g) ?? []).length === (screenCss.match(/\}/g) ?? []).length);
+check("profile component stays bounded", profile.split(/\r?\n/).length <= 190);
+check("map screen stays bounded", mapScreen.split(/\r?\n/).length <= 430);
+check("local map stays bounded", localMap.split(/\r?\n/).length <= 360);
+
+const failures = checks.filter((item) => !item.pass);
+for (const item of checks) console.log(`${item.pass ? "PASS" : "FAIL"} ${item.name}`);
+console.log(`\n${checks.length - failures.length}/${checks.length} map/profile/topology recovery invariants passed`);
+if (failures.length) process.exit(1);

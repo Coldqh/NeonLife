@@ -1,18 +1,19 @@
 {
   "name": "neon-life",
   "private": true,
-  "version": "0.32.0",
+  "version": "0.32.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json --pretty false && tsc --noEmit -p tsconfig.node.json --pretty false",
-    "test:ui": "npm run test:ui:architecture && npm run test:ui:recovery",
+    "test:ui": "npm run test:ui:architecture && npm run test:ui:recovery && npm run test:recovery",
     "test:ui:architecture": "node scripts/verify-ui-architecture.mjs",
     "test:ui:recovery": "node scripts/verify-ui-recovery.mjs",
     "test:map": "node scripts/verify-map-foundation.mjs",
-    "test:streets": "node scripts/verify-street-topology.mjs"
+    "test:streets": "node scripts/verify-street-topology.mjs",
+    "test:recovery": "node scripts/verify-map-profile-recovery.mjs"
   },
   "dependencies": {
     "react": "18.3.1",

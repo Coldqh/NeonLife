@@ -22,7 +22,7 @@ import type {
   StreetTopologyTotalsState
 } from "./types";
 
-const TOPOLOGY_VERSION = 1;
+const TOPOLOGY_VERSION = 2;
 const CACHE_LIMIT = 64;
 const CANDIDATE_OFFSETS = [125, 250, 375, 500, 625, 750, 875] as const;
 const STREET_NAMES = [
@@ -145,9 +145,18 @@ function roadClassFor(offsetM: number, pattern: StreetPattern, boundaryConnected
   return "local";
 }
 
-function lineName(catalog: SectorStreetCatalogState, orientation: "horizontal" | "vertical", offsetM: number): string {
-  const index = Math.abs(Math.round(offsetM / 125) + (orientation === "vertical" ? 3 : 0)) % catalog.streetNamePool.length;
-  return catalog.streetNamePool[index];
+function lineName(
+  citySeed: string,
+  catalog: SectorStreetCatalogState,
+  sector: MetropolitanSectorState,
+  orientation: "horizontal" | "vertical",
+  offsetM: number
+): string {
+  const globalAxisM = Math.round((orientation === "horizontal" ? sector.bounds.yM : sector.bounds.xM) + offsetM);
+  const rng = new SeededRandom(`${citySeed}:continuous-street:${orientation}:${globalAxisM}:v${TOPOLOGY_VERSION}`);
+  const base = STREET_NAMES[rng.integer(0, STREET_NAMES.length - 1)];
+  if (catalog.pattern === "industrial-spine" && rng.chance(.42)) return base.replace("улица", "тракт").replace("аллея", "проезд");
+  return base;
 }
 
 function materializeIntersections(
@@ -180,6 +189,7 @@ function materializeIntersections(
 }
 
 function materializeSegments(
+  citySeed: string,
   sector: MetropolitanSectorState,
   catalog: SectorStreetCatalogState,
   intersections: StreetIntersectionState[],
@@ -198,7 +208,7 @@ function materializeSegments(
     const edgeConnection = from.kind === "sector-gate" || to.kind === "sector-gate";
     const roadClass = roadClassFor(fixed, catalog.pattern, boundaryOffsets.has(fixed) || edgeConnection);
     const metrics = classMetrics(roadClass);
-    const name = lineName(catalog, orientation, fixed);
+    const name = lineName(citySeed, catalog, sector, orientation, fixed);
     segments.push({
       id: createStableEntityId("street-segment", `${catalog.seed}:${orientation}:${fixed}:${start}:${end}`),
       sectorId: sector.id,
@@ -498,10 +508,34 @@ function applyDeltas(topology: MaterializedSectorStreetTopologyState, state: Str
   if (!deltas.length) return topology;
   const closed = new Set(deltas.filter((delta) => delta.kind === "closed-segment" || delta.kind === "removed-segment").map((delta) => delta.targetId));
   const renamed = new Map(deltas.filter((delta) => delta.kind === "renamed-street" && delta.textValue).map((delta) => [delta.targetId, delta.textValue!]));
-  return {
-    ...topology,
-    segments: topology.segments.filter((segment) => !closed.has(segment.id)).map((segment) => renamed.has(segment.id) ? { ...segment, name: renamed.get(segment.id)! } : segment)
-  };
+  const segments = topology.segments
+    .filter((segment) => !closed.has(segment.id))
+    .map((segment) => renamed.has(segment.id) ? { ...segment, name: renamed.get(segment.id)! } : segment);
+  const availableSegmentIds = new Set(segments.map((segment) => segment.id));
+  const parcels = topology.parcels
+    .filter((parcel) => availableSegmentIds.has(parcel.streetSegmentId))
+    .map((parcel) => {
+      const nextName = renamed.get(parcel.streetSegmentId);
+      if (!nextName) return parcel;
+      const comma = parcel.addressCode.indexOf(",");
+      return {
+        ...parcel,
+        streetName: nextName,
+        addressCode: `${nextName}${comma >= 0 ? parcel.addressCode.slice(comma) : `, ${parcel.streetNumber}`}`
+      };
+    });
+  const parcelIds = new Set(parcels.map((parcel) => parcel.id));
+  const buildingEntrances = topology.buildingEntrances.filter((entrance) => availableSegmentIds.has(entrance.streetSegmentId) && parcelIds.has(entrance.parcelId));
+  const parkingZones = topology.parkingZones.filter((zone) => availableSegmentIds.has(zone.streetSegmentId));
+  const blocks = topology.blocks.map((block) => ({ ...block, parcelIds: block.parcelIds.filter((id) => parcelIds.has(id)) }));
+  const checksum = hashText([
+    topology.catalogSeed,
+    segments.map((segment) => `${segment.id}:${segment.name}`).join("|"),
+    parcels.map((parcel) => `${parcel.id}:${parcel.addressCode}`).join("|"),
+    buildingEntrances.map((entrance) => entrance.id).join("|"),
+    parkingZones.map((zone) => zone.id).join("|")
+  ].join("::"));
+  return { ...topology, segments, parcels, buildingEntrances, parkingZones, blocks, checksum };
 }
 
 function buildingLayoutHash(buildings: BuildingState[]): string {
@@ -520,7 +554,7 @@ function materializeTopology(state: StreetTopologyState, input: StreetTopologyIn
   const yLines = [...new Set([0, sector.bounds.heightM, ...baseOffsets, ...catalog.edgePorts.filter((port) => port.edge === "east" || port.edge === "west").map((port) => port.offsetM)])].sort((left, right) => left - right);
   const intersections = materializeIntersections(sector, catalog, xLines, yLines);
   const buildings = input.urban.buildings.filter((building) => building.sectorId === sectorId);
-  const segments = removeBuildingConflicts(materializeSegments(sector, catalog, intersections, xLines, yLines), intersections, buildings);
+  const segments = removeBuildingConflicts(materializeSegments(input.seed, sector, catalog, intersections, xLines, yLines), intersections, buildings);
   const blockData = materializeBlocksAndParcels(sector, catalog, segments, intersections, xLines, yLines, buildings);
   const parkingZones = materializeParking(sector, catalog, segments, intersections, buildings);
   const checksumSource = [catalog.seed, intersections.length, segments.map((segment) => `${segment.id}:${segment.name}`).join("|"), blockData.parcels.map((parcel) => `${parcel.id}:${parcel.addressCode}`).join("|")].join("::");

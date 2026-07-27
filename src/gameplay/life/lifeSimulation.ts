@@ -101,6 +101,32 @@ function clamp(value: number): number {
   return Math.max(0, Math.min(100, value));
 }
 
+function streetGeometryChanged(previous: GameSession["streets"], next: GameSession["streets"]): boolean {
+  if (previous.topologyVersion !== next.topologyVersion || previous.deltas.length !== next.deltas.length) return true;
+  if (previous.materializedSectors.length !== next.materializedSectors.length) return true;
+  const checksums = new Map(previous.materializedSectors.map((item) => [item.sectorId, item.checksum]));
+  return next.materializedSectors.some((item) => checksums.get(item.sectorId) !== item.checksum);
+}
+
+function urbanLayoutChanged(previous: GameSession["urban"], next: GameSession["urban"]): boolean {
+  if (previous.buildings.length !== next.buildings.length) return true;
+  const byId = new Map(previous.buildings.map((building) => [building.id, building]));
+  return next.buildings.some((building) => {
+    const old = byId.get(building.id);
+    return !old
+      || old.bounds.xM !== building.bounds.xM
+      || old.bounds.yM !== building.bounds.yM
+      || old.bounds.widthM !== building.bounds.widthM
+      || old.bounds.heightM !== building.bounds.heightM;
+  });
+}
+
+function idSetChanged<T extends { id: string }>(previous: T[], next: T[]): boolean {
+  if (previous.length !== next.length) return true;
+  const ids = new Set(previous.map((item) => item.id));
+  return next.some((item) => !ids.has(item.id));
+}
+
 function createEvent(session: GameSession, timestamp: number, category: EventCategory, title: string, detail: string | undefined, importance: 1 | 2 | 3): WorldEvent {
   return {
     id: createStableEntityId("event", `${session.world.meta.seed}:${timestamp}:${category}:${title}:${session.events.length}`),
@@ -295,8 +321,13 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     preferredSectorId: options.playerPosition?.sectorId
   };
   let streetsState = advanceStreetTopologyState(session.streets, streetInput);
-  urbanState = alignUrbanFabricToStreetTopology(urbanState, streetsState, streetInput);
-  streetsState = advanceStreetTopologyState(streetsState, { ...streetInput, urban: urbanState });
+  const layoutChanged = urbanLayoutChanged(session.urban, urbanState);
+  const requiresAddressRepair = urbanState.buildings.some((building) => !building.streetName || !building.parcelId || !building.primaryEntranceId);
+  if (layoutChanged || streetGeometryChanged(session.streets, streetsState) || requiresAddressRepair) {
+    urbanState = alignUrbanFabricToStreetTopology(urbanState, streetsState, streetInput);
+    streetsState = advanceStreetTopologyState(streetsState, { ...streetInput, urban: urbanState });
+  }
+  const geometryChanged = streetGeometryChanged(session.streets, streetsState);
   const urbanSynchronizedMetropolitan = synchronizeMetropolitanFromUrban(metropolitanAdvance.state, urbanState);
   const mobilityState = advanceMetropolitanMobilityState(session.mobility, {
     timestamp: nextTimestamp,
@@ -370,7 +401,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     mobility: mobilityState,
     playerPosition: options.playerPosition
   });
-  const vehiclesState = refreshPhysicalVehicleSpatialPresentation(snapPhysicalVehicleParkingToStreetTopology(advancePhysicalVehiclesState(session.vehicles, {
+  const advancedVehicles = advancePhysicalVehiclesState(session.vehicles, {
     timestamp: nextTimestamp,
     seed: session.world.meta.seed,
     playerId: session.player.id,
@@ -383,7 +414,12 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     population: populationState,
     organizations: dataAdvance.organizations,
     command: options.vehicleCommand
-  }), streetsState, { timestamp: nextTimestamp, seed: session.world.meta.seed, metropolitan: metropolitanState, urban: urbanState }), provisionalLocalScene.playerPosition, nextTimestamp);
+  });
+  const parkingNetworkChanged = geometryChanged || idSetChanged(session.vehicles.parkingNodes, advancedVehicles.parkingNodes);
+  const streetAlignedVehicles = parkingNetworkChanged
+    ? snapPhysicalVehicleParkingToStreetTopology(advancedVehicles, streetsState, { timestamp: nextTimestamp, seed: session.world.meta.seed, metropolitan: metropolitanState, urban: urbanState })
+    : advancedVehicles;
+  const vehiclesState = refreshPhysicalVehicleSpatialPresentation(streetAlignedVehicles, provisionalLocalScene.playerPosition, nextTimestamp);
   const crimeAdvance = advanceVehicleCrimeState(session.vehicleCrime, {
     timestamp: nextTimestamp,
     seed: session.world.meta.seed,
@@ -395,7 +431,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     organizations: dataAdvance.organizations
   });
   const crimeVehiclesState = synchronizeVehicleCrimeStatus(crimeAdvance.state, vehiclesState);
-  const transitState = snapTransitStopsToStreetTopology(advanceTransitOperationsState(session.transit, {
+  const advancedTransit = advanceTransitOperationsState(session.transit, {
     timestamp: nextTimestamp,
     seed: session.world.meta.seed,
     playerId: session.player.id,
@@ -409,7 +445,11 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     mobility: mobilityState,
     physicalVehicles: crimeVehiclesState,
     command: options.transitCommand
-  }), streetsState, { timestamp: nextTimestamp, seed: session.world.meta.seed, metropolitan: metropolitanState, urban: urbanState });
+  });
+  const transitNetworkChanged = geometryChanged || idSetChanged(session.transit.stops, advancedTransit.stops);
+  const transitState = transitNetworkChanged
+    ? snapTransitStopsToStreetTopology(advancedTransit, streetsState, { timestamp: nextTimestamp, seed: session.world.meta.seed, metropolitan: metropolitanState, urban: urbanState })
+    : advancedTransit;
   const localSceneState = advanceLocalSceneState(provisionalLocalScene, {
     timestamp: nextTimestamp,
     seed: session.world.meta.seed,

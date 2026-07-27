@@ -183,6 +183,70 @@ assert(migrated.payload.streets.catalogs.length === 1512, "migration did not bui
 assert(migrated.payload.urban.buildings.map((building) => building.id).sort().join("|") === buildingIds, "migration changed building identities");
 assert(migrated.payload.urban.buildings.every((building) => Boolean(building.addressCode)), "migration lost building addresses");
 
+// Continuous street names must survive sector borders.
+for (const sector of session.metropolitan.sectors.slice(0, 240)) {
+  const east = session.metropolitan.sectors.find((candidate) => candidate.xIndex === sector.xIndex + 1 && candidate.yIndex === sector.yIndex);
+  if (!east) continue;
+  const leftTopology = getSectorStreetTopology(session.streets, { timestamp: session.timestamp, seed, metropolitan: session.metropolitan, urban: session.urban, preferredSectorId: sector.id }, sector.id);
+  const rightTopology = getSectorStreetTopology(session.streets, { timestamp: session.timestamp, seed, metropolitan: session.metropolitan, urban: session.urban, preferredSectorId: east.id }, east.id);
+  const leftNodes = new Map(leftTopology.intersections.map((node) => [node.id, node]));
+  const rightNodes = new Map(rightTopology.intersections.map((node) => [node.id, node]));
+  const leftBoundary = leftTopology.segments.filter((segment) => {
+    const from = leftNodes.get(segment.fromIntersectionId);
+    const to = leftNodes.get(segment.toIntersectionId);
+    return Boolean(from && to && (Math.abs(from.xM - (sector.bounds.xM + sector.bounds.widthM)) < .01 || Math.abs(to.xM - (sector.bounds.xM + sector.bounds.widthM)) < .01));
+  });
+  for (const segment of leftBoundary) {
+    const from = leftNodes.get(segment.fromIntersectionId)!;
+    const to = leftNodes.get(segment.toIntersectionId)!;
+    const yM = Math.abs(from.xM - (sector.bounds.xM + sector.bounds.widthM)) < .01 ? from.yM : to.yM;
+    const match = rightTopology.segments.find((candidate) => {
+      const rightFrom = rightNodes.get(candidate.fromIntersectionId);
+      const rightTo = rightNodes.get(candidate.toIntersectionId);
+      return Boolean(rightFrom && rightTo && (
+        Math.abs(rightFrom.xM - east.bounds.xM) < .01 && Math.abs(rightFrom.yM - yM) < .01
+        || Math.abs(rightTo.xM - east.bounds.xM) < .01 && Math.abs(rightTo.yM - yM) < .01
+      ));
+    });
+    if (match) assert(match.name === segment.name, `street name changes at border ${sector.code}/${east.code}`);
+  }
+}
+
+// Renaming or removing a street must update dependent topology, not only the visible segment.
+const deltaSector = session.streets.materializedSectors.find((topology) => topology.parcels.some((parcel) => topology.segments.some((segment) => segment.id === parcel.streetSegmentId)));
+assert(deltaSector, "no topology available for delta test");
+const deltaParcel = deltaSector.parcels.find((parcel) => deltaSector.segments.some((segment) => segment.id === parcel.streetSegmentId))!;
+const renamedTopology = getSectorStreetTopology({
+  ...session.streets,
+  deltas: [...session.streets.deltas, {
+    id: "test-rename-delta",
+    sectorId: deltaSector.sectorId,
+    kind: "renamed-street",
+    targetId: deltaParcel.streetSegmentId,
+    textValue: "Проверочная улица",
+    createdAt: session.timestamp,
+    updatedAt: session.timestamp,
+    permanent: true
+  }]
+}, { timestamp: session.timestamp, seed, metropolitan: session.metropolitan, urban: session.urban, preferredSectorId: deltaSector.sectorId }, deltaSector.sectorId);
+const renamedParcel = renamedTopology.parcels.find((parcel) => parcel.id === deltaParcel.id);
+assert(renamedParcel?.streetName === "Проверочная улица" && renamedParcel.addressCode.startsWith("Проверочная улица,"), "street rename did not propagate to address");
+const removedTopology = getSectorStreetTopology({
+  ...session.streets,
+  deltas: [...session.streets.deltas, {
+    id: "test-remove-delta",
+    sectorId: deltaSector.sectorId,
+    kind: "removed-segment",
+    targetId: deltaParcel.streetSegmentId,
+    createdAt: session.timestamp,
+    updatedAt: session.timestamp,
+    permanent: true
+  }]
+}, { timestamp: session.timestamp, seed, metropolitan: session.metropolitan, urban: session.urban, preferredSectorId: deltaSector.sectorId }, deltaSector.sectorId);
+assert(!removedTopology.parcels.some((parcel) => parcel.streetSegmentId === deltaParcel.streetSegmentId), "removed street kept dependent parcels");
+assert(!removedTopology.buildingEntrances.some((entrance) => entrance.streetSegmentId === deltaParcel.streetSegmentId), "removed street kept dependent entrances");
+assert(!removedTopology.parkingZones.some((zone) => zone.streetSegmentId === deltaParcel.streetSegmentId), "removed street kept dependent parking");
+
 console.log(JSON.stringify({
   catalogs: session.streets.catalogs.length,
   materialized: session.streets.materializedSectors.length,

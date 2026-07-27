@@ -23,8 +23,6 @@ import {
   enterLocalBuilding,
   enterPhysicalVehicle,
   interactWithTransitPassenger,
-  leaveLocalBuilding,
-  leavePhysicalVehicle,
   progressLife,
   rideTransitToNextStop,
   skipTransitJourney,
@@ -149,13 +147,7 @@ export default function App() {
         overlay={transitOverlay ?? settingsOverlay}
         notice={notice ? <div className={`toast toast--${notice.tone}`} role="status">{notice.text}</div> : null}
       >
-        {screen === "profile" ? (
-          <ProfileScreen
-            session={session}
-            onLeaveBuilding={() => setSession((current) => leaveLocalBuilding(current))}
-            onLeaveVehicle={() => setSession((current) => leavePhysicalVehicle(current))}
-          />
-        ) : null}
+        {screen === "profile" ? <ProfileScreen session={session} /> : null}
         {screen === "map" ? (
           <MapScreen
             session={session}
