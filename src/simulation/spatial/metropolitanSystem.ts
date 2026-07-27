@@ -5,6 +5,7 @@ import type {
   DistrictSpatialState,
   LocationFootprintKind,
   LocationSpatialState,
+  MapDistrictState,
   MetricBounds,
   MetropolitanAdvanceInput,
   MetropolitanAdvanceResult,
@@ -54,46 +55,84 @@ function config(): MetropolitanConfig {
   };
 }
 
-function districtBounds(index: number, count: number): MetricBounds {
-  if (count <= 1) return { xM: 0, yM: 0, widthM: CITY_WIDTH_M, heightM: CITY_HEIGHT_M };
-  if (index === 0) return { xM: 0, yM: 0, widthM: 16_000, heightM: CITY_HEIGHT_M };
-  if (index === 1) return { xM: 16_000, yM: 12_000, widthM: 26_000, heightM: 24_000 };
-  if (index === 2) return { xM: 16_000, yM: 0, widthM: 26_000, heightM: 12_000 };
-  const bandHeight = CITY_HEIGHT_M / count;
-  return { xM: 0, yM: Math.floor(index * bandHeight), widthM: CITY_WIDTH_M, heightM: Math.ceil(bandHeight) };
+function sectorKey(xIndex: number, yIndex: number): string {
+  return `${xIndex}:${yIndex}`;
 }
 
-function districtForSector(xIndex: number, yIndex: number, districts: DistrictState[]): DistrictState {
-  if (districts.length <= 1) return districts[0];
-  const xM = xIndex * SECTOR_SIZE_M + SECTOR_SIZE_M / 2;
-  const yM = yIndex * SECTOR_SIZE_M + SECTOR_SIZE_M / 2;
-  if (xM < 16_000) return districts[0];
-  if (yM >= 12_000) return districts[1] ?? districts[0];
-  return districts[2] ?? districts[districts.length - 1] ?? districts[0];
+function districtSeedCells(seed: string, districts: DistrictState[], cfg: MetropolitanConfig): Array<{ districtId: string; xIndex: number; yIndex: number }> {
+  if (!districts.length) throw new Error("Metropolitan generation requires at least one district");
+  const rng = new SeededRandom(`${seed}:administrative-district-seeds:v2`);
+  const candidates = Array.from({ length: cfg.sectorsHigh }, (_, yIndex) =>
+    Array.from({ length: cfg.sectorsWide }, (_, xIndex) => ({ xIndex, yIndex }))
+  ).flat();
+  const selected: Array<{ districtId: string; xIndex: number; yIndex: number }> = [];
+  for (const district of districts) {
+    if (!selected.length) {
+      const first = candidates[rng.integer(0, candidates.length - 1)];
+      selected.push({ districtId: district.id, ...first });
+      continue;
+    }
+    let best = candidates[0];
+    let bestScore = -Infinity;
+    for (const candidate of candidates) {
+      const minimumDistance = Math.min(...selected.map((item) => Math.hypot(candidate.xIndex - item.xIndex, candidate.yIndex - item.yIndex)));
+      const edgePenalty = candidate.xIndex === 0 || candidate.yIndex === 0 || candidate.xIndex === cfg.sectorsWide - 1 || candidate.yIndex === cfg.sectorsHigh - 1 ? 1.2 : 0;
+      const score = minimumDistance - edgePenalty + new SeededRandom(`${seed}:district-seed-score:${district.id}:${candidate.xIndex}:${candidate.yIndex}`).next() * 0.35;
+      if (score > bestScore) {
+        bestScore = score;
+        best = candidate;
+      }
+    }
+    selected.push({ districtId: district.id, ...best });
+  }
+  return selected;
+}
+
+function administrativeDistrictAssignments(seed: string, districts: DistrictState[], cfg: MetropolitanConfig): Map<string, DistrictState> {
+  const seeds = districtSeedCells(seed, districts, cfg);
+  const districtById = new Map(districts.map((district) => [district.id, district]));
+  const assignments = new Map<string, DistrictState>();
+  for (let yIndex = 0; yIndex < cfg.sectorsHigh; yIndex += 1) {
+    for (let xIndex = 0; xIndex < cfg.sectorsWide; xIndex += 1) {
+      const nearest = [...seeds].sort((left, right) => {
+        const leftDistance = (xIndex - left.xIndex) ** 2 + (yIndex - left.yIndex) ** 2;
+        const rightDistance = (xIndex - right.xIndex) ** 2 + (yIndex - right.yIndex) ** 2;
+        return leftDistance - rightDistance || left.districtId.localeCompare(right.districtId);
+      })[0];
+      assignments.set(sectorKey(xIndex, yIndex), districtById.get(nearest.districtId) ?? districts[0]);
+    }
+  }
+  return assignments;
+}
+
+function weightedLandUse(rng: SeededRandom, weights: Array<[SectorLandUse, number]>): SectorLandUse {
+  const total = weights.reduce((sum, [, weight]) => sum + Math.max(0, weight), 0);
+  let cursor = rng.next() * Math.max(1, total);
+  for (const [landUse, weight] of weights) {
+    cursor -= Math.max(0, weight);
+    if (cursor <= 0) return landUse;
+  }
+  return weights[weights.length - 1]?.[0] ?? "mixed";
 }
 
 function landUseFor(seed: string, district: DistrictState, xIndex: number, yIndex: number, districtIndex: number): SectorLandUse {
   const rng = new SeededRandom(`${seed}:sector-land:${district.id}:${xIndex}:${yIndex}`);
   const edge = xIndex === 0 || yIndex === 0 || xIndex === Math.ceil(CITY_WIDTH_M / SECTOR_SIZE_M) - 1 || yIndex === Math.ceil(CITY_HEIGHT_M / SECTOR_SIZE_M) - 1;
-  if (edge && rng.chance(0.36)) return "vacant";
-  if ((xIndex + yIndex) % 13 === 0) return "transport";
-  if ((xIndex * 3 + yIndex) % 29 === 0) return "utility";
-  if (districtIndex === 0) {
-    if (rng.chance(0.54)) return "residential";
-    if (rng.chance(0.52)) return "mixed";
-    if (rng.chance(0.48)) return "commercial";
-    return "industrial";
-  }
-  if (districtIndex === 1) {
-    if (rng.chance(0.56)) return "industrial";
-    if (rng.chance(0.5)) return "mixed";
-    if (rng.chance(0.42)) return "transport";
-    return "residential";
-  }
-  if (rng.chance(0.48)) return "corporate";
-  if (rng.chance(0.45)) return "commercial";
-  if (rng.chance(0.45)) return "residential";
-  return "civic";
+  if (edge && rng.chance(0.22)) return "vacant";
+  if ((xIndex * 7 + yIndex * 11 + districtIndex) % 41 === 0) return "transport";
+  if ((xIndex * 13 + yIndex * 5 + districtIndex) % 67 === 0) return "utility";
+  const industrialBias = district.pollution * 0.9 + (100 - district.costOfLiving) * 0.3;
+  const corporateBias = district.corporateInfluence + district.costOfLiving * 0.55;
+  const residentialBias = 82 + (100 - district.pollution) * 0.3;
+  return weightedLandUse(rng, [
+    ["residential", residentialBias],
+    ["mixed", 94],
+    ["commercial", 44 + district.employmentRate * 0.45],
+    ["industrial", 20 + industrialBias],
+    ["corporate", 8 + corporateBias * 0.55],
+    ["civic", 18 + district.governmentInfluence * 0.5],
+    ["transport", 10 + district.infrastructure * 0.2]
+  ]);
 }
 
 function densityWeight(landUse: SectorLandUse, district: DistrictState, xIndex: number, yIndex: number): number {
@@ -108,12 +147,10 @@ function densityWeight(landUse: SectorLandUse, district: DistrictState, xIndex: 
     utility: 0.07,
     vacant: 0.025
   };
-  const centerX = district.code.includes("TIER") ? 34 : district.code.includes("RING") ? 28 : 8;
-  const centerY = district.code.includes("TIER") ? 6 : district.code.includes("RING") ? 24 : 18;
-  const distance = Math.hypot(xIndex + 0.5 - centerX, yIndex + 0.5 - centerY);
-  const centerBoost = Math.max(0.35, 1.45 - distance / 32);
-  const verticality = 0.75 + district.costOfLiving / 110 + district.infrastructure / 180;
-  return useWeight[landUse] * centerBoost * verticality;
+  const distance = Math.hypot(xIndex + 0.5 - CITY_WIDTH_M / SECTOR_SIZE_M / 2, yIndex + 0.5 - CITY_HEIGHT_M / SECTOR_SIZE_M / 2);
+  const centerBoost = Math.max(0.62, 1.32 - distance / 55);
+  const verticality = 0.75 + district.costOfLiving / 110 + district.corporateInfluence / 190;
+  return Math.max(0.001, useWeight[landUse] * centerBoost * verticality);
 }
 
 function buildingEstimate(landUse: SectorLandUse, densityPerKm2: number, rng: SeededRandom): number {
@@ -165,9 +202,10 @@ function assignPopulation(sectors: MetropolitanSectorState[], districts: Distric
 function createSectors(seed: string, timestamp: number, districts: DistrictState[], represented: Record<string, number>): MetropolitanSectorState[] {
   const cfg = config();
   const sectors: MetropolitanSectorState[] = [];
+  const assignments = administrativeDistrictAssignments(seed, districts, cfg);
   for (let yIndex = 0; yIndex < cfg.sectorsHigh; yIndex += 1) {
     for (let xIndex = 0; xIndex < cfg.sectorsWide; xIndex += 1) {
-      const district = districtForSector(xIndex, yIndex, districts);
+      const district = assignments.get(sectorKey(xIndex, yIndex)) ?? districts[0];
       const districtIndex = Math.max(0, districts.findIndex((item) => item.id === district.id));
       const landUse = landUseFor(seed, district, xIndex, yIndex, districtIndex);
       const sectorSeed = `${seed}:metro:${cfg.seedVersion}:${xIndex}:${yIndex}`;
@@ -181,6 +219,7 @@ function createSectors(seed: string, timestamp: number, districts: DistrictState
         yIndex,
         bounds: { xM: xIndex * cfg.sectorSizeM, yM: yIndex * cfg.sectorSizeM, widthM: cfg.sectorSizeM, heightM: cfg.sectorSizeM },
         districtId: district.id,
+        mapDistrictId: "",
         seed: sectorSeed,
         representedPopulation: 0,
         representedHouseholds: 0,
@@ -201,6 +240,193 @@ function createSectors(seed: string, timestamp: number, districts: DistrictState
     }
   }
   return assignPopulation(sectors, districts, represented);
+}
+
+
+const MAP_DISTRICT_PREFIXES = [
+  "NEON", "ASH", "GLASS", "GHOST", "IRON", "LOWLIGHT", "EMBER", "SILT", "CROWN", "STATIC", "BLACK", "COPPER", "VOID", "RED", "NORTH", "SOUTH"
+] as const;
+const MAP_DISTRICT_SUFFIXES = [
+  "WARD", "QUAY", "TRACE", "HEIGHTS", "BLOCKS", "MARKET", "YARDS", "GATE", "ROW", "CROSS", "TERRACE", "BELT", "ARC", "COMMON", "DOCKS", "ARRAY"
+] as const;
+
+function boundsForSectors(sectors: MetropolitanSectorState[]): MetricBounds {
+  const cfg = config();
+  if (!sectors.length) return { xM: 0, yM: 0, widthM: cfg.sectorSizeM, heightM: cfg.sectorSizeM };
+  const minX = Math.min(...sectors.map((sector) => sector.bounds.xM));
+  const minY = Math.min(...sectors.map((sector) => sector.bounds.yM));
+  const maxX = Math.max(...sectors.map((sector) => sector.bounds.xM + sector.bounds.widthM));
+  const maxY = Math.max(...sectors.map((sector) => sector.bounds.yM + sector.bounds.heightM));
+  return { xM: minX, yM: minY, widthM: maxX - minX, heightM: maxY - minY };
+}
+
+function dominantLandUseFor(sectors: MetropolitanSectorState[]): SectorLandUse {
+  const counts = new Map<SectorLandUse, number>();
+  for (const sector of sectors) counts.set(sector.landUse, (counts.get(sector.landUse) ?? 0) + 1);
+  return [...counts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] ?? "mixed";
+}
+
+function neighborhoodCounts(sectors: MetropolitanSectorState[], districts: DistrictState[]): Map<string, number> {
+  const localCounts = new Map(districts.map((district) => [district.id, sectors.filter((sector) => sector.districtId === district.id).length]));
+  const maximum = Math.max(districts.length, districts.length * 6);
+  const target = Math.max(districts.length, Math.min(maximum, Math.round(sectors.length / 126)));
+  const base = target >= districts.length * 2 ? 2 : 1;
+  const counts = new Map(districts.map((district) => [district.id, localCounts.get(district.id) ? base : 0]));
+  while ([...counts.values()].reduce((sum, value) => sum + value, 0) < target) {
+    const candidate = districts
+      .filter((district) => (counts.get(district.id) ?? 0) < 6 && (localCounts.get(district.id) ?? 0) > 0)
+      .sort((left, right) => {
+        const leftScore = (localCounts.get(left.id) ?? 0) / Math.max(1, counts.get(left.id) ?? 1);
+        const rightScore = (localCounts.get(right.id) ?? 0) / Math.max(1, counts.get(right.id) ?? 1);
+        return rightScore - leftScore || left.id.localeCompare(right.id);
+      })[0];
+    if (!candidate) break;
+    counts.set(candidate.id, (counts.get(candidate.id) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function mapDistrictSeeds(seed: string, administrativeDistrictId: string, sectors: MetropolitanSectorState[], count: number): MetropolitanSectorState[] {
+  const rng = new SeededRandom(`${seed}:map-district-seeds:v1:${administrativeDistrictId}`);
+  const selected: MetropolitanSectorState[] = [];
+  if (!sectors.length) return selected;
+  selected.push(sectors[rng.integer(0, sectors.length - 1)]);
+  while (selected.length < Math.min(count, sectors.length)) {
+    let best = sectors[0];
+    let bestScore = -Infinity;
+    for (const sector of sectors) {
+      if (selected.some((item) => item.id === sector.id)) continue;
+      const distance = Math.min(...selected.map((item) => Math.abs(item.xIndex - sector.xIndex) + Math.abs(item.yIndex - sector.yIndex)));
+      const score = distance + new SeededRandom(`${seed}:map-district-spread:${administrativeDistrictId}:${sector.id}`).next() * 0.2;
+      if (score > bestScore) {
+        bestScore = score;
+        best = sector;
+      }
+    }
+    selected.push(best);
+  }
+  return selected;
+}
+
+function uniqueMapDistrictName(seed: string, administrativeDistrict: DistrictState, index: number, used: Set<string>): string {
+  const rng = new SeededRandom(`${seed}:map-district-name:${administrativeDistrict.id}:${index}`);
+  for (let attempt = 0; attempt < 64; attempt += 1) {
+    const name = `${MAP_DISTRICT_PREFIXES[(rng.integer(0, MAP_DISTRICT_PREFIXES.length - 1) + attempt) % MAP_DISTRICT_PREFIXES.length]} ${MAP_DISTRICT_SUFFIXES[(rng.integer(0, MAP_DISTRICT_SUFFIXES.length - 1) + attempt * 3) % MAP_DISTRICT_SUFFIXES.length]}`;
+    if (!used.has(name)) {
+      used.add(name);
+      return name;
+    }
+  }
+  const fallback = `${administrativeDistrict.name} ${String(index + 1).padStart(2, "0")}`;
+  used.add(fallback);
+  return fallback;
+}
+
+function createMapDistricts(seed: string, sourceSectors: MetropolitanSectorState[], administrativeDistricts: DistrictState[]): { sectors: MetropolitanSectorState[]; mapDistricts: MapDistrictState[] } {
+  const sectors = sourceSectors.map((sector) => ({ ...sector }));
+  const byCoordinate = new Map(sectors.map((sector) => [sectorKey(sector.xIndex, sector.yIndex), sector]));
+  const sectorIndex = new Map(sectors.map((sector, index) => [sector.id, index]));
+  const usedNames = new Set<string>();
+  const counts = neighborhoodCounts(sectors, administrativeDistricts);
+  const mapDistricts: MapDistrictState[] = [];
+  let globalIndex = 0;
+
+  for (const administrativeDistrict of administrativeDistricts) {
+    const local = sectors.filter((sector) => sector.districtId === administrativeDistrict.id);
+    if (!local.length) continue;
+    const count = counts.get(administrativeDistrict.id) ?? 1;
+    const seeds = mapDistrictSeeds(seed, administrativeDistrict.id, local, count);
+    const ownerBySectorId = new Map<string, number>();
+    const queue: Array<{ sector: MetropolitanSectorState; owner: number }> = [];
+    seeds.forEach((sector, owner) => {
+      ownerBySectorId.set(sector.id, owner);
+      queue.push({ sector, owner });
+    });
+    for (let cursor = 0; cursor < queue.length; cursor += 1) {
+      const { sector, owner } = queue[cursor];
+      const neighbors = [
+        byCoordinate.get(sectorKey(sector.xIndex - 1, sector.yIndex)),
+        byCoordinate.get(sectorKey(sector.xIndex + 1, sector.yIndex)),
+        byCoordinate.get(sectorKey(sector.xIndex, sector.yIndex - 1)),
+        byCoordinate.get(sectorKey(sector.xIndex, sector.yIndex + 1))
+      ].filter((item): item is MetropolitanSectorState => item !== undefined && item.districtId === administrativeDistrict.id);
+      for (const neighbor of neighbors) {
+        if (ownerBySectorId.has(neighbor.id)) continue;
+        ownerBySectorId.set(neighbor.id, owner);
+        queue.push({ sector: neighbor, owner });
+      }
+    }
+    for (const sector of local) {
+      if (ownerBySectorId.has(sector.id)) continue;
+      const owner = seeds
+        .map((item, index) => ({ index, distance: Math.abs(item.xIndex - sector.xIndex) + Math.abs(item.yIndex - sector.yIndex) }))
+        .sort((left, right) => left.distance - right.distance || left.index - right.index)[0]?.index ?? 0;
+      ownerBySectorId.set(sector.id, owner);
+    }
+
+    for (let localIndex = 0; localIndex < seeds.length; localIndex += 1) {
+      const districtId = createStableEntityId("map-district", `${seed}:map-district:v1:${administrativeDistrict.id}:${localIndex}`);
+      const districtSectors = local.filter((sector) => ownerBySectorId.get(sector.id) === localIndex);
+      for (const sector of districtSectors) {
+        const index = sectorIndex.get(sector.id);
+        if (index !== undefined) sectors[index] = { ...sectors[index], mapDistrictId: districtId };
+      }
+      const bounds = boundsForSectors(districtSectors);
+      const representedPopulation = districtSectors.reduce((sum, sector) => sum + sector.representedPopulation, 0);
+      const averageCrowd = districtSectors.reduce((sum, sector) => sum + sector.crowdLoad, 0) / Math.max(1, districtSectors.length);
+      const averageTraffic = districtSectors.reduce((sum, sector) => sum + sector.trafficLoad, 0) / Math.max(1, districtSectors.length);
+      mapDistricts.push({
+        id: districtId,
+        name: uniqueMapDistrictName(seed, administrativeDistrict, localIndex, usedNames),
+        code: `D-${String(globalIndex + 1).padStart(2, "0")}`,
+        administrativeDistrictId: administrativeDistrict.id,
+        bounds,
+        center: {
+          xM: districtSectors.reduce((sum, sector) => sum + sector.bounds.xM + sector.bounds.widthM / 2, 0) / Math.max(1, districtSectors.length),
+          yM: districtSectors.reduce((sum, sector) => sum + sector.bounds.yM + sector.bounds.heightM / 2, 0) / Math.max(1, districtSectors.length)
+        },
+        sectorIds: districtSectors.map((sector) => sector.id),
+        representedPopulation,
+        dominantLandUse: dominantLandUseFor(districtSectors),
+        transitScore: clamp(Math.round(administrativeDistrict.infrastructure * 0.72 + administrativeDistrict.employmentRate * 0.28)),
+        activityScore: clamp(Math.round(averageCrowd * 0.62 + averageTraffic * 0.38 + administrativeDistrict.employmentRate * 0.18)),
+        riskScore: clamp(Math.round((100 - administrativeDistrict.securityLevel) * 0.58 + administrativeDistrict.gangInfluence * 0.42))
+      });
+      globalIndex += 1;
+    }
+  }
+
+  const fallbackDistrict = mapDistricts[0];
+  return {
+    sectors: sectors.map((sector) => sector.mapDistrictId || !fallbackDistrict ? sector : { ...sector, mapDistrictId: fallbackDistrict.id }),
+    mapDistricts
+  };
+}
+
+function refreshMapDistricts(existing: MapDistrictState[], sectors: MetropolitanSectorState[], administrativeDistricts: DistrictState[]): MapDistrictState[] {
+  const administrativeById = new Map(administrativeDistricts.map((district) => [district.id, district]));
+  return existing.flatMap((district) => {
+    const local = sectors.filter((sector) => sector.mapDistrictId === district.id);
+    const administrative = administrativeById.get(district.administrativeDistrictId);
+    if (!local.length || !administrative) return [];
+    const bounds = boundsForSectors(local);
+    const averageCrowd = local.reduce((sum, sector) => sum + sector.crowdLoad, 0) / local.length;
+    const averageTraffic = local.reduce((sum, sector) => sum + sector.trafficLoad, 0) / local.length;
+    return [{
+      ...district,
+      bounds,
+      center: {
+        xM: local.reduce((sum, sector) => sum + sector.bounds.xM + sector.bounds.widthM / 2, 0) / local.length,
+        yM: local.reduce((sum, sector) => sum + sector.bounds.yM + sector.bounds.heightM / 2, 0) / local.length
+      },
+      sectorIds: local.map((sector) => sector.id),
+      representedPopulation: local.reduce((sum, sector) => sum + sector.representedPopulation, 0),
+      dominantLandUse: dominantLandUseFor(local),
+      transitScore: clamp(Math.round(administrative.infrastructure * 0.72 + administrative.employmentRate * 0.28)),
+      activityScore: clamp(Math.round(averageCrowd * 0.62 + averageTraffic * 0.38 + administrative.employmentRate * 0.18)),
+      riskScore: clamp(Math.round((100 - administrative.securityLevel) * 0.58 + administrative.gangInfluence * 0.42))
+    }];
+  });
 }
 
 function footprintFor(location: LocationState): LocationFootprintKind {
@@ -276,81 +502,188 @@ function createRoadNetwork(seed: string, sectors: MetropolitanSectorState[]): { 
   const nodes: RoadNodeState[] = [];
   const links: RoadLinkState[] = [];
   const cfg = config();
-  const spacing = 4;
-  for (let y = 0; y <= cfg.sectorsHigh; y += spacing) {
-    for (let x = 0; x <= cfg.sectorsWide; x += spacing) {
-      const sectorX = Math.min(cfg.sectorsWide - 1, x);
-      const sectorY = Math.min(cfg.sectorsHigh - 1, y);
-      const sector = sectors.find((item) => item.xIndex === sectorX && item.yIndex === sectorY) ?? sectors[0];
-      nodes.push({
-        id: createStableEntityId("road-node", `${seed}:${x}:${y}`),
+  const spacing = 2;
+  const byGrid = new Map<string, RoadNodeState>();
+  const sectorAt = (xM: number, yM: number) => sectors.find((sector) =>
+    sector.xIndex === Math.min(cfg.sectorsWide - 1, Math.max(0, Math.floor(xM / cfg.sectorSizeM)))
+    && sector.yIndex === Math.min(cfg.sectorsHigh - 1, Math.max(0, Math.floor(yM / cfg.sectorSizeM)))
+  ) ?? sectors[0];
+
+  for (let yIndex = 0; yIndex <= cfg.sectorsHigh; yIndex += spacing) {
+    for (let xIndex = 0; xIndex <= cfg.sectorsWide; xIndex += spacing) {
+      const edge = xIndex === 0 || yIndex === 0 || xIndex === cfg.sectorsWide || yIndex === cfg.sectorsHigh;
+      const rng = new SeededRandom(`${seed}:road-node:v2:${xIndex}:${yIndex}`);
+      const xM = clamp(xIndex * cfg.sectorSizeM + (edge ? 0 : rng.integer(-240, 240)), 0, cfg.widthM);
+      const yM = clamp(yIndex * cfg.sectorSizeM + (edge ? 0 : rng.integer(-240, 240)), 0, cfg.heightM);
+      const sector = sectorAt(xM, yM);
+      const node: RoadNodeState = {
+        id: createStableEntityId("road-node", `${seed}:v2:${xIndex}:${yIndex}`),
         sectorId: sector.id,
-        xM: Math.min(cfg.widthM, x * cfg.sectorSizeM),
-        yM: Math.min(cfg.heightM, y * cfg.sectorSizeM),
-        kind: x === 0 || y === 0 || x >= cfg.sectorsWide || y >= cfg.sectorsHigh ? "district-gate" : (x + y) % 12 === 0 ? "interchange" : "intersection"
-      });
+        xM,
+        yM,
+        kind: edge ? "district-gate" : (xIndex + yIndex) % 12 === 0 ? "interchange" : "intersection"
+      };
+      nodes.push(node);
+      byGrid.set(sectorKey(xIndex, yIndex), node);
     }
   }
-  const byCoord = new Map(nodes.map((node) => [`${node.xM}:${node.yM}`, node]));
-  for (const node of nodes) {
-    const east = byCoord.get(`${node.xM + spacing * cfg.sectorSizeM}:${node.yM}`);
-    const south = byCoord.get(`${node.xM}:${node.yM + spacing * cfg.sectorSizeM}`);
-    for (const target of [east, south]) {
-      if (!target) continue;
-      const lengthM = Math.round(Math.hypot(target.xM - node.xM, target.yM - node.yM));
-      const className = (node.xM / cfg.sectorSizeM + node.yM / cfg.sectorSizeM) % 12 === 0 ? "expressway" as const : "arterial" as const;
-      const districtIds = [...new Set([sectors.find((item) => item.id === node.sectorId)?.districtId, sectors.find((item) => item.id === target.sectorId)?.districtId].filter((value): value is string => Boolean(value)))];
-      links.push({
-        id: createStableEntityId("road-link", `${seed}:${node.id}:${target.id}`),
-        fromNodeId: node.id,
-        toNodeId: target.id,
-        class: className,
-        lengthM,
-        lanes: className === "expressway" ? 8 : 4,
-        capacityPerHour: className === "expressway" ? 10_800 : 4_800,
-        speedLimitKph: className === "expressway" ? 105 : 68,
-        districtIds
-      });
+
+  const addLink = (from: RoadNodeState, to: RoadNodeState, className: RoadLinkState["class"], name: string, scope: string): void => {
+    const corridorId = createStableEntityId("road-corridor", `${seed}:road-corridor:v2:${scope}`);
+    const lengthM = Math.round(Math.hypot(to.xM - from.xM, to.yM - from.yM));
+    const fromSector = sectors.find((sector) => sector.id === from.sectorId);
+    const toSector = sectors.find((sector) => sector.id === to.sectorId);
+    const baseTraffic = ((fromSector?.trafficLoad ?? 0) + (toSector?.trafficLoad ?? 0)) / 2;
+    const classLoad = className === "expressway" ? 18 : className === "arterial" ? 10 : className === "collector" ? 4 : 0;
+    const districtIds = [...new Set([fromSector?.districtId, toSector?.districtId].filter((value): value is string => Boolean(value)))];
+    links.push({
+      id: createStableEntityId("road-link", `${seed}:road-link:v2:${from.id}:${to.id}`),
+      corridorId,
+      name,
+      fromNodeId: from.id,
+      toNodeId: to.id,
+      class: className,
+      lengthM,
+      lanes: className === "expressway" ? 8 : className === "arterial" ? 6 : className === "collector" ? 4 : 2,
+      capacityPerHour: className === "expressway" ? 10_800 : className === "arterial" ? 6_800 : className === "collector" ? 3_400 : 1_600,
+      speedLimitKph: className === "expressway" ? 105 : className === "arterial" ? 72 : className === "collector" ? 52 : 36,
+      trafficLoad: clamp(Math.round(baseTraffic + classLoad)),
+      districtIds
+    });
+  };
+
+  const horizontalNames = ["NORTH TRACE", "CROWN WAY", "NEON SPINE", "FOUNDRY ARC", "SOUTH BELT", "HARBOR RUN", "LOWLINE"];
+  const verticalNames = ["WEST GATE", "SILT AVENUE", "MERIDIAN", "GLASS ROAD", "EAST LINK", "FREIGHT WAY", "OUTER TRACE"];
+  for (let yIndex = 0; yIndex <= cfg.sectorsHigh; yIndex += spacing) {
+    for (let xIndex = 0; xIndex < cfg.sectorsWide; xIndex += spacing) {
+      const from = byGrid.get(sectorKey(xIndex, yIndex));
+      const to = byGrid.get(sectorKey(Math.min(cfg.sectorsWide, xIndex + spacing), yIndex));
+      if (!from || !to) continue;
+      const className: RoadLinkState["class"] = [8, 18, 28].includes(yIndex) ? "expressway" : yIndex % 6 === 0 ? "arterial" : "collector";
+      const corridorIndex = Math.round(yIndex / 6) % horizontalNames.length;
+      addLink(from, to, className, horizontalNames[corridorIndex], `horizontal:${yIndex}`);
+    }
+  }
+  for (let xIndex = 0; xIndex <= cfg.sectorsWide; xIndex += spacing) {
+    for (let yIndex = 0; yIndex < cfg.sectorsHigh; yIndex += spacing) {
+      const from = byGrid.get(sectorKey(xIndex, yIndex));
+      const to = byGrid.get(sectorKey(xIndex, Math.min(cfg.sectorsHigh, yIndex + spacing)));
+      if (!from || !to) continue;
+      const className: RoadLinkState["class"] = [10, 24, 36].includes(xIndex) ? "expressway" : xIndex % 6 === 0 ? "arterial" : "collector";
+      const corridorIndex = Math.round(xIndex / 6) % verticalNames.length;
+      addLink(from, to, className, verticalNames[corridorIndex], `vertical:${xIndex}`);
+    }
+  }
+
+  const diagonalPairs: Array<[string, Array<[number, number]>]> = [
+    ["RED DIAGONAL", Array.from({ length: 18 }, (_, index) => [Math.min(cfg.sectorsWide, index * 2), Math.min(cfg.sectorsHigh, index * 2)] as [number, number])],
+    ["CROSSCITY CUT", Array.from({ length: 18 }, (_, index) => [Math.min(cfg.sectorsWide, index * 2 + 6), Math.max(0, cfg.sectorsHigh - index * 2)] as [number, number])]
+  ];
+  for (const [name, points] of diagonalPairs) {
+    const unique = points.filter(([xIndex, yIndex], index) => index === 0 || xIndex !== points[index - 1][0] || yIndex !== points[index - 1][1]);
+    for (let index = 1; index < unique.length; index += 1) {
+      const from = byGrid.get(sectorKey(unique[index - 1][0], unique[index - 1][1]));
+      const to = byGrid.get(sectorKey(unique[index][0], unique[index][1]));
+      if (from && to) addLink(from, to, "arterial", name, `diagonal:${name}`);
     }
   }
   return { nodes, links };
 }
 
-function createTransit(seed: string, sectors: MetropolitanSectorState[], districts: DistrictState[]): { stations: TransitStationState[]; lines: TransitLineState[] } {
+function createTransit(seed: string, sectors: MetropolitanSectorState[], mapDistricts: MapDistrictState[]): { stations: TransitStationState[]; lines: TransitLineState[] } {
   const stations: TransitStationState[] = [];
-  const lineDefinitions = [
-    { scope: "red-spine", name: "RED SPINE", mode: "metro" as const, yM: 18_000, capacity: 680_000 },
-    { scope: "crown-elevated", name: "CROWN ELEVATED", mode: "elevated" as const, yM: 7_000, capacity: 360_000 },
-    { scope: "foundry-freight", name: "FOUNDRY FREIGHT", mode: "freight" as const, yM: 28_000, capacity: 240_000 }
-  ];
   const lines: TransitLineState[] = [];
-  for (const definition of lineDefinitions) {
-    const lineId = createStableEntityId("transit-line", `${seed}:${definition.scope}`);
-    const stationIds: string[] = [];
-    for (let xM = 2_000; xM < CITY_WIDTH_M; xM += 4_000) {
-      const xIndex = Math.min(Math.floor(xM / SECTOR_SIZE_M), Math.ceil(CITY_WIDTH_M / SECTOR_SIZE_M) - 1);
-      const yIndex = Math.min(Math.floor(definition.yM / SECTOR_SIZE_M), Math.ceil(CITY_HEIGHT_M / SECTOR_SIZE_M) - 1);
-      const sector = sectors.find((item) => item.xIndex === xIndex && item.yIndex === yIndex) ?? sectors[0];
-      const district = districts.find((item) => item.id === sector.districtId) ?? districts[0];
-      const stationId = createStableEntityId("transit-station", `${seed}:${definition.scope}:${xM}`);
-      stationIds.push(stationId);
-      stations.push({
-        id: stationId,
-        name: `${district.code} ${Math.round(xM / 1_000).toString().padStart(2, "0")}`,
-        sectorId: sector.id,
-        districtId: sector.districtId,
-        xM,
-        yM: definition.yM,
-        lineIds: [lineId],
-        dailyCapacity: Math.round(definition.capacity / 10)
-      });
+  const stationByCoordinate = new Map<string, TransitStationState>();
+  const cfg = config();
+  const sectorAt = (xM: number, yM: number) => sectors.find((sector) =>
+    sector.xIndex === Math.min(cfg.sectorsWide - 1, Math.max(0, Math.floor(xM / cfg.sectorSizeM)))
+    && sector.yIndex === Math.min(cfg.sectorsHigh - 1, Math.max(0, Math.floor(yM / cfg.sectorSizeM)))
+  ) ?? sectors[0];
+  const stationAt = (lineId: string, scope: string, xM: number, yM: number, index: number): TransitStationState => {
+    const key = `${Math.round(xM / 250)}:${Math.round(yM / 250)}`;
+    const existing = stationByCoordinate.get(key);
+    if (existing) {
+      if (!existing.lineIds.includes(lineId)) existing.lineIds.push(lineId);
+      return existing;
     }
+    const sector = sectorAt(xM, yM);
+    const mapDistrict = mapDistricts.find((district) => district.id === sector.mapDistrictId);
+    const station: TransitStationState = {
+      id: createStableEntityId("transit-station", `${seed}:transit-station:v2:${scope}:${index}`),
+      name: `${mapDistrict?.name ?? sector.code} ${String(index + 1).padStart(2, "0")}`,
+      sectorId: sector.id,
+      districtId: sector.districtId,
+      xM,
+      yM,
+      lineIds: [lineId],
+      dailyCapacity: 68_000
+    };
+    stations.push(station);
+    stationByCoordinate.set(key, station);
+    return station;
+  };
+
+  const definitions: Array<{
+    scope: string;
+    name: string;
+    mode: TransitLineState["mode"];
+    capacity: number;
+    points: Array<{ xM: number; yM: number }>;
+  }> = [
+    {
+      scope: "red-spine",
+      name: "RED SPINE",
+      mode: "metro",
+      capacity: 760_000,
+      points: Array.from({ length: 11 }, (_, index) => ({ xM: 1_000 + index * 4_000, yM: 18_000 + Math.round(Math.sin(index * 0.8) * 700) }))
+    },
+    {
+      scope: "crown-elevated",
+      name: "CROWN ELEVATED",
+      mode: "elevated",
+      capacity: 420_000,
+      points: Array.from({ length: 10 }, (_, index) => ({ xM: 3_000 + index * 4_000, yM: 7_000 + Math.round(Math.sin(index * 0.65 + 1.2) * 500) }))
+    },
+    {
+      scope: "harbor-line",
+      name: "HARBOR LINE",
+      mode: "regional-rail",
+      capacity: 510_000,
+      points: Array.from({ length: 10 }, (_, index) => ({ xM: 3_000 + index * 4_000, yM: 29_000 + Math.round(Math.sin(index * 0.7) * 650) }))
+    },
+    {
+      scope: "meridian",
+      name: "MERIDIAN METRO",
+      mode: "metro",
+      capacity: 640_000,
+      points: Array.from({ length: 9 }, (_, index) => ({ xM: 14_000 + Math.round(Math.sin(index * 0.75) * 550), yM: 2_000 + index * 4_000 }))
+    },
+    {
+      scope: "east-link",
+      name: "EAST LINK",
+      mode: "elevated",
+      capacity: 390_000,
+      points: Array.from({ length: 9 }, (_, index) => ({ xM: 32_000 + Math.round(Math.sin(index * 0.6 + 2) * 600), yM: 2_000 + index * 4_000 }))
+    },
+    {
+      scope: "foundry-freight",
+      name: "FOUNDRY FREIGHT",
+      mode: "freight",
+      capacity: 260_000,
+      points: Array.from({ length: 9 }, (_, index) => ({ xM: 5_000 + index * 4_000, yM: 34_000 - Math.round(index * 2_800) }))
+    }
+  ];
+
+  for (const definition of definitions) {
+    const lineId = createStableEntityId("transit-line", `${seed}:transit-line:v2:${definition.scope}`);
+    const lineStations = definition.points.map((point, index) => stationAt(lineId, definition.scope, clamp(point.xM, 0, cfg.widthM), clamp(point.yM, 0, cfg.heightM), index));
+    const lengthM = lineStations.slice(1).reduce((sum, station, index) => sum + Math.hypot(station.xM - lineStations[index].xM, station.yM - lineStations[index].yM), 0);
     lines.push({
       id: lineId,
       name: definition.name,
       mode: definition.mode,
-      stationIds,
-      lengthM: CITY_WIDTH_M - 4_000,
+      stationIds: lineStations.map((station) => station.id),
+      lengthM: Math.round(lengthM),
       dailyCapacity: definition.capacity
     });
   }
@@ -407,25 +740,26 @@ function streamingState(cfg: MetropolitanConfig, focus: MetropolitanSectorState,
 }
 
 function districtSpatialStates(districts: DistrictState[], sectors: MetropolitanSectorState[]): DistrictSpatialState[] {
-  return districts.map((district, index) => {
+  return districts.flatMap((district) => {
     const local = sectors.filter((sector) => sector.districtId === district.id);
-    const bounds = districtBounds(index, districts.length);
+    if (!local.length) return [];
+    const bounds = boundsForSectors(local);
     const representedPopulation = local.reduce((sum, sector) => sum + sector.representedPopulation, 0);
     const areaKm2 = Math.max(1, local.length);
-    const uses = new Map<SectorLandUse, number>();
-    for (const sector of local) uses.set(sector.landUse, (uses.get(sector.landUse) ?? 0) + 1);
-    const dominantLandUse = [...uses.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] ?? "mixed";
-    return {
+    return [{
       districtId: district.id,
       bounds,
-      center: { xM: bounds.xM + bounds.widthM / 2, yM: bounds.yM + bounds.heightM / 2 },
+      center: {
+        xM: local.reduce((sum, sector) => sum + sector.bounds.xM + sector.bounds.widthM / 2, 0) / local.length,
+        yM: local.reduce((sum, sector) => sum + sector.bounds.yM + sector.bounds.heightM / 2, 0) / local.length
+      },
       representedPopulation,
       densityPerKm2: Math.round(representedPopulation / areaKm2),
       sectorIds: local.map((sector) => sector.id),
-      dominantLandUse,
+      dominantLandUse: dominantLandUseFor(local),
       transitScore: clamp(Math.round(district.infrastructure * 0.72 + district.employmentRate * 0.28)),
       verticality: clamp(Math.round(district.costOfLiving * 0.45 + district.corporateInfluence * 0.35 + district.infrastructure * 0.2))
-    };
+    }];
   });
 }
 
@@ -444,25 +778,27 @@ function totalsFor(state: Omit<MetropolitanState, "totals">): MetropolitanTotals
 
 export function createMetropolitanState(input: MetropolitanAdvanceInput): MetropolitanState {
   const cfg = config();
-  const sectors = createSectors(input.seed, input.timestamp, input.districts, input.representedPopulationByDistrict);
-  const locations = placeLocations(input.seed, sectors, input.locations);
-  const roads = createRoadNetwork(input.seed, sectors);
-  const transit = createTransit(input.seed, sectors, input.districts);
+  const generatedSectors = createSectors(input.seed, input.timestamp, input.districts, input.representedPopulationByDistrict);
+  const mapped = createMapDistricts(input.seed, generatedSectors, input.districts);
+  const locations = placeLocations(input.seed, mapped.sectors, input.locations);
+  const roads = createRoadNetwork(input.seed, mapped.sectors);
+  const transit = createTransit(input.seed, mapped.sectors, mapped.mapDistricts);
   const focusPlacement = locations.find((item) => item.locationId === input.targetLocationId)
     ?? locations.find((item) => item.locationId === input.activeLocationId)
     ?? locations[0];
-  const focus = sectors.find((sector) => sector.id === focusPlacement?.sectorId) ?? sectors[0];
-  const streaming = streamingState(cfg, focus, sectors);
-  const nextSectors = sectors.map((sector) => ({
+  const focus = mapped.sectors.find((sector) => sector.id === focusPlacement?.sectorId) ?? mapped.sectors[0];
+  const streaming = streamingState(cfg, focus, mapped.sectors);
+  const nextSectors = mapped.sectors.map((sector) => ({
     ...sector,
     detailLevel: streaming.activeSectorIds.includes(sector.id) ? "active" as const : streaming.warmSectorIds.includes(sector.id) ? "warm" as const : "cold" as const,
     materializedResidentCount: streaming.activeSectorIds.includes(sector.id) ? Math.max(4, Math.round(sector.representedPopulation / 1_800)) : 0,
     materializedInteriorCount: streaming.activeSectorIds.includes(sector.id) ? 2 : 0
   }));
   const base = {
-    version: 1 as const,
+    version: 2 as const,
     config: cfg,
     districts: districtSpatialStates(input.districts, nextSectors),
+    mapDistricts: refreshMapDistricts(mapped.mapDistricts, nextSectors, input.districts),
     sectors: nextSectors,
     locations,
     roadNodes: roads.nodes,
@@ -534,6 +870,18 @@ function compactState(state: MetropolitanState, input: MetropolitanAdvanceInput,
   };
 }
 
+function refreshRoadTraffic(links: RoadLinkState[], nodes: RoadNodeState[], sectors: MetropolitanSectorState[]): RoadLinkState[] {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const sectorById = new Map(sectors.map((sector) => [sector.id, sector]));
+  return links.map((link) => {
+    const fromSector = sectorById.get(nodeById.get(link.fromNodeId)?.sectorId ?? "");
+    const toSector = sectorById.get(nodeById.get(link.toNodeId)?.sectorId ?? "");
+    const average = ((fromSector?.trafficLoad ?? 0) + (toSector?.trafficLoad ?? 0)) / 2;
+    const capacityRelief = link.class === "expressway" ? 12 : link.class === "arterial" ? 6 : link.class === "collector" ? 2 : 0;
+    return { ...link, trafficLoad: clamp(Math.round(average - capacityRelief)) };
+  });
+}
+
 export function advanceMetropolitanState(state: MetropolitanState, input: MetropolitanAdvanceInput): MetropolitanAdvanceResult {
   if (input.timestamp <= state.lastUpdatedAt) {
     return { state, compactedEventBudget: input.recentEventCount, compactedObservationBudget: input.recentObservationCount };
@@ -594,7 +942,9 @@ export function advanceMetropolitanState(state: MetropolitanState, input: Metrop
   const base = {
     ...state,
     districts: districtSpatialStates(input.districts, sectors),
+    mapDistricts: refreshMapDistricts(state.mapDistricts, sectors, input.districts),
     sectors,
+    roadLinks: refreshRoadTraffic(state.roadLinks, state.roadNodes, sectors),
     archive: compacted.archive,
     streaming: compacted.streaming,
     lastUpdatedAt: input.timestamp
@@ -605,29 +955,59 @@ export function advanceMetropolitanState(state: MetropolitanState, input: Metrop
 
 export function normalizeMetropolitanState(value: unknown, input: MetropolitanAdvanceInput): MetropolitanState {
   if (!value || typeof value !== "object") return createMetropolitanState(input);
-  const raw = value as Partial<MetropolitanState>;
-  if (raw.version !== 1 || !Array.isArray(raw.sectors) || !Array.isArray(raw.locations) || !raw.config || !raw.streaming) {
+  const raw = value as Partial<MetropolitanState> & { version?: number };
+  if (![1, 2].includes(raw.version ?? 0) || !Array.isArray(raw.sectors) || !Array.isArray(raw.locations) || !raw.config || !raw.streaming) {
     return createMetropolitanState(input);
   }
   const requiredSectors = raw.config.sectorsWide * raw.config.sectorsHigh;
   if (raw.sectors.length !== requiredSectors || raw.config.widthM !== CITY_WIDTH_M || raw.config.heightM !== CITY_HEIGHT_M) {
     return createMetropolitanState(input);
   }
-  return advanceMetropolitanState({
-    version: 1,
-    config: raw.config,
-    districts: Array.isArray(raw.districts) ? raw.districts : [],
-    sectors: raw.sectors,
+
+  const rawSectors = raw.sectors.map((sector) => ({
+    ...sector,
+    mapDistrictId: typeof (sector as MetropolitanSectorState & { mapDistrictId?: string }).mapDistrictId === "string"
+      ? (sector as MetropolitanSectorState & { mapDistrictId: string }).mapDistrictId
+      : ""
+  }));
+  const hasValidMapDistricts = Array.isArray(raw.mapDistricts)
+    && raw.mapDistricts.length > 0
+    && rawSectors.every((sector) => raw.mapDistricts?.some((district) => district.id === sector.mapDistrictId));
+  const mapped = hasValidMapDistricts
+    ? { sectors: rawSectors, mapDistricts: raw.mapDistricts as MapDistrictState[] }
+    : createMapDistricts(input.seed, rawSectors, input.districts);
+
+  const hasCurrentRoadGraph = Array.isArray(raw.roadNodes)
+    && Array.isArray(raw.roadLinks)
+    && raw.roadNodes.length >= 200
+    && raw.roadLinks.every((link) => typeof (link as RoadLinkState).corridorId === "string" && typeof (link as RoadLinkState).trafficLoad === "number");
+  const roads = hasCurrentRoadGraph
+    ? { nodes: raw.roadNodes as RoadNodeState[], links: raw.roadLinks as RoadLinkState[] }
+    : createRoadNetwork(input.seed, mapped.sectors);
+  const hasCurrentTransit = Array.isArray(raw.transitStations)
+    && Array.isArray(raw.transitLines)
+    && raw.transitLines.length >= 5
+    && raw.transitLines.every((line) => line.stationIds.length >= 5);
+  const transit = hasCurrentTransit
+    ? { stations: raw.transitStations as TransitStationState[], lines: raw.transitLines as TransitLineState[] }
+    : createTransit(input.seed, mapped.sectors, mapped.mapDistricts);
+
+  const normalized: MetropolitanState = {
+    version: 2,
+    config: { ...config(), ...raw.config, seedVersion: 1 },
+    districts: districtSpatialStates(input.districts, mapped.sectors),
+    mapDistricts: refreshMapDistricts(mapped.mapDistricts, mapped.sectors, input.districts),
+    sectors: mapped.sectors,
     locations: raw.locations,
-    roadNodes: Array.isArray(raw.roadNodes) ? raw.roadNodes : [],
-    roadLinks: Array.isArray(raw.roadLinks) ? raw.roadLinks : [],
-    transitStations: Array.isArray(raw.transitStations) ? raw.transitStations : [],
-    transitLines: Array.isArray(raw.transitLines) ? raw.transitLines : [],
+    roadNodes: roads.nodes,
+    roadLinks: roads.links,
+    transitStations: transit.stations,
+    transitLines: transit.lines,
     deltas: Array.isArray(raw.deltas) ? raw.deltas : [],
     archive: Array.isArray(raw.archive) ? raw.archive : [],
     streaming: raw.streaming,
     totals: raw.totals ?? {
-      sectors: raw.sectors.length,
+      sectors: mapped.sectors.length,
       representedPopulation: 0,
       estimatedBuildings: 0,
       estimatedFloorAreaM2: 0,
@@ -636,8 +1016,9 @@ export function normalizeMetropolitanState(value: unknown, input: MetropolitanAd
       persistentDeltas: 0,
       archiveSummaries: 0
     },
-    lastUpdatedAt: typeof raw.lastUpdatedAt === "number" ? raw.lastUpdatedAt : input.timestamp
-  }, input).state;
+    lastUpdatedAt: Math.min(typeof raw.lastUpdatedAt === "number" ? raw.lastUpdatedAt : input.timestamp - 1, input.timestamp - 1)
+  };
+  return advanceMetropolitanState(normalized, input).state;
 }
 
 export function sectorForLocation(state: MetropolitanState, locationId: string): MetropolitanSectorState | null {

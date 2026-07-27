@@ -60,4 +60,4 @@ if (Test-Path $deleteList) {
     }
 }
 
-Write-Host "NEON LIFE v0.30.3 INTERFACE RECOVERY applied to $ProjectRoot"
+Write-Host "NEON LIFE v0.31.0 REAL CITY MAP FOUNDATION applied to $ProjectRoot"

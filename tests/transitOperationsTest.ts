@@ -40,7 +40,7 @@ function transitInput(session: ReturnType<typeof createWorldSession>) {
 const seed = "TRANSIT-OPERATIONS-28";
 let session = createWorldSession(seed);
 
-assert(session.schemaVersion === 27, "new world schema is not 27");
+assert(session.schemaVersion === 28, "new world schema is not 28");
 assert(session.transit.version === 1, "transit operations version mismatch");
 assert(!session.transit.player.journey, "fresh world unexpectedly starts in transit");
 assert(session.transit.stops.length >= 30, "too few physical stops");
@@ -162,7 +162,7 @@ const migrated = migrateEnvelope({
   payload: legacy
 }, "slot-1");
 assert(migrated, "migration returned null");
-assert(migrated.schemaVersion === 27, "migration schema mismatch");
+assert(migrated.schemaVersion === 28, "migration schema mismatch");
 assert(migrated.payload.transit.version === 1, "migration did not create transit operations");
 assert(migrated.payload.transit.routes.length > 0, "migration created empty transit routes");
 

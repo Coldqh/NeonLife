@@ -164,6 +164,51 @@ function districtHub(input: TransitOperationsInput, districtId: string): Metropo
     .sort((left, right) => pointDistance(sectorCenter(left), district.center) - pointDistance(sectorCenter(right), district.center))[0];
 }
 
+function orderLocalWaypoints(hub: MetropolitanSectorState, placements: MetropolitanSectorState[]): MetropolitanSectorState[] {
+  const remaining = placements
+    .filter((sector, index, array) => sector.id !== hub.id && array.findIndex((item) => item.id === sector.id) === index);
+  const ordered = [hub];
+  while (remaining.length) {
+    const current = ordered[ordered.length - 1];
+    remaining.sort((left, right) => {
+      const leftDistance = Math.abs(left.xIndex - current.xIndex) + Math.abs(left.yIndex - current.yIndex);
+      const rightDistance = Math.abs(right.xIndex - current.xIndex) + Math.abs(right.yIndex - current.yIndex);
+      return leftDistance - rightDistance || left.code.localeCompare(right.code);
+    });
+    ordered.push(remaining.shift() as MetropolitanSectorState);
+  }
+  return ordered;
+}
+
+function connectLocalWaypoints(input: TransitOperationsInput, waypoints: MetropolitanSectorState[]): MetropolitanSectorState[] {
+  const byCoordinate = new Map(input.metropolitan.sectors.map((sector) => [`${sector.xIndex}:${sector.yIndex}`, sector]));
+  const result: MetropolitanSectorState[] = [];
+  const seen = new Set<string>();
+  const append = (sector: MetropolitanSectorState | undefined) => {
+    if (!sector || seen.has(sector.id)) return;
+    seen.add(sector.id);
+    result.push(sector);
+  };
+  append(waypoints[0]);
+  for (let index = 1; index < waypoints.length; index += 1) {
+    const destination = waypoints[index];
+    let xIndex = waypoints[index - 1].xIndex;
+    let yIndex = waypoints[index - 1].yIndex;
+    let horizontalTurn = index % 2 === 0;
+    while (xIndex !== destination.xIndex || yIndex !== destination.yIndex) {
+      const xDistance = Math.abs(destination.xIndex - xIndex);
+      const yDistance = Math.abs(destination.yIndex - yIndex);
+      const moveHorizontal = xDistance > yDistance || xDistance === yDistance && horizontalTurn;
+      if (moveHorizontal && xDistance > 0) xIndex += Math.sign(destination.xIndex - xIndex);
+      else if (yDistance > 0) yIndex += Math.sign(destination.yIndex - yIndex);
+      else xIndex += Math.sign(destination.xIndex - xIndex);
+      horizontalTurn = !horizontalTurn;
+      append(byCoordinate.get(`${xIndex}:${yIndex}`));
+    }
+  }
+  return result;
+}
+
 function busRoutes(input: TransitOperationsInput, stopMap: Map<string, TransitStopState>): TransitRouteOperationState[] {
   const routes: TransitRouteOperationState[] = [];
 
@@ -175,16 +220,17 @@ function busRoutes(input: TransitOperationsInput, stopMap: Map<string, TransitSt
       .filter((placement) => placement.districtId === district.id)
       .map((placement) => input.metropolitan.sectors.find((sector) => sector.id === placement.sectorId))
       .filter((sector): sector is MetropolitanSectorState => Boolean(sector));
-    const sectors = [hubSector, ...placements]
-      .filter((sector, index, array) => array.findIndex((item) => item.id === sector.id) === index)
-      .sort((left, right) => Math.atan2(sectorCenter(left).yM - sectorCenter(hubSector).yM, sectorCenter(left).xM - sectorCenter(hubSector).xM)
-        - Math.atan2(sectorCenter(right).yM - sectorCenter(hubSector).yM, sectorCenter(right).xM - sectorCenter(hubSector).xM))
-      .slice(0, 16);
-    while (sectors.length < 4) {
-      const fallback = input.metropolitan.sectors.find((sector) => sector.districtId === district.id && !sectors.some((item) => item.id === sector.id));
+    const waypoints = orderLocalWaypoints(hubSector, placements).slice(0, 16);
+    while (waypoints.length < 4) {
+      const current = waypoints[waypoints.length - 1] ?? hubSector;
+      const fallback = input.metropolitan.sectors
+        .filter((sector) => sector.districtId === district.id && !waypoints.some((item) => item.id === sector.id))
+        .sort((left, right) => Math.abs(left.xIndex - current.xIndex) + Math.abs(left.yIndex - current.yIndex)
+          - Math.abs(right.xIndex - current.xIndex) - Math.abs(right.yIndex - current.yIndex))[0];
       if (!fallback) break;
-      sectors.push(fallback);
+      waypoints.push(fallback);
     }
+    const sectors = connectLocalWaypoints(input, waypoints);
     const stopIds = sectors.map((sector, index) => busStopForSector(input, stopMap, sector, index === 0 ? `${district.name} HUB` : undefined).id);
     if (stopIds.length < 2) continue;
     const districtFlow = input.mobility.sectorFlows.filter((flow) => flow.districtId === district.id);

@@ -1,0 +1,53 @@
+import fs from "node:fs";
+import path from "node:path";
+
+const root = process.cwd();
+const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
+const checks = [];
+const check = (name, pass) => checks.push({ name, pass: Boolean(pass) });
+
+const types = read("src/simulation/spatial/types.ts");
+const system = read("src/simulation/spatial/metropolitanSystem.ts");
+const globalMap = read("src/app/map/GlobalCityMap.tsx");
+const mapScreen = read("src/app/screens/MapScreen.tsx");
+const mapCss = read("src/ui/theme/map.css");
+const saveTypes = read("src/core/saves/types.ts");
+
+check("metropolitan state schema is version 2", types.includes("version: 2;") && system.includes("version: 2"));
+check("save schema is version 28", saveTypes.includes("SAVE_SCHEMA_VERSION = 28"));
+check("persistent map districts exist", types.includes("export interface MapDistrictState") && types.includes("mapDistricts: MapDistrictState[]"));
+check("every sector owns a map district id", types.includes("mapDistrictId: EntityId"));
+check("hardcoded three-region splitter removed", !system.includes("districtForSector") && !system.includes("districtBounds"));
+check("district assignment is generic", system.includes("districtSeedCells") && system.includes("administrativeDistrictAssignments") && system.includes("nearest"));
+check("connected map districts are generated", system.includes("createMapDistricts") && system.includes("ownerBySectorId") && system.includes("queue") && system.includes("neighbors"));
+check("district names are stable and unique", system.includes("MAP_DISTRICT_PREFIXES") && system.includes("usedNames"));
+check("road corridors have identity and names", types.includes("corridorId: EntityId") && types.includes("name: string") && system.includes("corridorId"));
+check("road traffic is stored per link", types.includes("trafficLoad: number") && system.includes("refreshRoadTraffic") && system.includes("average - capacityRelief"));
+check("road hierarchy includes collectors arterials and expressways", ["collector", "arterial", "expressway"].every((value) => system.includes(`\"${value}\"`)));
+check("rail network has multiple named lines", system.includes("RED SPINE") && system.includes("MERIDIAN METRO") && system.includes("FOUNDRY FREIGHT"));
+check("legacy metropolitan state is normalized", system.includes("normalizeMetropolitanState") && system.includes("[1, 2].includes(raw.version"));
+check("legacy sector and placement ids are preserved", system.includes("rawSectors") && system.includes("locations: raw.locations"));
+check("global map persists camera", globalMap.includes("CAMERA_KEY") && globalMap.includes("localStorage.setItem"));
+check("global map supports drag", globalMap.includes("setPointerCapture") && globalMap.includes("pointerMove"));
+check("global map supports pinch", globalMap.includes("PinchState") && globalMap.includes("pointers.current.size >= 2"));
+check("global map supports wheel zoom at cursor", globalMap.includes("onWheel") && globalMap.includes("zoomAt(event.clientX, event.clientY"));
+check("global map supports double click zoom", globalMap.includes("onDoubleClick"));
+check("global map has camera inertia", globalMap.includes("velocity.current") && globalMap.includes("requestAnimationFrame"));
+check("global map constrains camera", globalMap.includes("constrainedCamera"));
+check("map has district road rail bus traffic risk and activity layers", ["districts", "roads", "rail", "bus", "traffic", "risk", "activity"].every((layer) => globalMap.includes(`${layer}: boolean`) || mapScreen.includes(`key: \"${layer}\"`)));
+check("transport layer draws route paths", globalMap.includes("session.transit.routes") && globalMap.includes("route.stopIds"));
+check("traffic layer colors actual road links", globalMap.includes("link.trafficLoad") && globalMap.includes("layers.traffic"));
+check("map uses levels of detail", globalMap.includes("zoom >= 2.05") && globalMap.includes("zoom < 1.85") && globalMap.includes("zoom >= 1.35"));
+check("map separates district and sector inspectors", mapScreen.includes('type InspectorLevel = "district" | "sector"') && mapScreen.includes("district-inspector") && mapScreen.includes("sector-inspector"));
+check("exact point selection is retained", mapScreen.includes("selectedPoint") && globalMap.includes("MapPointSelection"));
+check("travel requires explicit location selection", mapScreen.includes("selectedLocationId") && !mapScreen.includes("sectorLocations[0]"));
+check("camera does not auto-focus on first render", globalMap.includes("if (!focusRevision) return"));
+check("layer controls are horizontally scrollable", mapCss.includes("overflow-x: auto") && mapCss.includes("scrollbar-width: none"));
+check("map CSS braces balanced", (mapCss.match(/\{/g) ?? []).length === (mapCss.match(/\}/g) ?? []).length);
+check("global map stays within file bound", globalMap.split(/\r?\n/).length <= 540);
+check("map screen stays within file bound", mapScreen.split(/\r?\n/).length <= 360);
+
+const failures = checks.filter((item) => !item.pass);
+for (const item of checks) console.log(`${item.pass ? "PASS" : "FAIL"} ${item.name}`);
+console.log(`\n${checks.length - failures.length}/${checks.length} map foundation invariants passed`);
+if (failures.length) process.exit(1);

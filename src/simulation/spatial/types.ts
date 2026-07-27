@@ -36,6 +36,21 @@ export interface MetropolitanConfig {
   seedVersion: number;
 }
 
+export interface MapDistrictState {
+  id: EntityId;
+  name: string;
+  code: string;
+  administrativeDistrictId: EntityId;
+  bounds: MetricBounds;
+  center: MetricPoint;
+  sectorIds: EntityId[];
+  representedPopulation: number;
+  dominantLandUse: SectorLandUse;
+  transitScore: number;
+  activityScore: number;
+  riskScore: number;
+}
+
 export interface DistrictSpatialState {
   districtId: EntityId;
   bounds: MetricBounds;
@@ -55,6 +70,7 @@ export interface MetropolitanSectorState {
   yIndex: number;
   bounds: MetricBounds;
   districtId: EntityId;
+  mapDistrictId: EntityId;
   seed: string;
   representedPopulation: number;
   representedHouseholds: number;
@@ -96,6 +112,8 @@ export interface RoadNodeState extends MetricPoint {
 
 export interface RoadLinkState {
   id: EntityId;
+  corridorId: EntityId;
+  name: string;
   fromNodeId: EntityId;
   toNodeId: EntityId;
   class: "local" | "collector" | "arterial" | "expressway";
@@ -103,6 +121,7 @@ export interface RoadLinkState {
   lanes: number;
   capacityPerHour: number;
   speedLimitKph: number;
+  trafficLoad: number;
   districtIds: EntityId[];
 }
 
@@ -177,9 +196,10 @@ export interface MetropolitanTotals {
 }
 
 export interface MetropolitanState {
-  version: 1;
+  version: 2;
   config: MetropolitanConfig;
   districts: DistrictSpatialState[];
+  mapDistricts: MapDistrictState[];
   sectors: MetropolitanSectorState[];
   locations: LocationSpatialState[];
   roadNodes: RoadNodeState[];
