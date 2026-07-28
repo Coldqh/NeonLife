@@ -420,6 +420,29 @@ export function payObligation(state: PressureState, obligationId: string, timest
   return { state: next, obligation: paid };
 }
 
+export function scheduleNextRentObligation(state: PressureState, paidObligationId: string, dueAt: number): PressureState {
+  const paid = state.obligations.find((item) => item.id === paidObligationId && item.type === "rent" && item.status === "paid");
+  if (!paid) return state;
+  const duplicate = state.obligations.some((item) => item.type === "rent" && item.status !== "paid" && item.dueAt === dueAt);
+  if (duplicate) return state;
+  const cycle = state.obligations.filter((item) => item.type === "rent").length + 1;
+  const next: ObligationState = {
+    ...paid,
+    id: createStableEntityId("obligation", `${paid.id}:cycle:${cycle}:${dueAt}`),
+    code: `OBL-RENT-${cycle}`,
+    dueAt,
+    status: "active",
+    extensionCount: 0,
+    lastNoticeStage: 0,
+    paidAt: null
+  };
+  return {
+    ...state,
+    housingStatus: "active",
+    obligations: [...state.obligations, next].slice(-36)
+  };
+}
+
 export function extendRentObligation(state: PressureState, timestamp: number): PressureState | null {
   const rent = state.obligations.find((item) => item.type === "rent" && (item.status === "active" || item.status === "overdue"));
   if (!rent || rent.extensionCount >= 1 || timestamp > rent.dueAt + 24 * HOUR) return null;

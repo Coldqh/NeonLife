@@ -33,6 +33,8 @@ export function NearbyScreen({
   onWalkTo,
   onEnterBuilding,
   onEnterVehicle,
+  onLeaveBuilding,
+  onLeaveVehicle,
   onRouteTo,
   onAdvance,
   notify
@@ -42,6 +44,8 @@ export function NearbyScreen({
   onWalkTo: (target: LocalMovementTargetState) => void;
   onEnterBuilding: (buildingId: string) => void;
   onEnterVehicle: (vehicleId: string) => void;
+  onLeaveBuilding: () => void;
+  onLeaveVehicle: () => void;
   onRouteTo: (locationId: string) => void;
   onAdvance: (minutes: number, source: string) => void;
   notify: (text: string, tone?: NoticeTone) => void;
@@ -72,6 +76,13 @@ export function NearbyScreen({
   const selectedBuilding = selected?.type === "building" ? buildings.find((building) => building.buildingId === selected.id) : undefined;
   const selectedVehicle = selected?.type === "vehicle" ? vehicles.find((vehicle) => vehicle.id === selected.id) : undefined;
   const selectionExists = Boolean(selectedActor || selectedBuilding || selectedVehicle);
+  const playerPosition = session.localScene.playerPosition;
+  const currentBuilding = playerPosition.buildingId
+    ? session.urban.buildings.find((building) => building.id === playerPosition.buildingId)
+    : undefined;
+  const currentVehicle = session.vehicles.player.currentVehicleId
+    ? session.vehicles.vehicles.find((vehicle) => vehicle.id === session.vehicles.player.currentVehicleId)
+    : undefined;
 
   useEffect(() => {
     if (selected && !selectionExists) setSelected(null);
@@ -124,6 +135,19 @@ export function NearbyScreen({
         <div><span>Активный сектор</span><h1 id="nearby-title">Рядом</h1><p>Физические объекты вокруг игрока.</p></div>
         <label className="nearby-search"><span className="sr-only">Поиск</span><input value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} placeholder="Имя, адрес, номер…" /></label>
       </header>
+
+      {playerPosition.state === "inside" && currentBuilding ? (
+        <section className="nearby-player-context" aria-label="Текущее положение игрока">
+          <div><i>▦</i><span><small>Внутри здания</small><strong>{currentBuilding.addressCode}</strong><em>Этаж {playerPosition.floor ?? 1}</em></span></div>
+          <button type="button" onClick={onLeaveBuilding}>Выйти на улицу</button>
+        </section>
+      ) : null}
+      {playerPosition.state === "vehicle" && currentVehicle ? (
+        <section className="nearby-player-context" aria-label="Текущее положение игрока">
+          <div><i>▰</i><span><small>В машине</small><strong>{currentVehicle.modelName}</strong><em>{currentVehicle.plate} · {session.vehicles.player.seat === "driver" ? "водитель" : "пассажир"}</em></span></div>
+          <button type="button" onClick={onLeaveVehicle}>Выйти из машины</button>
+        </section>
+      ) : null}
 
       <div className="nearby-tabs" role="tablist" aria-label="Категории объектов">
         {tabs.map((tab) => {

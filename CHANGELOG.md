@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.33.1 — World Integrity Recovery
+
+- restored explicit exit actions for buildings and physical vehicles in Nearby;
+- stopped free street movement from retaining a stale named location;
+- changed hunger and fatigue to fractional, chunk-independent accumulation;
+- made physical interactions require the player's exact spatial location;
+- added recurring weekly rent obligations after payment;
+- removed the duplicate scheduled rent warning from new and migrated saves;
+- moved personal loan transfers to canonical resident/household funds and explicit kernel counterparties;
+- made map opening labels respect game time;
+- added executable world-integrity regression tests and required them in deploy CI.
+
 ## 0.33.0 — Local Movement & Route Planner
 
 - added persistent street-level walking routes;

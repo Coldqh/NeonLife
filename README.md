@@ -1,15 +1,15 @@
-# NEON LIFE 0.33.0 patch installer
+# NEON LIFE 0.33.1 patch
 
-Патч закреплён на конкретном GitHub-коммите и скачивает только изменённые и новые файлы.
+Патч устанавливается поверх `0.33.0`.
 
-Требования:
-
-- установленная версия 0.32.1;
-- PowerShell;
-- доступ к `raw.githubusercontent.com` во время установки.
-
-Запуск:
+1. Распакуй содержимое ZIP в корень проекта `C:\NeonLife` с заменой файлов.
+2. Открой PowerShell в корне проекта.
+3. Выполни:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\APPLY_PATCH.ps1 -ProjectRoot C:\NeonLife
+npm install
+npm test
+npm run build
 ```
+
+Изменения перечислены в `PATCH_0.33.1.md`. Архив содержит только новые и изменённые файлы.

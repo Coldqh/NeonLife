@@ -1,4 +1,6 @@
 node_modules
 dist
+.worldintegritytest-dist
+.localmovementtest-dist
 *.local
 .DS_Store

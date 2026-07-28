@@ -49,6 +49,9 @@ check("boot reconciles stale transit", save.includes("reconcileLoadedTransitJour
 check("journey start does not auto-skip access time", life.includes("progressLife(session, 0") && life.includes('kind: "begin"'));
 check("transit domain has walk and wait commands", transitSystem.includes('command.kind === "walk"') && transitSystem.includes('command.kind === "wait"'));
 check("false approach success notices removed", !nearby.includes("Ты подошёл к") && !nearby.includes("Посадка:"));
+check("building exit is wired", app.includes("leaveLocalBuilding") && nearby.includes("onLeaveBuilding") && nearby.includes("Выйти на улицу"));
+check("vehicle exit is wired", app.includes("leavePhysicalVehicle") && nearby.includes("onLeaveVehicle") && nearby.includes("Выйти из машины"));
+check("map uses time-aware opening hours", map.includes("isLocationOpen(location, session.timestamp)") && !map.includes('location.open ? "Открыто"'));
 
 for (const file of ["src/ui/theme/app-shell.css", "src/ui/theme/screens.css", "src/ui/theme/map.css", "src/ui/theme/nearby.css", "src/ui/theme/transit.css"]) {
   const text = read(file);

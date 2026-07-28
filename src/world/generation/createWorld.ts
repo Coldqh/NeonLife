@@ -36,7 +36,6 @@ import type {
   GameSession,
   LocationState,
   OrganizationState,
-  ScheduledWorldEvent,
   WorldState
 } from "../state/types";
 
@@ -124,19 +123,6 @@ function attachLocations(
       if (organization) organization.locationIds.push(location.id);
     }
   }
-}
-
-function createQueue(seed: string, start: number, world: WorldState): ScheduledWorldEvent[] {
-  return [
-    {
-      id: createStableEntityId("scheduled", `${seed}:rent-warning`),
-      dueAt: start + 5 * 24 * 60 * 60_000,
-      type: "rent-warning",
-      status: "queued",
-      entityIds: [world.playerId],
-      payload: { daysLeft: 2 }
-    }
-  ];
 }
 
 export function createWorldSession(seed: string): GameSession {
@@ -464,7 +450,7 @@ export function createWorldSession(seed: string): GameSession {
       marketName: market.name,
       housingName: housing.name
     }),
-    eventQueue: createQueue(seed, INITIAL_GAME_TIMESTAMP, world),
+    eventQueue: [],
     currentActivity: `В жилом блоке ${housing.name}`,
     district: districtPulse,
     life: {

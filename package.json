@@ -1,7 +1,7 @@
 {
   "name": "neon-life",
   "private": true,
-  "version": "0.33.0",
+  "version": "0.33.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -15,7 +15,9 @@
     "test:streets": "node scripts/verify-street-topology.mjs",
     "test:recovery": "node scripts/verify-map-profile-recovery.mjs",
     "test:movement": "node scripts/verify-local-movement.mjs",
-    "test:movement:domain": "node scripts/run-local-movement-domain-test.mjs"
+    "test:movement:domain": "node scripts/run-local-movement-domain-test.mjs",
+    "test": "npm run typecheck && npm run test:ui && npm run test:integrity",
+    "test:integrity": "node scripts/run-world-integrity-domain-test.mjs"
   },
   "dependencies": {
     "react": "18.3.1",

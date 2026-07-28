@@ -24,6 +24,8 @@ import {
   finishLocalMovement,
   enterLocalBuilding,
   enterPhysicalVehicle,
+  leaveLocalBuilding,
+  leavePhysicalVehicle,
   interactWithTransitPassenger,
   advanceLocalMovement,
   progressLife,
@@ -195,6 +197,8 @@ export default function App() {
             onWalkTo={walkTo}
             onEnterBuilding={(buildingId) => setSession((current) => enterLocalBuilding(current, buildingId))}
             onEnterVehicle={(vehicleId) => setSession((current) => enterPhysicalVehicle(current, vehicleId))}
+            onLeaveBuilding={() => setSession((current) => leaveLocalBuilding(current))}
+            onLeaveVehicle={() => setSession((current) => leavePhysicalVehicle(current))}
             onRouteTo={routeToLocation}
             onAdvance={advance}
             notify={notify}

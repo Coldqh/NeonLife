@@ -446,7 +446,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
   const clinicLocation = locations.find((location) => location.type === "clinic") ?? marketLocation;
   const existingLife = isObject(payload.life) ? payload.life : null;
   const migratedEvents = (Array.isArray(payload.events) ? payload.events : []).filter((event) => !isLegacyStoryEvent(event));
-  const migratedQueue = (Array.isArray(payload.eventQueue) ? payload.eventQueue : []).filter((event) => !isObject(event) || (event.type !== "vacancy-expiry" && event.type !== "grid-restoration" && event.type !== "patrol-shift"));
+  const migratedQueue = (Array.isArray(payload.eventQueue) ? payload.eventQueue : []).filter((event) => !isObject(event) || (event.type !== "vacancy-expiry" && event.type !== "grid-restoration" && event.type !== "patrol-shift" && event.type !== "rent-warning"));
   const people = hasHumanNetwork(payload.people)
     ? payload.people
     : createHumanNetwork(seed, timestamp, locations);

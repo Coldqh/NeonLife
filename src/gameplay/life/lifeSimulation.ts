@@ -85,6 +85,7 @@ import {
   declineNpcRequest as declineNpcRequestState,
   extendRentObligation,
   payObligation as payObligationState,
+  scheduleNextRentObligation,
   trackPressureMetrics
 } from "../pressure/pressureSystem";
 import type { GameSession } from "../../world/state/types";
@@ -144,6 +145,26 @@ function locationNameForSession(session: GameSession, locationId: string): strin
   return session.world.locations.find((location) => location.id === locationId)?.name ?? "UNKNOWN NODE";
 }
 
+/**
+ * Returns a named location only when the player's physical position is
+ * actually attached to that location. `life.currentLocationId` remains a
+ * legacy routing anchor and is not proof of physical presence after free
+ * street movement.
+ */
+export function getPlayerExactLocationId(session: GameSession): string | null {
+  const position = session.localScene.playerPosition;
+  if (position.locationId && session.world.locations.some((location) => location.id === position.locationId)) {
+    return position.locationId;
+  }
+  if (position.buildingId) {
+    return session.urban.buildings.find((building) => building.id === position.buildingId)?.anchorLocationId ?? null;
+  }
+  if (position.vehicleId) {
+    return session.vehicles.vehicles.find((vehicle) => vehicle.id === position.vehicleId)?.position.locationId ?? null;
+  }
+  return null;
+}
+
 interface ProgressOptions {
   category?: EventCategory;
   title?: string;
@@ -165,6 +186,7 @@ interface ProgressOptions {
   relationChanges?: number;
   worldEvents?: number;
   trackBalance?: boolean;
+  balanceCounterpartyEntityId?: string;
 }
 
 export function progressLife(session: GameSession, minutes: number, options: ProgressOptions = {}): GameSession {
@@ -521,8 +543,10 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     ));
   }
 
-  const baselineFatigue = Math.max(0, Math.round(minutes / 120));
-  const baselineHunger = Math.max(0, Math.round(minutes / 150));
+  // Needs must not depend on whether time advanced in one large action or
+  // many small actions. Player condition supports fractional accumulation.
+  const baselineFatigue = Math.max(0, minutes / 120);
+  const baselineHunger = Math.max(0, minutes / 150);
   const housingDaysLeft = getHousingDaysLeft(session.life.housing, nextTimestamp);
   const courierState = refreshCourierBoard(
     expireCourierOrders(session.jobs.courier, nextTimestamp),
@@ -581,11 +605,12 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   const kernelDrafts = [...populationAdvance.transactions, ...economyAdvance.transactions, ...infrastructureAdvance.transactions, ...productionAdvance.transactions, ...organizationAdvance.transactions, ...governmentAdvance.transactions, ...healthAdvance.transactions, ...dataAdvance.transactions, ...crimeAdvance.transactions];
   if ((options.balanceDelta ?? 0) !== 0) {
     const amount = Math.abs(options.balanceDelta ?? 0);
+    const counterpartyEntityId = options.balanceCounterpartyEntityId ?? kernelSystemEntityId(session.world.meta.seed, "clearing");
     kernelDrafts.push({
       idempotencyKey: `${session.world.meta.seed}:player:${nextTimestamp}:${options.title ?? options.activity ?? "action"}:${options.balanceDelta}`,
       timestamp: nextTimestamp,
-      debitEntityId: (options.balanceDelta ?? 0) < 0 ? session.player.id : kernelSystemEntityId(session.world.meta.seed, "clearing"),
-      creditEntityId: (options.balanceDelta ?? 0) < 0 ? kernelSystemEntityId(session.world.meta.seed, "clearing") : session.player.id,
+      debitEntityId: (options.balanceDelta ?? 0) < 0 ? session.player.id : counterpartyEntityId,
+      creditEntityId: (options.balanceDelta ?? 0) < 0 ? counterpartyEntityId : session.player.id,
       resource: "credits",
       amount,
       reason: "player-action",
@@ -656,7 +681,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     life: {
       ...session.life,
       food: productionAdvance.food,
-      currentLocationId: targetLocation?.id ?? session.life.currentLocationId
+      currentLocationId: targetLocation?.id ?? localSceneState.playerPosition.locationId ?? session.life.currentLocationId
     },
     jobs: {
       ...session.jobs,
@@ -719,7 +744,7 @@ export function advanceLocalMovement(session: GameSession, minutes = 1): GameSes
     sectorId: result.position.sectorId,
     xM: result.position.xM,
     yM: result.position.yM,
-    locationId: arrived ? result.route.target.locationId ?? session.localScene.playerPosition.locationId : session.localScene.playerPosition.locationId,
+    ...(arrived && result.route.target.locationId ? { locationId: result.route.target.locationId } : {}),
     state: "outside",
     updatedAt: session.timestamp + minutes * 60_000
   };
@@ -1450,7 +1475,8 @@ export function drivePhysicalVehicleToLocation(session: GameSession, locationId:
 
 export function servicePhysicalVehicle(session: GameSession, vehicleId: string): GameSession {
   if (session.localScene.playerPosition.state !== "outside") return session;
-  const currentLocation = session.world.locations.find((location) => location.id === session.life.currentLocationId);
+  const exactLocationId = getPlayerExactLocationId(session);
+  const currentLocation = session.world.locations.find((location) => location.id === exactLocationId);
   const vehicle = getPhysicalVehicle(session.vehicles, vehicleId);
   if (!vehicle || currentLocation?.type !== "workshop" || vehicle.distanceToPlayerM > 30 || vehicle.state === "moving") return session;
   if (vehicle.access !== "owned" && vehicle.access !== "authorized") return session;
@@ -1583,7 +1609,8 @@ function forgedVehiclePlate(session: GameSession, vehicleId: string): string {
 }
 
 function isAtVehicleWorkshop(session: GameSession): boolean {
-  return session.world.locations.find((location) => location.id === session.life.currentLocationId)?.type === "workshop";
+  const exactLocationId = getPlayerExactLocationId(session);
+  return session.world.locations.find((location) => location.id === exactLocationId)?.type === "workshop";
 }
 
 export function replateStolenPhysicalVehicle(session: GameSession, vehicleId: string): GameSession {
@@ -1661,7 +1688,9 @@ export function acceptCourierOrder(session: GameSession, orderId: string): GameS
 
 export function pickupCourierOrder(session: GameSession): GameSession {
   const active = getActiveCourierOrder(session.jobs.courier);
-  const nextState = collectCourierCargo(session.jobs.courier, session.life.currentLocationId, session.timestamp + 6 * 60_000);
+  const exactLocationId = getPlayerExactLocationId(session);
+  if (!exactLocationId) return session;
+  const nextState = collectCourierCargo(session.jobs.courier, exactLocationId, session.timestamp + 6 * 60_000);
   if (!active || nextState === session.jobs.courier) return session;
   const progressed = progressLife(session, 6, {
     category: "work",
@@ -1719,7 +1748,9 @@ export function deliverCourierOrder(session: GameSession): GameSession {
     };
   }
   const completionTimestamp = session.timestamp + 5 * 60_000;
-  const completion = completeCourierOrder(session.jobs.courier, session.life.currentLocationId, completionTimestamp);
+  const exactLocationId = getPlayerExactLocationId(session);
+  if (!exactLocationId) return session;
+  const completion = completeCourierOrder(session.jobs.courier, exactLocationId, completionTimestamp);
   if (!completion) return session;
   const progressed = progressLife(session, 5, {
     category: "work",
@@ -1867,12 +1898,14 @@ export function completePersonalRequest(session: GameSession, requestId: string)
       ].slice(0, 100)
     };
   }
+  const exactLocationId = getPlayerExactLocationId(session);
+  if (!exactLocationId) return session;
   const completionAt = session.timestamp + request.durationMinutes * 60_000;
   const completion = completeNpcRequestState(
     session.pressure,
     requestId,
     completionAt,
-    session.life.currentLocationId,
+    exactLocationId,
     session.player.balance
   );
   if (!completion) return session;
@@ -1918,26 +1951,70 @@ export function completePersonalRequest(session: GameSession, requestId: string)
   };
 }
 
+function adjustPersonLiquidity(
+  session: GameSession,
+  personId: string,
+  delta: number
+): { population: GameSession["population"]; accountEntityId: string } | null {
+  const resident = session.population.residents.find((item) => item.activePersonId === personId);
+  if (!resident || !Number.isFinite(delta) || delta === 0) return null;
+  const household = session.population.households.find((item) => item.id === resident.householdId);
+  let residentSavings = Math.max(0, resident.savings);
+  let householdBalance = Math.max(0, household?.balance ?? 0);
+
+  if (delta < 0) {
+    let remaining = Math.abs(delta);
+    if (residentSavings + householdBalance < remaining) return null;
+    const fromSavings = Math.min(residentSavings, remaining);
+    residentSavings -= fromSavings;
+    remaining -= fromSavings;
+    householdBalance -= remaining;
+  } else {
+    residentSavings += delta;
+  }
+
+  return {
+    accountEntityId: resident.id,
+    population: {
+      ...session.population,
+      residents: session.population.residents.map((item) => item.id === resident.id ? { ...item, savings: residentSavings } : item),
+      households: household
+        ? session.population.households.map((item) => item.id === household.id ? { ...item, balance: householdBalance } : item)
+        : session.population.households
+    }
+  };
+}
+
 export function payPlayerObligation(session: GameSession, obligationId: string): GameSession {
   const originalObligation = session.pressure.obligations.find((item) => item.id === obligationId);
   const payment = payObligationState(session.pressure, obligationId, session.timestamp + 2 * 60_000, session.player.balance);
   if (!payment) return session;
   const obligation = payment.obligation;
-  const base = { ...session, pressure: payment.state };
+  const creditorLiquidity = obligation.type === "personal" && obligation.creditorPersonId
+    ? adjustPersonLiquidity(session, obligation.creditorPersonId, obligation.amount)
+    : null;
+  const base = {
+    ...session,
+    pressure: payment.state,
+    population: creditorLiquidity?.population ?? session.population
+  };
   const progressed = progressLife(base, 2, {
     category: "finance",
     title: `${obligation.code}: платёж проведён.`,
     detail: `${obligation.creditorName} · −₵ ${obligation.amount}`,
     importance: originalObligation?.status === "overdue" || originalObligation?.status === "defaulted" ? 2 : 1,
     balanceDelta: -obligation.amount,
+    balanceCounterpartyEntityId: creditorLiquidity?.accountEntityId,
     relationChanges: obligation.creditorPersonId ? 1 : 0,
     activity: "Финансовый терминал"
   });
   let next = progressed;
   if (obligation.type === "rent") {
     const paidUntil = Math.max(session.life.housing.paidUntil, progressed.timestamp) + 7 * 24 * 60 * 60_000;
+    const pressure = scheduleNextRentObligation(progressed.pressure, obligation.id, paidUntil);
     next = {
       ...progressed,
+      pressure,
       life: { ...progressed.life, housing: { ...progressed.life.housing, paidUntil } },
       player: { ...progressed.player, housingDaysLeft: getHousingDaysLeft({ ...progressed.life.housing, paidUntil }, progressed.timestamp) }
     };
@@ -2014,6 +2091,8 @@ export function requestEmergencyLoan(session: GameSession, personId: string): Ga
     };
   }
   const amount = Math.min(160, Math.max(100, Math.floor(person.money * 0.22)));
+  const creditorLiquidity = adjustPersonLiquidity(session, person.id, -amount);
+  if (!creditorLiquidity) return session;
   const obligation = {
     id: createStableEntityId("obligation", `${session.world.meta.seed}:personal:${person.id}:${session.timestamp}`),
     code: `OBL-P${session.pressure.obligations.length + 1}`,
@@ -2031,16 +2110,14 @@ export function requestEmergencyLoan(session: GameSession, personId: string): Ga
   const base = {
     ...session,
     pressure: { ...session.pressure, obligations: [...session.pressure.obligations, obligation] },
-    people: {
-      ...session.people,
-      people: session.people.people.map((item) => item.id === person.id ? { ...item, money: item.money - amount } : item)
-    }
+    population: creditorLiquidity.population
   };
   const progressed = progressLife(base, 6, {
     category: "finance",
     title: `${person.name} передал ₵ ${amount}.`,
     detail: `Личный долг ${obligation.code} · вернуть в течение трёх дней.`,
     balanceDelta: amount,
+    balanceCounterpartyEntityId: creditorLiquidity.accountEntityId,
     trackBalance: false,
     relationChanges: 1,
     activity: "Личный финансовый перевод"
@@ -2062,7 +2139,8 @@ export function requestEmergencyLoan(session: GameSession, personId: string): Ga
 }
 
 export function buyFoodAtCurrentLocation(session: GameSession, productId: string): GameSession {
-  const location = session.world.locations.find((item) => item.id === session.life.currentLocationId);
+  const exactLocationId = getPlayerExactLocationId(session);
+  const location = session.world.locations.find((item) => item.id === exactLocationId);
   if (!location || !isLocationOpen(location, session.timestamp)) return session;
   const product = getFoodProduct(productId);
   const business = getBusinessAtLocation(session.economy, location.id);
@@ -2120,7 +2198,7 @@ export function orderFoodToHome(session: GameSession, productId: string): GameSe
 
 export function eatFoodFromStorage(session: GameSession, productId: string): GameSession {
   const product = getFoodProduct(productId);
-  const atHome = session.life.currentLocationId === session.life.housing.locationId;
+  const atHome = getPlayerExactLocationId(session) === session.life.housing.locationId;
   if (!canPrepare(product.requirement, session.life.food.appliances, atHome)) return session;
   const consumed = consumeFood(session.life.food, productId, session.timestamp);
   if (!consumed) return session;
@@ -2160,7 +2238,7 @@ export function discardSpoiled(session: GameSession): GameSession {
 }
 
 export function sleepAtHome(session: GameSession, hours: number): GameSession {
-  if (session.life.currentLocationId !== session.life.housing.locationId || session.pressure.housingStatus === "evicted") return session;
+  if (getPlayerExactLocationId(session) !== session.life.housing.locationId || session.pressure.housingStatus === "evicted") return session;
   const recovery = calculateSleepRecovery(session.life.housing, hours);
   const progressed = progressLife(session, hours * 60, {
     category: "personal",

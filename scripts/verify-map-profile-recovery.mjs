@@ -19,7 +19,7 @@ const life = read("src/gameplay/life/lifeSimulation.ts");
 check("profile is a dossier, not a position debugger", profile.includes("Личное досье") && profile.includes("Собственность") && profile.includes("История мира"));
 check("profile removes spatial exit actions", !profile.includes("onLeaveBuilding") && !profile.includes("onLeaveVehicle") && !profile.includes("Количество ключей"));
 check("profile uses only real session data", !profile.includes("Псевдо") && !profile.includes("fake") && profile.includes("session.jobs.courier.completedDeliveries"));
-check("app no longer wires profile exit actions", app.includes("<ProfileScreen session={session} />") && !app.includes("onLeaveBuilding={()"));
+check("profile stays passive while Nearby owns exit actions", app.includes("<ProfileScreen session={session} />") && app.includes("onLeaveBuilding={()") && app.includes("onLeaveVehicle={()"));
 check("map is a full stage", mapScreen.includes("map-stage") && mapCss.includes('.game-shell[data-screen="map"] .game-shell__content { overflow: hidden; }'));
 check("map uses city district sector breadcrumb", ["Город", "openDistrict", "openSector", "map-breadcrumb"].every((marker) => mapScreen.includes(marker)));
 check("map inspector became bottom sheet", mapScreen.includes("map-sheet") && !mapScreen.includes("map-inspector") && !mapCss.includes(".map-inspector"));

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import type { GameSession, LocationState } from "../../world/state/types";
 import type { MapDistrictState, MetropolitanSectorState } from "../../simulation/spatial/types";
-import { getTravelOptions } from "../../gameplay/travel/travelSystem";
+import { getTravelOptions, isLocationOpen } from "../../gameplay/travel/travelSystem";
 import { getSectorStreetTopology } from "../../simulation/streets/streetTopologySystem";
 import { GlobalCityMap, type MapLayers, type MapPointSelection } from "../map/GlobalCityMap";
 import { LocalSectorMap, type LocalMapSelection } from "../map/LocalSectorMap";
@@ -252,9 +252,10 @@ export function MapScreen({
       ["Риск", `${selectedDistrict.riskScore}%`]
     ];
   } else if (localSelection?.kind === "location") {
+    const open = isLocationOpen(localSelection.location, session.timestamp);
     selectionTitle = localSelection.location.name;
     selectionEyebrow = "Точка города";
-    selectionDescription = `${localSelection.location.open ? "Открыто" : "Закрыто"} · безопасность ${localSelection.location.security}%`;
+    selectionDescription = `${open ? "Открыто" : "Закрыто"} · безопасность ${localSelection.location.security}%`;
     selectionFacts = [["Район", selectedDistrict?.name ?? "—"], ["Сектор", selectedSector.code]];
   } else if (localSelection?.kind === "building") {
     selectionTitle = localSelection.building.addressCode;
@@ -334,7 +335,7 @@ export function MapScreen({
                 <header><h2>Места сектора</h2><span>{sectorLocations.length + sectorStops.length}</span></header>
                 {sectorLocations.map((location) => (
                   <button type="button" key={location.id} onClick={() => { setSelectedLocationId(location.id); setLocalSelection({ kind: "location", location }); setMode("local"); setSheetSize("half"); }}>
-                    <span><strong>{location.name}</strong><small>{location.open ? "Открыто" : "Закрыто"}</small></span><em>›</em>
+                    <span><strong>{location.name}</strong><small>{isLocationOpen(location, session.timestamp) ? "Открыто" : "Закрыто"}</small></span><em>›</em>
                   </button>
                 ))}
                 {sectorStops.slice(0, 8).map((stop) => (

@@ -33,7 +33,17 @@ export function districtName(session: GameSession, districtId = session.world.ac
 }
 
 export function currentLocation(session: GameSession): LocationState | undefined {
-  return session.world.locations.find((location) => location.id === session.life.currentLocationId);
+  const position = session.localScene.playerPosition;
+  const buildingLocationId = position.buildingId
+    ? session.urban.buildings.find((building) => building.id === position.buildingId)?.anchorLocationId
+    : undefined;
+  const vehicleLocationId = position.vehicleId
+    ? session.vehicles.vehicles.find((vehicle) => vehicle.id === position.vehicleId)?.position.locationId
+    : undefined;
+  const exactLocationId = position.locationId ?? buildingLocationId ?? vehicleLocationId;
+  return exactLocationId
+    ? session.world.locations.find((location) => location.id === exactLocationId)
+    : undefined;
 }
 
 export function playerOccupation(session: GameSession): string {
