@@ -1,14 +1,14 @@
 {
   "name": "neon-life",
   "private": true,
-  "version": "0.34.0",
+  "version": "0.35.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json --pretty false && tsc --noEmit -p tsconfig.node.json --pretty false",
-    "test:ui": "npm run test:ui:architecture && npm run test:ui:recovery && npm run test:recovery && npm run test:movement",
+    "test:ui": "npm run test:ui:architecture && npm run test:ui:recovery && npm run test:recovery && npm run test:movement && npm run test:map-ui",
     "test:ui:architecture": "node scripts/verify-ui-architecture.mjs",
     "test:ui:recovery": "node scripts/verify-ui-recovery.mjs",
     "test:map": "node scripts/verify-map-foundation.mjs",
@@ -18,7 +18,8 @@
     "test:movement:domain": "node scripts/run-local-movement-domain-test.mjs",
     "test": "npm run typecheck && npm run test:ui && npm run test:integrity && npm run test:life",
     "test:integrity": "node scripts/run-world-integrity-domain-test.mjs",
-    "test:life": "node scripts/run-physical-life-domain-test.mjs"
+    "test:life": "node scripts/run-physical-life-domain-test.mjs",
+    "test:map-ui": "node scripts/verify-city-map-overhaul.mjs"
   },
   "dependencies": {
     "react": "18.3.1",

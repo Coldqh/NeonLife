@@ -27,6 +27,7 @@ import {
   enterPhysicalVehicle,
   leaveLocalBuilding,
   leavePhysicalVehicle,
+  moveInsideBuilding,
   interactWithTransitPassenger,
   advanceLocalMovement,
   progressLife,
@@ -189,6 +190,11 @@ export default function App() {
             onRequestedLocationHandled={() => setRequestedLocationId(undefined)}
             onTravel={travel}
             onWalk={walkTo}
+            onEnterBuilding={(buildingId) => setSession((current) => enterLocalBuilding(current, buildingId))}
+            onLeaveBuilding={() => setSession((current) => leaveLocalBuilding(current))}
+            onMoveBuildingFloor={(floor, method) => setSession((current) => moveInsideBuilding(current, floor, method))}
+            onEnterVehicle={(vehicleId) => setSession((current) => enterPhysicalVehicle(current, vehicleId))}
+            onLeaveVehicle={() => setSession((current) => leavePhysicalVehicle(current))}
           />
         ) : null}
         {screen === "nearby" ? (

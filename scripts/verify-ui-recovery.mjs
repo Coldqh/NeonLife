@@ -44,7 +44,7 @@ check("food has carried and home storage presentation", localActions.includes("�
 check("courier loop exposes pickup and delivery", localActions.includes("Забрать груз") && localActions.includes("Передать груз"));
 check("clinic actions are physical", localActions.includes("Стабилизация") && localActions.includes("clinic-care"));
 check("nearby inspector is not a fixed overlay", !nearbyCss.includes("position: fixed"));
-check("map has city district sector navigation", map.includes("map-breadcrumb") && map.includes("openDistrict") && map.includes("openSector"));
+check("map has city district sector navigation", map.includes("city-map__segmented") && map.includes("openDistrict") && map.includes("openSector") && map.includes('setMode("global")') && map.includes('setMode("local")'));
 check("global map supports pinch", globalMap.includes("pointers.current.size >= 2") && globalMap.includes("PinchState"));
 check("local map supports pinch", localMap.includes("pointers.current.size >= 2") && localMap.includes("PinchState"));
 check("global transit layer uses real routes", globalMap.includes("session.transit.routes") && globalMap.includes("route.stopIds"));
@@ -61,7 +61,7 @@ check("building exit is wired", app.includes("leaveLocalBuilding") && nearby.inc
 check("vehicle exit is wired", app.includes("leavePhysicalVehicle") && nearby.includes("onLeaveVehicle") && nearby.includes("Выйти из машины"));
 check("map uses time-aware opening hours", map.includes("isLocationOpen(location, session.timestamp)") && !map.includes('location.open ? "Открыто"'));
 
-for (const file of ["src/ui/theme/app-shell.css", "src/ui/theme/screens.css", "src/ui/theme/map.css", "src/ui/theme/nearby.css", "src/ui/theme/transit.css"]) {
+for (const file of ["src/ui/theme/app-shell.css", "src/ui/theme/screens.css", "src/ui/theme/map.css", "src/ui/theme/city-map.css", "src/ui/theme/city-map-render.css", "src/ui/theme/city-profiles.css", "src/ui/theme/nearby.css", "src/ui/theme/transit.css"]) {
   const text = read(file);
   check(`${file} braces balanced`, (text.match(/\{/g) ?? []).length === (text.match(/\}/g) ?? []).length);
 }

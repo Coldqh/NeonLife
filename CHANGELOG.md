@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.35.0 — City Map & Profile Overhaul
+
+- replaced the primary global and local map UI;
+- rendered real metropolitan roads, transit lines, street blocks and street segments;
+- added functional map filters and category markers;
+- restricted people and vehicles to the player’s actual building, street or immediate radius;
+- added rich venue, residential building, stop, person and vehicle profiles;
+- connected building entry, exit, floor movement, vehicle entry and vehicle exit to domain commands;
+- added persistent favorites, share/clipboard actions and startable physical routes;
+- split map, rendering and profile styles into bounded files;
+- added executable city-map overhaul verification.
+
 ## 0.34.0 — Physical Life Loop
 
 - added a physical contextual actions tab to Nearby;
