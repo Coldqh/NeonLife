@@ -506,3 +506,39 @@
   .map-sheet__actions button { max-width: 88px; font-size: 10px; }
   .route-card dl { grid-template-columns: 1fr 1fr; }
 }
+
+/* v0.33.0 local movement */
+.local-map__route { pointer-events: none; }
+.local-map__route polyline {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.local-map__route-base {
+  stroke: rgba(226, 233, 244, .24);
+  stroke-width: 1.45;
+}
+.local-map__route-remaining {
+  stroke: rgba(255, 51, 77, .98);
+  stroke-width: 1.15;
+  filter: drop-shadow(0 0 4px rgba(255, 51, 77, .42));
+}
+.local-map__route-start {
+  fill: var(--nl-bg-deep);
+  stroke: var(--nl-text);
+  stroke-width: .7;
+  vector-effect: non-scaling-stroke;
+}
+.local-map__route-target {
+  fill: var(--nl-accent);
+  stroke: #fff;
+  stroke-width: .8;
+  vector-effect: non-scaling-stroke;
+}
+.route-card__streets {
+  margin: 10px 0 0;
+  color: var(--nl-muted);
+  font-size: 13px;
+  line-height: 18px;
+}

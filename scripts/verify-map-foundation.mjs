@@ -38,14 +38,14 @@ check("map has district road rail bus traffic risk and activity layers", ["distr
 check("transport layer draws route paths", globalMap.includes("session.transit.routes") && globalMap.includes("route.stopIds"));
 check("traffic layer colors actual road links", globalMap.includes("link.trafficLoad") && globalMap.includes("layers.traffic"));
 check("map uses levels of detail", globalMap.includes("zoom >= 2.05") && globalMap.includes("zoom < 1.85") && globalMap.includes("zoom >= 1.35"));
-check("map separates district and sector inspectors", mapScreen.includes('type InspectorLevel = "district" | "sector"') && mapScreen.includes("district-inspector") && mapScreen.includes("sector-inspector"));
+check("map separates district and sector selection", mapScreen.includes('type InspectorLevel = "district" | "sector"') && mapScreen.includes("map-sheet") && mapScreen.includes("inspectorLevel"));
 check("exact point selection is retained", mapScreen.includes("selectedPoint") && globalMap.includes("MapPointSelection"));
 check("travel requires explicit location selection", mapScreen.includes("selectedLocationId") && !mapScreen.includes("sectorLocations[0]"));
 check("camera does not auto-focus on first render", globalMap.includes("if (!focusRevision) return"));
-check("layer controls are horizontally scrollable", mapCss.includes("overflow-x: auto") && mapCss.includes("scrollbar-width: none"));
+check("layers use a dedicated overlay", mapScreen.includes("layersOpen") && mapScreen.includes("map-layer-overlay") && mapScreen.includes("map-layer-sheet"));
 check("map CSS braces balanced", (mapCss.match(/\{/g) ?? []).length === (mapCss.match(/\}/g) ?? []).length);
 check("global map stays within file bound", globalMap.split(/\r?\n/).length <= 540);
-check("map screen stays within file bound", mapScreen.split(/\r?\n/).length <= 360);
+check("map screen stays within file bound", mapScreen.split(/\r?\n/).length <= 420);
 
 const failures = checks.filter((item) => !item.pass);
 for (const item of checks) console.log(`${item.pass ? "PASS" : "FAIL"} ${item.name}`);

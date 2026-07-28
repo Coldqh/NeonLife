@@ -6,6 +6,7 @@ import "./ui/theme/global.css";
 import "./ui/theme/app-shell.css";
 import "./ui/theme/screens.css";
 import "./ui/theme/map.css";
+import "./ui/theme/local-movement.css";
 import "./ui/theme/nearby.css";
 import "./ui/theme/transit.css";
 import "./ui/theme/overlays.css";

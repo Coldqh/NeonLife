@@ -1,11 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import type { GameSession, LocationState } from "../../world/state/types";
 import type { MapDistrictState, MetropolitanSectorState } from "../../simulation/spatial/types";
 import { getTravelOptions } from "../../gameplay/travel/travelSystem";
 import { getSectorStreetTopology } from "../../simulation/streets/streetTopologySystem";
 import { GlobalCityMap, type MapLayers, type MapPointSelection } from "../map/GlobalCityMap";
 import { LocalSectorMap, type LocalMapSelection } from "../map/LocalSectorMap";
+import { RouteCard } from "../map/RouteCard";
 import { compactNumber } from "../shared/presentation";
+import type { LocalMovementTargetState } from "../../simulation/localMovement/types";
+import {
+  localMovementTargetForBuilding,
+  localMovementTargetForLocation,
+  localMovementTargetForPoint,
+  localMovementTargetForStop,
+  planLocalMovement
+} from "../../simulation/localMovement/localMovementSystem";
 
 const LAYER_ITEMS: Array<{ key: keyof MapLayers; label: string; icon: string; description: string }> = [
   { key: "districts", label: "Районы", icon: "◇", description: "Границы и названия районов" },
@@ -33,13 +42,6 @@ function landUseLabel(value: MetropolitanSectorState["landUse"]): string {
     vacant: "Незастроенная зона"
   };
   return labels[value];
-}
-
-function travelModeLabel(mode: ReturnType<typeof getTravelOptions>[number]["mode"]): string {
-  if (mode === "walk") return "Пешком";
-  if (mode === "bus") return "Автобус";
-  if (mode === "metro") return "Метро";
-  return "Такси";
 }
 
 function buildingUseLabel(use: GameSession["urban"]["buildings"][number]["use"]): string {
@@ -72,12 +74,14 @@ export function MapScreen({
   session,
   requestedLocationId,
   onRequestedLocationHandled,
-  onTravel
+  onTravel,
+  onWalk
 }: {
   session: GameSession;
   requestedLocationId?: string;
   onRequestedLocationHandled: () => void;
   onTravel: (locationId: string) => void;
+  onWalk: (target: LocalMovementTargetState) => void;
 }) {
   const focusSector = session.metropolitan.sectors.find((sector) => sector.id === session.metropolitan.streaming.focusSectorId)
     ?? session.metropolitan.sectors[0];
@@ -135,6 +139,31 @@ export function MapScreen({
     urban: session.urban,
     preferredSectorId: selectedSector.id
   }, selectedSector.id), [selectedSector.id, session.metropolitan, session.streets, session.timestamp, session.urban, session.world.meta.seed]);
+
+  const movementTarget = useMemo<LocalMovementTargetState | null>(() => {
+    if (!localSelection || mode !== "local") return null;
+    if (localSelection.kind === "location") return localMovementTargetForLocation(session, localSelection.location.id);
+    if (localSelection.kind === "building") return localMovementTargetForBuilding(session, localSelection.building.id);
+    if (localSelection.kind === "stop") return localMovementTargetForStop(session, localSelection.stop.id);
+    if (localSelection.kind === "point") return localMovementTargetForPoint(session, selectedSector.id, localSelection.xM, localSelection.yM);
+    const nodes = new Map(selectedTopology.intersections.map((node) => [node.id, node]));
+    const from = nodes.get(localSelection.segment.fromIntersectionId);
+    const to = nodes.get(localSelection.segment.toIntersectionId);
+    if (!from || !to) return null;
+    return localMovementTargetForPoint(
+      session,
+      selectedSector.id,
+      (from.xM + to.xM) / 2,
+      (from.yM + to.yM) / 2,
+      localSelection.segment.name,
+      localSelection.segment
+    );
+  }, [localSelection, mode, selectedSector.id, selectedTopology.intersections, session]);
+
+  const movementPreview = useMemo(
+    () => movementTarget && !session.localMovement ? planLocalMovement(session, movementTarget) : null,
+    [movementTarget, session]
+  );
 
   function selectSector(selection: MapPointSelection): void {
     setSelectedSectorId(selection.sector.id);
@@ -195,6 +224,11 @@ export function MapScreen({
   function beginTravel(): void {
     if (!selectedLocation || selectedLocation.id === session.life.currentLocationId) return;
     onTravel(selectedLocation.id);
+  }
+
+  function beginWalk(): void {
+    if (!movementTarget || !movementPreview) return;
+    onWalk(movementTarget);
   }
 
   let selectionTitle = selectedSector.code;
@@ -260,7 +294,7 @@ export function MapScreen({
             onSelectDistrict={selectDistrict}
           />
         ) : (
-          <LocalSectorMap session={session} sector={selectedSector} selected={localSelection} onSelect={selectLocal} />
+          <LocalSectorMap session={session} sector={selectedSector} selected={localSelection} route={movementPreview ?? session.localMovement ?? null} onSelect={selectLocal} />
         )}
 
         <nav className="map-breadcrumb" aria-label="Уровни карты" data-no-swipe>
@@ -311,28 +345,24 @@ export function MapScreen({
               </section>
             ) : null}
 
-            {selectedLocation ? (
-              <section className="route-card">
-                <header><span>Маршрут</span><strong>{selectedLocation.name}</strong></header>
-                {selectedLocation.id === session.life.currentLocationId ? <p>Ты уже находишься здесь.</p> : travelOption ? (
-                  <>
-                    <div className="route-card__line"><i>●</i><span /><b>{travelModeLabel(travelOption.mode)}</b><span /><i>◆</i></div>
-                    <dl>
-                      <div><dt>Время</dt><dd>{travelOption.durationMinutes} мин.</dd></div>
-                      <div><dt>Стоимость</dt><dd>{travelOption.cost ? `₵ ${travelOption.cost}` : "Бесплатно"}</dd></div>
-                      <div><dt>Расстояние</dt><dd>{travelOption.distanceKm} км</dd></div>
-                    </dl>
-                    <button type="button" className="primary-button" disabled={session.player.balance < travelOption.cost} onClick={beginTravel}>{session.player.balance < travelOption.cost ? "Недостаточно средств" : "Начать маршрут"}</button>
-                  </>
-                ) : <p>Маршрут к этой точке сейчас недоступен.</p>}
-              </section>
+            {movementTarget ? (
+              <RouteCard
+                target={movementTarget}
+                preview={movementPreview}
+                selectedLocation={selectedLocation}
+                currentLocationId={session.life.currentLocationId}
+                travelOption={travelOption}
+                balance={session.player.balance}
+                onWalk={beginWalk}
+                onTravel={beginTravel}
+              />
             ) : null}
           </div>
         </aside>
 
         {layersOpen ? (
           <div className="map-layer-overlay" role="presentation" onClick={() => setLayersOpen(false)}>
-            <section className="map-layer-sheet" role="dialog" aria-modal="true" aria-label="Слои карты" onClick={(event) => event.stopPropagation()}>
+            <section className="map-layer-sheet" role="dialog" aria-modal="true" aria-label="Слои карты" onClick={(event: ReactMouseEvent<HTMLElement>) => event.stopPropagation()}>
               <header><div><span>Отображение</span><h2>Слои карты</h2></div><button type="button" onClick={() => setLayersOpen(false)}>×</button></header>
               <div>
                 {LAYER_ITEMS.map((item) => (

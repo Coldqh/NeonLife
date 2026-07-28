@@ -45,6 +45,8 @@ import {
 } from "../../simulation/transit/transitOperationsSystem";
 import type { TransitCommand, TransitPhoneActivity } from "../../simulation/transit/types";
 import { advanceStreetTopologyState, alignUrbanFabricToStreetTopology, snapPhysicalVehicleParkingToStreetTopology, snapTransitStopsToStreetTopology } from "../../simulation/streets/streetTopologySystem";
+import { advanceLocalMovementRoute, localMovementCurrentStreet, localMovementTargetForStop, planLocalMovement, refreshLocalMovementRoute, WALKING_SPEED_M_PER_MINUTE } from "../../simulation/localMovement/localMovementSystem";
+import type { LocalMovementTargetState } from "../../simulation/localMovement/types";
 import {
   advanceVehicleCrimeState,
   appendVehicleCrimeObservations,
@@ -665,8 +667,110 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   };
 }
 
+
+function applyLocalMovementDistrict(session: GameSession): GameSession {
+  const position = session.localScene.playerPosition;
+  const sector = session.metropolitan.sectors.find((item) => item.id === position.sectorId);
+  const mapDistrict = sector ? session.metropolitan.mapDistricts.find((item) => item.id === sector.mapDistrictId) : undefined;
+  const district = mapDistrict ? session.world.districts.find((item) => item.id === mapDistrict.administrativeDistrictId) : undefined;
+  if (!sector && !district) return session;
+  return {
+    ...session,
+    world: { ...session.world, activeDistrictId: district?.id ?? session.world.activeDistrictId },
+    player: {
+      ...session.player,
+      district: district?.name ?? session.player.district,
+      sector: sector?.code ?? session.player.sector
+    }
+  };
+}
+
+export function reconcileLocalMovement(session: GameSession): GameSession {
+  const route = session.localMovement;
+  if (!route) return session;
+  const valid = route.version === 1
+    && route.points.length >= 2
+    && route.currentLegIndex >= 0
+    && route.currentLegIndex < route.points.length
+    && route.points.every((point) => Number.isFinite(point.xM) && Number.isFinite(point.yM))
+    && Number.isFinite(route.totalDistanceM)
+    && Number.isFinite(route.travelledM)
+    && Number.isFinite(route.streetDeltaCount)
+    && typeof route.streetRevision === "string";
+  if (!valid) return { ...session, localMovement: undefined };
+  if (route.status === "arrived") return session;
+  const refreshed = refreshLocalMovementRoute(session, route);
+  return refreshed ? { ...session, localMovement: refreshed } : { ...session, localMovement: undefined, currentActivity: "На улице" };
+}
+
+export function startLocalMovement(session: GameSession, target: LocalMovementTargetState): GameSession {
+  if (session.localMovement || session.transit.player.journey || session.localScene.playerPosition.state !== "outside") return session;
+  const route = planLocalMovement(session, target);
+  if (!route) return session;
+  return { ...session, localMovement: route, currentActivity: `Пешком: ${route.target.label}` };
+}
+
+export function advanceLocalMovement(session: GameSession, minutes = 1): GameSession {
+  const route = session.localMovement;
+  if (!route || route.status !== "walking" || minutes <= 0) return session;
+  const result = advanceLocalMovementRoute(session, route, minutes);
+  const arrived = result.route.status === "arrived";
+  const position: SpatialPositionState = {
+    sectorId: result.position.sectorId,
+    xM: result.position.xM,
+    yM: result.position.yM,
+    locationId: arrived ? result.route.target.locationId ?? session.localScene.playerPosition.locationId : session.localScene.playerPosition.locationId,
+    state: "outside",
+    updatedAt: session.timestamp + minutes * 60_000
+  };
+  const transitJourney = session.transit.player.journey;
+  const linkedTransitWalk = Boolean(result.route.target.stopId
+    && transitJourney?.phase === "walking"
+    && transitJourney.currentStopId === result.route.target.stopId);
+  const transitWalkMinutes = linkedTransitWalk && transitJourney
+    ? (arrived
+      ? transitJourney.walkingMinutesRemaining
+      : Math.min(minutes, Math.max(0, transitJourney.walkingMinutesRemaining - 1)))
+    : 0;
+  const progressed = progressLife({ ...session, localMovement: route }, minutes, {
+    category: arrived ? "personal" : undefined,
+    title: arrived ? `Прибытие: ${result.route.target.label}.` : undefined,
+    detail: arrived ? `Пешком · ${Math.round(result.route.totalDistanceM)} м.` : undefined,
+    importance: 1,
+    activity: arrived ? `У цели: ${result.route.target.label}` : `Идёт по ${localMovementCurrentStreet(result.route)}`,
+    targetLocationId: arrived ? result.route.target.locationId : undefined,
+    playerPosition: position,
+    fatigueDelta: minutes >= 8 ? 1 : 0,
+    transitCommand: transitWalkMinutes > 0 ? { kind: "walk", minutes: transitWalkMinutes } : undefined,
+    suppressTimeEvent: true
+  });
+  return applyLocalMovementDistrict({ ...progressed, localMovement: result.route });
+}
+
+export function skipLocalMovement(session: GameSession): GameSession {
+  const route = session.localMovement;
+  if (!route || route.status !== "walking") return session;
+  const minutes = Math.max(1, Math.ceil(route.remainingDistanceM / WALKING_SPEED_M_PER_MINUTE));
+  return advanceLocalMovement(session, minutes);
+}
+
+export function cancelLocalMovement(session: GameSession): GameSession {
+  const route = session.localMovement;
+  if (!route || route.status === "arrived") return session;
+  const withoutMovement = { ...session, localMovement: undefined, currentActivity: "На улице" };
+  const journey = session.transit.player.journey;
+  return route.target.stopId && journey?.phase === "walking" && journey.currentStopId === route.target.stopId
+    ? cancelTransitJourney(withoutMovement)
+    : withoutMovement;
+}
+
+export function finishLocalMovement(session: GameSession): GameSession {
+  if (!session.localMovement || session.localMovement.status !== "arrived") return session;
+  return { ...session, localMovement: undefined };
+}
+
 export function travelToLocation(session: GameSession, locationId: string): GameSession {
-  if (session.localScene.playerPosition.state === "vehicle" || session.transit.player.journey) return session;
+  if (session.localScene.playerPosition.state === "vehicle" || session.transit.player.journey || session.localMovement) return session;
   const option = getTravelOptions(session).find((item) => item.location.id === locationId);
   if (!option) return session;
   if (option.mode === "bus" || option.mode === "metro") return startTransitJourney(session, locationId);
@@ -744,10 +848,12 @@ export function startTransitJourney(session: GameSession, locationId: string): G
   const stop = getTransitStop(session.transit, estimate.originStopId);
   if (!position || !stop) return session;
   const firstRoute = session.transit.routes.find((route) => route.id === estimate.segments[0]?.routeId);
-  return progressLife(session, 0, {
+  const stopTarget = estimate.walkingMinutes > 0 ? localMovementTargetForStop(session, estimate.originStopId) : null;
+  const streetRoute = stopTarget ? planLocalMovement(session, stopTarget) : null;
+  const progressed = progressLife(session, 0, {
     category: "personal",
     title: `Маршрут построен: ${stop.name}.`,
-    detail: `${firstRoute?.code ?? option.routeCode} · пешком ${estimate.walkingMinutes} мин. · ожидание ${estimate.waitingMinutes} мин. · ${estimate.segments.length > 1 ? `${estimate.segments.length - 1} пересадка` : "прямой маршрут"}`,
+    detail: `${firstRoute?.code ?? option.routeCode} · пешком ${streetRoute?.estimatedMinutes ?? estimate.walkingMinutes} мин. · ожидание ${estimate.waitingMinutes} мин. · ${estimate.segments.length > 1 ? `${estimate.segments.length - 1} пересадка` : "прямой маршрут"}`,
     importance: firstRoute?.status === "delayed" || firstRoute?.status === "crowded" ? 2 : 1,
     fatigueDelta: 0,
     stressDelta: 0,
@@ -762,6 +868,9 @@ export function startTransitJourney(session: GameSession, locationId: string): G
       waitingMinutes: estimate.waitingMinutes
     }
   });
+  return streetRoute && progressed.transit.player.journey?.phase === "walking"
+    ? { ...progressed, localMovement: streetRoute }
+    : progressed;
 }
 
 export function walkTransitJourney(session: GameSession, requestedMinutes = 1): GameSession {

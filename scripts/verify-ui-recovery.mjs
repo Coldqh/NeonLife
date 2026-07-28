@@ -36,7 +36,7 @@ check("profile uses real identity screen", profile.includes("profile-hero") && p
 check("profile does not print raw coordinates", !profile.includes("xM") && !profile.includes("yM"));
 check("nearby category swipe exists", nearby.includes("TAB_ORDER") && nearby.includes("pointerUp"));
 check("nearby inspector is not a fixed overlay", !nearbyCss.includes("position: fixed"));
-check("map mode swipe exists", map.includes("swipeStart") && map.includes("swipeEnd"));
+check("map has city district sector navigation", map.includes("map-breadcrumb") && map.includes("openDistrict") && map.includes("openSector"));
 check("global map supports pinch", globalMap.includes("pointers.current.size >= 2") && globalMap.includes("PinchState"));
 check("local map supports pinch", localMap.includes("pointers.current.size >= 2") && localMap.includes("PinchState"));
 check("global transit layer uses real routes", globalMap.includes("session.transit.routes") && globalMap.includes("route.stopIds"));
@@ -46,7 +46,7 @@ check("transit has explicit waiting scene", transit.includes("waitingMinutesRema
 check("transit lists every stop", transit.includes("segment.stopIds.map"));
 check("transit can cancel before boarding", transit.includes("onCancel") && transitSystem.includes('command.kind === "cancel"'));
 check("boot reconciles stale transit", save.includes("reconcileLoadedTransitJourney") && reconcile.includes('journey.phase === "walking" || journey.phase === "waiting"'));
-check("journey start does not auto-skip access time", life.includes("return progressLife(session, 0"));
+check("journey start does not auto-skip access time", life.includes("progressLife(session, 0") && life.includes('kind: "begin"'));
 check("transit domain has walk and wait commands", transitSystem.includes('command.kind === "walk"') && transitSystem.includes('command.kind === "wait"'));
 check("false approach success notices removed", !nearby.includes("Ты подошёл к") && !nearby.includes("Посадка:"));
 

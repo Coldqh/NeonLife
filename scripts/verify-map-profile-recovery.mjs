@@ -8,6 +8,7 @@ const check = (name, pass) => checks.push({ name, pass: Boolean(pass) });
 
 const profile = read("src/app/screens/ProfileScreen.tsx");
 const mapScreen = read("src/app/screens/MapScreen.tsx");
+const routeCard = read("src/app/map/RouteCard.tsx");
 const localMap = read("src/app/map/LocalSectorMap.tsx");
 const mapCss = read("src/ui/theme/map.css");
 const screenCss = read("src/ui/theme/screens.css");
@@ -28,7 +29,7 @@ check("local map selects stops", localMap.includes('kind: "stop"') && localMap.i
 check("local map selects streets", localMap.includes('kind: "street"') && localMap.includes("onSelect({ kind: \"street\", segment })"));
 check("local map selects arbitrary points", localMap.includes('kind: "point"') && localMap.includes("localCoordinates"));
 check("local map labels main streets", localMap.includes("local-map__street-label") && mapCss.includes(".local-map__street-label"));
-check("route card is compact and honest", mapScreen.includes("route-card__line") && mapScreen.includes("Маршрут к этой точке сейчас недоступен"));
+check("route card is compact and honest", mapScreen.includes("<RouteCard") && routeCard.includes("route-card__line") && routeCard.includes("Пешеходный маршрут к этой точке сейчас недоступен"));
 check("global map click creates explicit point selection", mapScreen.includes('setLocalSelection({ kind: "point"') && !mapScreen.includes('localSelection?.kind === "point" || selectedPoint'));
 check("continuous names use global axes", streets.includes("continuous-street") && streets.includes("globalAxisM"));
 check("topology generator version changed", streets.includes("TOPOLOGY_VERSION = 2"));

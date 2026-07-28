@@ -5,6 +5,8 @@ import type { LocalActorState, LocalBuildingPresenceState } from "../../simulati
 import type { PhysicalVehicleEntityState } from "../../simulation/vehicles/types";
 import { actorActivityIcon, buildingUseLabel, personPortrait, vehicleStateLabel } from "../shared/presentation";
 import type { NearbyMode, NoticeTone } from "../shared/types";
+import type { LocalMovementTargetState } from "../../simulation/localMovement/types";
+import { localMovementTargetForActor, localMovementTargetForBuilding, localMovementTargetForVehicle } from "../../simulation/localMovement/localMovementSystem";
 
 interface SelectedEntity {
   type: "person" | "building" | "vehicle";
@@ -28,9 +30,8 @@ const TAB_ORDER = tabs.map((tab) => tab.id);
 export function NearbyScreen({
   session,
   onSelectPerson,
-  onApproachBuilding,
+  onWalkTo,
   onEnterBuilding,
-  onApproachVehicle,
   onEnterVehicle,
   onRouteTo,
   onAdvance,
@@ -38,9 +39,8 @@ export function NearbyScreen({
 }: {
   session: GameSession;
   onSelectPerson: (personId: string) => void;
-  onApproachBuilding: (buildingId: string) => void;
+  onWalkTo: (target: LocalMovementTargetState) => void;
   onEnterBuilding: (buildingId: string) => void;
-  onApproachVehicle: (vehicleId: string) => void;
   onEnterVehicle: (vehicleId: string) => void;
   onRouteTo: (locationId: string) => void;
   onAdvance: (minutes: number, source: string) => void;
@@ -80,6 +80,9 @@ export function NearbyScreen({
   const buildingAccess = selectedBuilding
     ? session.buildingAccess.buildingEntries.find((entry) => entry.buildingId === selectedBuilding.buildingId)
     : undefined;
+  const actorTarget = selectedActor ? localMovementTargetForActor(session, selectedActor.id) : null;
+  const buildingTarget = selectedBuilding ? localMovementTargetForBuilding(session, selectedBuilding.buildingId) : null;
+  const vehicleTarget = selectedVehicle ? localMovementTargetForVehicle(session, selectedVehicle.id) : null;
 
   function changeMode(next: NearbyMode): void {
     setMode(next);
@@ -181,6 +184,7 @@ export function NearbyScreen({
                   <div><dt>Знакомство</dt><dd>{selectedActor.knownToPlayer ? "Известен" : "Незнакомец"}</dd></div>
                 </dl>
                 <div className="entity-actions">
+                  {actorTarget ? <button type="button" onClick={() => onWalkTo(actorTarget)}>Идти к человеку</button> : null}
                   <button type="button" onClick={() => { onAdvance(2, `Наблюдение: ${selectedActor.name}`); notify(`Наблюдение заняло 2 минуты`); }}>Наблюдать · 2 мин.</button>
                   {selectedActor.destinationLocationId ? <button type="button" onClick={() => onRouteTo(selectedActor.destinationLocationId!)}>Показать цель на карте</button> : null}
                 </div>
@@ -196,7 +200,7 @@ export function NearbyScreen({
                   <div><dt>Статус</dt><dd>{selectedBuilding.playerInside ? "Игрок внутри" : "Снаружи"}</dd></div>
                 </dl>
                 <div className="entity-actions">
-                  <button type="button" onClick={() => onApproachBuilding(selectedBuilding.buildingId)}>Подойти</button>
+                  {buildingTarget ? <button type="button" onClick={() => onWalkTo(buildingTarget)}>Идти ко входу</button> : null}
                   {selectedBuilding.distanceToPlayerM <= 12 && buildingAccess && !["locked", "closed", "unavailable"].includes(buildingAccess.publicDecision) ? <button type="button" onClick={() => onEnterBuilding(selectedBuilding.buildingId)}>Войти</button> : null}
                 </div>
               </>
@@ -211,7 +215,7 @@ export function NearbyScreen({
                   <div><dt>Законность</dt><dd>{selectedVehicle.legalStatus}</dd></div>
                 </dl>
                 <div className="entity-actions">
-                  <button type="button" onClick={() => onApproachVehicle(selectedVehicle.id)}>Подойти</button>
+                  {vehicleTarget ? <button type="button" onClick={() => onWalkTo(vehicleTarget)}>Идти к машине</button> : null}
                   {selectedVehicle.playerCanEnter && selectedVehicle.distanceToPlayerM <= 12 ? <button type="button" onClick={() => onEnterVehicle(selectedVehicle.id)}>Сесть</button> : null}
                 </div>
               </>

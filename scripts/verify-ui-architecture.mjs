@@ -26,6 +26,7 @@ const app = read("src/app/App.tsx");
 const header = read("src/app/shell/GameHeader.tsx");
 const nav = read("src/app/shell/PrimaryNavigation.tsx");
 const map = read("src/app/screens/MapScreen.tsx");
+const routeCard = read("src/app/map/RouteCard.tsx");
 const localMap = read("src/app/map/LocalSectorMap.tsx");
 const globalMap = read("src/app/map/GlobalCityMap.tsx");
 const transit = read("src/app/screens/TransitJourneyScreen.tsx");
@@ -42,7 +43,7 @@ check("Transit supports stops and cabin actions", transit.includes("currentStopI
 check("Global map supports drag", globalMap.includes("onPointerDown") && globalMap.includes("panX") && globalMap.includes("onWheel"));
 check("Local map uses real road graph", localMap.includes("session.streets") && localMap.includes("topology.segments") && localMap.includes("session.urban.buildings"));
 check("Local map has no decorative fallback blocks", !localMap.includes("fallback") && !localMap.includes("STREET_NAMES"));
-check("Route planning lives on map", map.includes("route-panel") && map.includes("getTravelOptions") && map.includes("Начать маршрут"));
+check("Route planning lives on map", map.includes("<RouteCard") && map.includes("getTravelOptions") && routeCard.includes("Начать пеший маршрут"));
 check("Legacy styles are not imported", !/components\.css|responsive\.css|mobile-experience\.css/.test(main));
 check("Split styles are imported", ["app-shell.css", "screens.css", "map.css", "nearby.css", "transit.css", "overlays.css"].every((file) => main.includes(file)));
 

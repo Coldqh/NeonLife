@@ -1,3 +1,19 @@
+# Changelog
+
+## 0.33.0 — Local Movement & Route Planner
+
+- added persistent street-level walking routes;
+- added A* pathfinding across connected sector gates;
+- added route targets for points, streets, buildings, stops, vehicles, people and named locations;
+- added incremental movement with saved progress and world-time advancement;
+- added route recovery and replanning after topology or target movement;
+- added a fullscreen walking scene with route geometry and progress;
+- replaced instant Nearby approach actions with the same route system used by the map;
+- connected the first bus or metro stop to the same street walker and explicit waiting handoff;
+- split route presentation and walking styles out of the map monolith;
+- added local movement verification with a two-sector executable graph fixture;
+- added a compiled domain test for buildings, stops, vehicles, people, cross-sector walking and transit handoff.
+
 # 0.32.1 — MAP, PROFILE & TOPOLOGY RECOVERY
 
 - карта переделана в полноэкранное игровое пространство;

@@ -60,4 +60,4 @@ if (Test-Path $deleteList) {
     }
 }
 
-Write-Host "NEON LIFE v0.32.1 MAP PROFILE TOPOLOGY RECOVERY applied to $ProjectRoot"
+Write-Host "NEON LIFE v0.33.0 LOCAL MOVEMENT ROUTE PLANNER applied to $ProjectRoot"

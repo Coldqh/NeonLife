@@ -9,23 +9,29 @@ import { ProfileScreen } from "./screens/ProfileScreen";
 import { MapScreen } from "./screens/MapScreen";
 import { NearbyScreen } from "./screens/NearbyScreen";
 import { TransitJourneyScreen } from "./screens/TransitJourneyScreen";
+import { LocalMovementScreen } from "./screens/LocalMovementScreen";
 import { SettingsOverlay } from "./overlays/SettingsOverlay";
 import type { GameScreen, NoticeState, NoticeTone } from "./shared/types";
 import { getPerson, toKnownNpc } from "../people/network/humanNetwork";
 import type { TransitPhoneActivity } from "../simulation/transit/types";
+import type { LocalMovementTargetState } from "../simulation/localMovement/types";
 import {
   alightTransitVehicle,
-  approachLocalBuilding,
-  approachPhysicalVehicle,
   boardTransitVehicle,
+  cancelLocalMovement,
   cancelTransitJourney,
   drivePhysicalVehicleToLocation,
+  finishLocalMovement,
   enterLocalBuilding,
   enterPhysicalVehicle,
   interactWithTransitPassenger,
+  advanceLocalMovement,
   progressLife,
+  reconcileLocalMovement,
   rideTransitToNextStop,
   skipTransitJourney,
+  skipLocalMovement,
+  startLocalMovement,
   standInTransit,
   takeTransitSeat,
   travelToLocation,
@@ -49,6 +55,10 @@ export default function App() {
   const { session, setSession } = save;
 
   useEffect(() => writeLocal(UI_SETTINGS_KEY, settings), [settings]);
+  useEffect(() => {
+    if (!session?.localMovement) return;
+    setSession((current) => reconcileLocalMovement(current));
+  }, [session?.localMovement?.id, session?.streets.topologyVersion, setSession]);
   useEffect(() => () => {
     if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
   }, []);
@@ -81,8 +91,19 @@ export default function App() {
     setScreen("map");
   }
 
+  function walkTo(target: LocalMovementTargetState): void {
+    if (!session || session.transit.player.journey || session.localMovement) return;
+    const next = startLocalMovement(session, target);
+    if (next === session) {
+      notify("Пеший маршрут к этой точке недоступен", "warn");
+      return;
+    }
+    setSession(next);
+    setScreen("map");
+  }
+
   function travel(locationId: string): void {
-    if (!session || session.transit.player.journey) return;
+    if (!session || session.transit.player.journey || session.localMovement) return;
     if (session.localScene.playerPosition.state === "inside") {
       notify("Сначала выйди из здания", "warn");
       return;
@@ -115,7 +136,17 @@ export default function App() {
     settings.highContrast ? "high-contrast" : ""
   ].filter(Boolean).join(" ");
 
-  const transitOverlay = session.transit.player.journey ? (
+  const localMovementOverlay = session.localMovement ? (
+    <LocalMovementScreen
+      session={session}
+      onAdvance={(minutes) => setSession((current) => advanceLocalMovement(current, minutes))}
+      onSkip={() => setSession((current) => skipLocalMovement(current))}
+      onCancel={() => setSession((current) => cancelLocalMovement(current))}
+      onFinish={() => setSession((current) => finishLocalMovement(current))}
+    />
+  ) : null;
+
+  const transitOverlay = session.transit.player.journey && !localMovementOverlay ? (
     <TransitJourneyScreen
       session={session}
       onWalk={(minutes) => setSession((current) => walkTransitJourney(current, minutes))}
@@ -133,7 +164,7 @@ export default function App() {
     />
   ) : null;
 
-  const settingsOverlay = settingsOpen && !transitOverlay ? (
+  const settingsOverlay = settingsOpen && !transitOverlay && !localMovementOverlay ? (
     <SettingsOverlay settings={settings} onSettings={setSettings} save={save} onClose={() => setSettingsOpen(false)} />
   ) : null;
 
@@ -144,7 +175,7 @@ export default function App() {
         screen={screen}
         onScreenChange={setScreen}
         onSettings={() => setSettingsOpen(true)}
-        overlay={transitOverlay ?? settingsOverlay}
+        overlay={transitOverlay ?? localMovementOverlay ?? settingsOverlay}
         notice={notice ? <div className={`toast toast--${notice.tone}`} role="status">{notice.text}</div> : null}
       >
         {screen === "profile" ? <ProfileScreen session={session} /> : null}
@@ -154,15 +185,15 @@ export default function App() {
             requestedLocationId={requestedLocationId}
             onRequestedLocationHandled={() => setRequestedLocationId(undefined)}
             onTravel={travel}
+            onWalk={walkTo}
           />
         ) : null}
         {screen === "nearby" ? (
           <NearbyScreen
             session={session}
             onSelectPerson={selectPerson}
-            onApproachBuilding={(buildingId) => setSession((current) => approachLocalBuilding(current, buildingId))}
+            onWalkTo={walkTo}
             onEnterBuilding={(buildingId) => setSession((current) => enterLocalBuilding(current, buildingId))}
-            onApproachVehicle={(vehicleId) => setSession((current) => approachPhysicalVehicle(current, vehicleId))}
             onEnterVehicle={(vehicleId) => setSession((current) => enterPhysicalVehicle(current, vehicleId))}
             onRouteTo={routeToLocation}
             onAdvance={advance}

@@ -11,6 +11,7 @@ import {
 import type { GameSession, LocationState } from "../../world/state/types";
 import type { MetropolitanSectorState } from "../../simulation/spatial/types";
 import type { StreetSegmentState } from "../../simulation/streets/types";
+import type { LocalMovementState } from "../../simulation/localMovement/types";
 import { getSectorStreetTopology } from "../../simulation/streets/streetTopologySystem";
 import { PLACE_ICONS } from "../shared/presentation";
 
@@ -47,12 +48,14 @@ export function LocalSectorMap({
   session,
   sector,
   selected,
+  route,
   onSelect
 }: {
   session: GameSession;
   sector: MetropolitanSectorState;
   selected: LocalMapSelection | null;
-  onSelect: (selection: LocalMapSelection) => void;
+  route?: LocalMovementState | null;
+  onSelect?: (selection: LocalMapSelection) => void;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const pointers = useRef(new Map<number, Point>());
@@ -97,6 +100,10 @@ export function LocalSectorMap({
   const playerInSector = player.sectorId === sector.id;
   const playerX = clamp((player.xM - sector.bounds.xM) / sector.bounds.widthM * 100, 0, 100);
   const playerY = clamp((player.yM - sector.bounds.yM) / sector.bounds.heightM * 100, 0, 100);
+  const remainingRoutePoints = route ? [
+    { xM: player.xM, yM: player.yM },
+    ...route.points.slice(Math.min(route.currentLegIndex + 1, route.points.length))
+  ] : [];
 
   function toX(xM: number): number { return (xM - sector.bounds.xM) / sector.bounds.widthM * 100; }
   function toY(yM: number): number { return (yM - sector.bounds.yM) / sector.bounds.heightM * 100; }
@@ -182,7 +189,7 @@ export function LocalSectorMap({
   }
 
   function selectPoint(event: ReactMouseEvent<SVGRectElement>): void {
-    if (moved.current > 8) return;
+    if (!onSelect || moved.current > 8) return;
     const point = localCoordinates(event.clientX, event.clientY);
     if (point) onSelect({ kind: "point", ...point });
   }
@@ -212,7 +219,7 @@ export function LocalSectorMap({
             <path d="M2.5 0H0V2.5" fill="none" stroke="rgba(147,162,189,.07)" strokeWidth=".18" />
           </pattern>
         </defs>
-        <rect className="local-map__hit" width="100" height="100" fill={`url(#sector-grid-${sector.id})`} onClick={selectPoint} />
+        <rect className="local-map__hit" width="100" height="100" fill={`url(#sector-grid-${sector.id})`} onClick={onSelect ? selectPoint : undefined} />
 
         {topology.blocks.map((block) => (
           <rect key={block.id} x={toX(block.bounds.xM)} y={toY(block.bounds.yM)} width={block.bounds.widthM / sector.bounds.widthM * 100} height={block.bounds.heightM / sector.bounds.heightM * 100} rx=".55" className={`local-map__block local-map__block--${block.landUse}`} />
@@ -230,10 +237,10 @@ export function LocalSectorMap({
             <g
               key={segment.id}
               className={`local-map__street local-map__street--${segment.class}${active ? " is-selected" : ""}`}
-              role="button"
-              tabIndex={0}
-              onClick={(event) => { event.stopPropagation(); if (moved.current <= 8) onSelect({ kind: "street", segment }); }}
-              onKeyDown={(event) => interactiveKey(event, () => onSelect({ kind: "street", segment }))}
+              role={onSelect ? "button" : undefined}
+              tabIndex={onSelect ? 0 : undefined}
+              onClick={onSelect ? (event: ReactMouseEvent<SVGGElement>) => { event.stopPropagation(); if (moved.current <= 8) onSelect({ kind: "street", segment }); } : undefined}
+              onKeyDown={onSelect ? (event: ReactKeyboardEvent<SVGGElement>) => interactiveKey(event, () => onSelect({ kind: "street", segment })) : undefined}
             >
               <line x1={toX(from.xM)} y1={toY(from.yM)} x2={toX(to.xM)} y2={toY(to.yM)} className="local-map__sidewalk" />
               <line x1={toX(from.xM)} y1={toY(from.yM)} x2={toX(to.xM)} y2={toY(to.yM)} className="local-map__road" />
@@ -254,10 +261,10 @@ export function LocalSectorMap({
             <g
               key={building.id}
               className={`local-map__building-wrap${active ? " is-selected" : ""}`}
-              role="button"
-              tabIndex={0}
-              onClick={(event) => { event.stopPropagation(); if (moved.current <= 8) onSelect({ kind: "building", building }); }}
-              onKeyDown={(event) => interactiveKey(event, () => onSelect({ kind: "building", building }))}
+              role={onSelect ? "button" : undefined}
+              tabIndex={onSelect ? 0 : undefined}
+              onClick={onSelect ? (event: ReactMouseEvent<SVGGElement>) => { event.stopPropagation(); if (moved.current <= 8) onSelect({ kind: "building", building }); } : undefined}
+              onKeyDown={onSelect ? (event: ReactKeyboardEvent<SVGGElement>) => interactiveKey(event, () => onSelect({ kind: "building", building })) : undefined}
             >
               <rect
                 x={toX(building.bounds.xM)}
@@ -286,10 +293,10 @@ export function LocalSectorMap({
               key={stop.id}
               transform={`translate(${toX(stop.xM)} ${toY(stop.yM)})`}
               className={`local-map__stop local-map__stop--${stop.mode}${active ? " is-selected" : ""}`}
-              role="button"
-              tabIndex={0}
-              onClick={(event) => { event.stopPropagation(); if (moved.current <= 8) onSelect({ kind: "stop", stop }); }}
-              onKeyDown={(event) => interactiveKey(event, () => onSelect({ kind: "stop", stop }))}
+              role={onSelect ? "button" : undefined}
+              tabIndex={onSelect ? 0 : undefined}
+              onClick={onSelect ? (event: ReactMouseEvent<SVGGElement>) => { event.stopPropagation(); if (moved.current <= 8) onSelect({ kind: "stop", stop }); } : undefined}
+              onKeyDown={onSelect ? (event: ReactKeyboardEvent<SVGGElement>) => interactiveKey(event, () => onSelect({ kind: "stop", stop })) : undefined}
             >
               <circle r="2.4" /><text textAnchor="middle" y=".85">{stop.mode === "metro" ? "M" : "B"}</text>
             </g>
@@ -305,15 +312,24 @@ export function LocalSectorMap({
               key={location.id}
               className={`local-map__poi${active ? " is-selected" : ""}`}
               transform={`translate(${x} ${y})`}
-              role="button"
-              tabIndex={0}
-              onClick={(event) => { event.stopPropagation(); if (moved.current <= 8) onSelect({ kind: "location", location }); }}
-              onKeyDown={(event) => interactiveKey(event, () => onSelect({ kind: "location", location }))}
+              role={onSelect ? "button" : undefined}
+              tabIndex={onSelect ? 0 : undefined}
+              onClick={onSelect ? (event: ReactMouseEvent<SVGGElement>) => { event.stopPropagation(); if (moved.current <= 8) onSelect({ kind: "location", location }); } : undefined}
+              onKeyDown={onSelect ? (event: ReactKeyboardEvent<SVGGElement>) => interactiveKey(event, () => onSelect({ kind: "location", location })) : undefined}
             >
               <circle r="3.4" /><text textAnchor="middle" y="1.35">{PLACE_ICONS[location.type]}</text>
             </g>
           );
         })}
+
+        {route?.points.length ? (
+          <g className="local-map__route" aria-hidden="true">
+            <polyline className="local-map__route-base" points={route.points.map((point) => `${toX(point.xM)},${toY(point.yM)}`).join(" ")} />
+            <polyline className="local-map__route-remaining" points={remainingRoutePoints.map((point) => `${toX(point.xM)},${toY(point.yM)}`).join(" ")} />
+            <circle className="local-map__route-start" cx={toX(route.points[0].xM)} cy={toY(route.points[0].yM)} r="1.5" />
+            <circle className="local-map__route-target" cx={toX(route.target.xM)} cy={toY(route.target.yM)} r="2.2" />
+          </g>
+        ) : null}
 
         {selected?.kind === "point" ? (
           <g transform={`translate(${toX(selected.xM)} ${toY(selected.yM)})`} className="local-map__point"><circle r="2.8" /><path d="M0-5 3.2-.8 0 4-3.2-.8z" /></g>
