@@ -213,13 +213,19 @@ function normalizeEconomyState(
 
 
 function normalizeUrbanFoodState(food: GameSession["life"]["food"], schemaVersion: number): GameSession["life"]["food"] {
-  if (schemaVersion >= 10) return food;
-  const totalStock = Object.values(food.shopStocks).reduce((total, shop) => total + Object.values(shop).reduce((sum, units) => sum + units, 0), 0);
-  if (totalStock >= 500) return food;
-  return {
+  const normalized = {
     ...food,
+    storage: Array.isArray(food.storage) ? food.storage : [],
+    carried: Array.isArray(food.carried) ? food.carried : [],
+    carryingCapacityGrams: typeof food.carryingCapacityGrams === "number" ? food.carryingCapacityGrams : 6_500
+  };
+  if (schemaVersion >= 10) return normalized;
+  const totalStock = Object.values(normalized.shopStocks).reduce((total, shop) => total + Object.values(shop).reduce((sum, units) => sum + units, 0), 0);
+  if (totalStock >= 500) return normalized;
+  return {
+    ...normalized,
     shopStocks: Object.fromEntries(
-      Object.entries(food.shopStocks).map(([locationId, shop]) => [
+      Object.entries(normalized.shopStocks).map(([locationId, shop]) => [
         locationId,
         Object.fromEntries(Object.entries(shop).map(([productId, units]) => [productId, units * 24]))
       ])
@@ -410,9 +416,23 @@ function migrateCourierState(
     .map((order, index) => migrateCourierOrder(order, people, index))
     .filter((order): order is CourierOrder => Boolean(order));
   if (!orders.length) return createInitialCourierState(seed, timestamp, locations, people, businesses);
+  const activeOrderId = typeof value.activeOrderId === "string" ? value.activeOrderId : null;
+  const activeOrder = activeOrderId ? orders.find((order) => order.id === activeOrderId) : undefined;
+  const rawCargo = isObject(value.carriedCargo) ? value.carriedCargo : null;
   return {
     orders,
-    activeOrderId: typeof value.activeOrderId === "string" ? value.activeOrderId : null,
+    activeOrderId,
+    carriedCargo: rawCargo && typeof rawCargo.orderId === "string"
+      ? {
+        orderId: rawCargo.orderId,
+        name: typeof rawCargo.name === "string" ? rawCargo.name : activeOrder?.cargoName ?? "UNKNOWN CARGO",
+        weightKg: typeof rawCargo.weightKg === "number" ? rawCargo.weightKg : activeOrder?.weightKg ?? 0,
+        condition: typeof rawCargo.condition === "number" ? rawCargo.condition : activeOrder?.condition ?? 100,
+        collectedAt: typeof rawCargo.collectedAt === "number" ? rawCargo.collectedAt : activeOrder?.collectedAt ?? timestamp
+      }
+      : activeOrder?.status === "in-transit"
+        ? { orderId: activeOrder.id, name: activeOrder.cargoName, weightKg: activeOrder.weightKg, condition: activeOrder.condition, collectedAt: activeOrder.collectedAt ?? timestamp }
+        : null,
     boardGeneration: typeof value.boardGeneration === "number" ? value.boardGeneration : 1,
     boardRefreshAt: typeof value.boardRefreshAt === "number" ? value.boardRefreshAt : timestamp + 8 * 60 * 60_000,
     rating: typeof value.rating === "number" ? value.rating : 50,

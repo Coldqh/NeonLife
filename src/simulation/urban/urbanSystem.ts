@@ -818,8 +818,8 @@ export function advanceUrbanFabricState(state: UrbanFabricState, input: UrbanFab
   const permanentUnitIds = new Set(assigned.units.map((unit) => unit.id));
   const activeSectors = new Set(input.metropolitan.streaming.activeSectorIds);
   const cachedUnits = state.units
-    .filter((unit) => !permanentUnitIds.has(unit.id) && activeSectors.has(unit.sectorId))
-    .sort((left, right) => right.lastMaterializedAt - left.lastMaterializedAt);
+    .filter((unit) => !permanentUnitIds.has(unit.id) && (unit.permanent || activeSectors.has(unit.sectorId)))
+    .sort((left, right) => Number(right.permanent) - Number(left.permanent) || right.lastMaterializedAt - left.lastMaterializedAt);
   const units = [...assigned.units, ...cachedUnits].slice(0, MAX_UNIT_CACHE);
   const interiors = updateInteriorCache(input, buildings, units, state.interiors);
   catalogs = updatedCatalogs(input.timestamp, catalogs, demography.cohorts, buildings);

@@ -18,6 +18,8 @@ export interface HomeAppliances {
 
 export interface FoodState {
   storage: FoodStack[];
+  carried: FoodStack[];
+  carryingCapacityGrams: number;
   shopStocks: Record<string, Record<string, number>>;
   appliances: HomeAppliances;
   lastMealAt: number | null;
@@ -27,11 +29,13 @@ export interface FoodState {
 }
 
 export type FoodFreshness = "fresh" | "expiring" | "spoiled";
+export type FoodInventory = "storage" | "carried";
 
 export interface FoodTransactionResult {
   state: FoodState;
   product: FoodProduct;
   quantity: number;
+  inventory: FoodInventory;
 }
 
 const URBAN_STOCK_SCALE = 24;
@@ -70,6 +74,8 @@ export function createInitialFoodState(seed: string, timestamp: number, marketId
   ];
   return {
     storage: starter,
+    carried: [],
+    carryingCapacityGrams: 6_500,
     shopStocks: {
       [marketId]: scaleUrbanStock(MARKET_STOCK),
       [kitchenId]: scaleUrbanStock(KITCHEN_STOCK),
@@ -107,11 +113,15 @@ export function getFoodFreshness(stack: FoodStack, timestamp: number): FoodFresh
 }
 
 export function getFoodUnits(state: FoodState): number {
-  return state.storage.reduce((total, stack) => total + stack.quantity, 0);
+  return [...state.storage, ...state.carried].reduce((total, stack) => total + stack.quantity, 0);
 }
 
 export function getFreshFoodUnits(state: FoodState, timestamp: number): number {
-  return state.storage.reduce((total, stack) => total + (getFoodFreshness(stack, timestamp) === "spoiled" ? 0 : stack.quantity), 0);
+  return [...state.storage, ...state.carried].reduce((total, stack) => total + (getFoodFreshness(stack, timestamp) === "spoiled" ? 0 : stack.quantity), 0);
+}
+
+export function getCarriedMassGrams(state: FoodState): number {
+  return state.carried.reduce((total, stack) => total + getFoodProduct(stack.productId).massGrams * stack.quantity, 0);
 }
 
 export function canPrepare(requirement: PreparationRequirement, appliances: HomeAppliances, atHome: boolean): boolean {
@@ -129,19 +139,22 @@ export function purchaseFood(
   locationId: string,
   productId: string,
   quantity: number,
-  timestamp: number
+  timestamp: number,
+  inventory: FoodInventory = "carried"
 ): FoodTransactionResult | null {
   const stock = state.shopStocks[locationId]?.[productId] ?? 0;
   if (quantity <= 0 || stock < quantity) return null;
   const product = getFoodProduct(productId);
+  if (inventory === "carried" && getCarriedMassGrams(state) + product.massGrams * quantity > state.carryingCapacityGrams) return null;
   const stack = createStack(seed, productId, quantity, timestamp, state.purchaseSequence);
   return {
     product,
     quantity,
+    inventory,
     state: {
       ...state,
       purchaseSequence: state.purchaseSequence + 1,
-      storage: [...state.storage, stack],
+      [inventory]: [...state[inventory], stack],
       shopStocks: {
         ...state.shopStocks,
         [locationId]: {
@@ -153,29 +166,63 @@ export function purchaseFood(
   };
 }
 
-export function consumeFood(state: FoodState, productId: string, timestamp: number): FoodTransactionResult | null {
-  const stackIndex = state.storage.findIndex((stack) => stack.productId === productId && stack.quantity > 0 && getFoodFreshness(stack, timestamp) !== "spoiled");
-  if (stackIndex < 0) return null;
-  const stack = state.storage[stackIndex];
-  const nextStack = { ...stack, quantity: stack.quantity - 1 };
+function consumeFrom(stacks: FoodStack[], productId: string, timestamp: number): { stacks: FoodStack[]; found: boolean } {
+  const stackIndex = stacks.findIndex((stack) => stack.productId === productId && stack.quantity > 0 && getFoodFreshness(stack, timestamp) !== "spoiled");
+  if (stackIndex < 0) return { stacks, found: false };
+  const next = stacks.slice();
+  const stack = next[stackIndex];
+  if (stack.quantity <= 1) next.splice(stackIndex, 1);
+  else next[stackIndex] = { ...stack, quantity: stack.quantity - 1 };
+  return { stacks: next, found: true };
+}
+
+export function consumeFood(
+  state: FoodState,
+  productId: string,
+  timestamp: number,
+  inventory: FoodInventory | "any" = "any"
+): FoodTransactionResult | null {
+  const order: FoodInventory[] = inventory === "any" ? ["carried", "storage"] : [inventory];
+  for (const source of order) {
+    const result = consumeFrom(state[source], productId, timestamp);
+    if (!result.found) continue;
+    return {
+      product: getFoodProduct(productId),
+      quantity: 1,
+      inventory: source,
+      state: {
+        ...state,
+        [source]: result.stacks,
+        lastMealAt: timestamp,
+        lastMealProductId: productId
+      }
+    };
+  }
+  return null;
+}
+
+export function storeCarriedFoodAtHome(state: FoodState, storageCapacityUnits: number): { state: FoodState; moved: number } {
+  const occupied = state.storage.reduce((total, stack) => total + stack.quantity, 0);
+  let free = Math.max(0, storageCapacityUnits - occupied);
+  if (free <= 0 || !state.carried.length) return { state, moved: 0 };
   const storage = state.storage.slice();
-  if (nextStack.quantity <= 0) storage.splice(stackIndex, 1);
-  else storage[stackIndex] = nextStack;
-  return {
-    product: getFoodProduct(productId),
-    quantity: 1,
-    state: {
-      ...state,
-      storage,
-      lastMealAt: timestamp,
-      lastMealProductId: productId
+  const carried: FoodStack[] = [];
+  let moved = 0;
+  for (const stack of state.carried) {
+    const quantity = Math.min(stack.quantity, free);
+    if (quantity > 0) {
+      storage.push({ ...stack, id: `${stack.id}:home`, quantity });
+      moved += quantity;
+      free -= quantity;
     }
-  };
+    if (quantity < stack.quantity) carried.push({ ...stack, quantity: stack.quantity - quantity });
+  }
+  return { state: { ...state, storage, carried }, moved };
 }
 
 export function discardSpoiledFood(state: FoodState, timestamp: number): { state: FoodState; discarded: number } {
   let discarded = 0;
-  const storage = state.storage.filter((stack) => {
+  const clean = (stacks: FoodStack[]) => stacks.filter((stack) => {
     if (getFoodFreshness(stack, timestamp) !== "spoiled") return true;
     discarded += stack.quantity;
     return false;
@@ -184,7 +231,8 @@ export function discardSpoiledFood(state: FoodState, timestamp: number): { state
     discarded,
     state: {
       ...state,
-      storage,
+      storage: clean(state.storage),
+      carried: clean(state.carried),
       discardedUnits: state.discardedUnits + discarded
     }
   };

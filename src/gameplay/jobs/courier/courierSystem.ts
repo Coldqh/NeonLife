@@ -33,9 +33,18 @@ export interface CourierOrder {
   completedAt: number | null;
 }
 
+export interface CourierCargoState {
+  orderId: string;
+  name: string;
+  weightKg: number;
+  condition: number;
+  collectedAt: number;
+}
+
 export interface CourierState {
   orders: CourierOrder[];
   activeOrderId: string | null;
+  carriedCargo: CourierCargoState | null;
   boardGeneration: number;
   boardRefreshAt: number;
   rating: number;
@@ -161,6 +170,7 @@ export function createInitialCourierState(seed: string, timestamp: number, locat
   return {
     orders: createBoard(seed, timestamp, locations, people, businesses, 1),
     activeOrderId: null,
+    carriedCargo: null,
     boardGeneration: 1,
     boardRefreshAt: timestamp + 8 * 60 * 60_000,
     rating: 50,
@@ -218,6 +228,13 @@ export function collectCourierCargo(state: CourierState, currentLocationId: stri
   if (!active || active.status !== "accepted" || active.pickupLocationId !== currentLocationId) return state;
   return {
     ...state,
+    carriedCargo: {
+      orderId: active.id,
+      name: active.cargoName,
+      weightKg: active.weightKg,
+      condition: active.condition,
+      collectedAt: timestamp
+    },
     orders: state.orders.map((item) => item.id === active.id ? { ...item, status: "in-transit", collectedAt: timestamp } : item)
   };
 }
@@ -246,6 +263,7 @@ export function completeCourierOrder(state: CourierState, currentLocationId: str
     state: {
       ...state,
       activeOrderId: null,
+      carriedCargo: null,
       completedDeliveries: state.completedDeliveries + 1,
       totalEarnings: state.totalEarnings + payout,
       rating: Math.max(0, Math.min(100, state.rating + ratingDelta)),
@@ -274,6 +292,9 @@ export function applyCourierTravelRisk(state: CourierState, seed: string, timest
     conditionLoss,
     state: {
       ...state,
+      carriedCargo: state.carriedCargo?.orderId === active.id
+        ? { ...state.carriedCargo, condition: Math.max(0, state.carriedCargo.condition - conditionLoss) }
+        : state.carriedCargo,
       orders: state.orders.map((item) => item.id === active.id
         ? { ...item, condition: Math.max(0, item.condition - conditionLoss) }
         : item)

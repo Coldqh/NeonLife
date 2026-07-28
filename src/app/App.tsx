@@ -15,6 +15,7 @@ import type { GameScreen, NoticeState, NoticeTone } from "./shared/types";
 import { getPerson, toKnownNpc } from "../people/network/humanNetwork";
 import type { TransitPhoneActivity } from "../simulation/transit/types";
 import type { LocalMovementTargetState } from "../simulation/localMovement/types";
+import { applyLocalLifeAction } from "./actions/localLifeActions";
 import {
   alightTransitVehicle,
   boardTransitVehicle,
@@ -200,6 +201,7 @@ export default function App() {
             onLeaveBuilding={() => setSession((current) => leaveLocalBuilding(current))}
             onLeaveVehicle={() => setSession((current) => leavePhysicalVehicle(current))}
             onRouteTo={routeToLocation}
+            onLifeAction={(action) => setSession((current) => applyLocalLifeAction(current, action))}
             onAdvance={advance}
             notify={notify}
           />

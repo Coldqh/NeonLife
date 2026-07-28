@@ -4,3 +4,5 @@ dist
 .localmovementtest-dist
 *.local
 .DS_Store
+
+.physicallifetest-dist

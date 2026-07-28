@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.34.0 — Physical Life Loop
+
+- added a physical contextual actions tab to Nearby;
+- restricted home sleep to the player's actual housing unit;
+- added risky outside sleep;
+- split food into carried inventory and home storage with carrying mass limits;
+- made purchases enter carried inventory instead of teleporting home;
+- added explicit storing of carried food at home;
+- made courier acceptance, pickup and delivery require the correct physical location;
+- added explicit carried courier cargo with condition and weight;
+- added physical clinic checkups and stabilization;
+- prevented permanent player housing units from being evicted by urban streaming;
+- added save migration v30 and an executable physical-life regression test.
+
 ## 0.33.1 — World Integrity Recovery
 
 - restored explicit exit actions for buildings and physical vehicles in Nearby;

@@ -6,6 +6,8 @@ import type { PhysicalVehicleEntityState } from "../../simulation/vehicles/types
 import { actorActivityIcon, buildingUseLabel, personPortrait, vehicleStateLabel } from "../shared/presentation";
 import type { NearbyMode, NoticeTone } from "../shared/types";
 import type { LocalMovementTargetState } from "../../simulation/localMovement/types";
+import type { LocalLifeAction } from "../actions/localLifeActions";
+import { LocalActionsPanel } from "./LocalActionsPanel";
 import { localMovementTargetForActor, localMovementTargetForBuilding, localMovementTargetForVehicle } from "../../simulation/localMovement/localMovementSystem";
 
 interface SelectedEntity {
@@ -20,6 +22,7 @@ interface SwipeState {
 }
 
 const tabs: Array<{ id: NearbyMode; label: string; icon: string }> = [
+  { id: "actions", label: "Действия", icon: "◆" },
   { id: "people", label: "Люди", icon: "♙" },
   { id: "places", label: "Здания", icon: "▦" },
   { id: "cars", label: "Машины", icon: "▰" },
@@ -36,6 +39,7 @@ export function NearbyScreen({
   onLeaveBuilding,
   onLeaveVehicle,
   onRouteTo,
+  onLifeAction,
   onAdvance,
   notify
 }: {
@@ -47,10 +51,11 @@ export function NearbyScreen({
   onLeaveBuilding: () => void;
   onLeaveVehicle: () => void;
   onRouteTo: (locationId: string) => void;
+  onLifeAction: (action: LocalLifeAction) => void;
   onAdvance: (minutes: number, source: string) => void;
   notify: (text: string, tone?: NoticeTone) => void;
 }) {
-  const [mode, setMode] = useState<NearbyMode>("people");
+  const [mode, setMode] = useState<NearbyMode>("actions");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<SelectedEntity | null>(null);
   const swipeRef = useRef<SwipeState | null>(null);
@@ -151,7 +156,7 @@ export function NearbyScreen({
 
       <div className="nearby-tabs" role="tablist" aria-label="Категории объектов">
         {tabs.map((tab) => {
-          const count = tab.id === "people" ? actors.length : tab.id === "places" ? buildings.length : tab.id === "cars" ? vehicles.length : events.length;
+          const count = tab.id === "actions" ? 1 : tab.id === "people" ? actors.length : tab.id === "places" ? buildings.length : tab.id === "cars" ? vehicles.length : events.length;
           return (
             <button type="button" role="tab" aria-selected={mode === tab.id} key={tab.id} className={mode === tab.id ? "is-active" : ""} onClick={() => changeMode(tab.id)}>
               <i>{tab.icon}</i><span>{tab.label}</span><b>{count}</b>
@@ -168,6 +173,7 @@ export function NearbyScreen({
         onPointerCancel={() => { swipeRef.current = null; }}
       >
         <div className="nearby-list" role="tabpanel">
+          {mode === "actions" ? <LocalActionsPanel session={session} onAction={onLifeAction} onRouteTo={onRouteTo} /> : null}
           {mode === "people" ? actors.map((actor) => (
             <button type="button" key={actor.id} className={selectedActor?.id === actor.id ? "is-selected" : ""} onClick={() => choosePerson(actor)}>
               <img src={personPortrait(actor.id)} alt="" />
