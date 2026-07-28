@@ -1,21 +1,31 @@
 # NEON LIFE v0.33.0 — Local Movement & Route Planner
 
-This patch turns the generated street network into a player movement system.
+Этот архив накладывается поверх версии 0.32.1.
 
-## Core loop
+Патч загружает изменённые файлы из зафиксированного GitHub-коммита:
 
-1. Select a point, street, building, stop, vehicle, person, or named location.
-2. Build a route over actual street intersections and connected sector gates.
-3. Start walking.
-4. Advance one minute, five minutes, continuously, or skip the remaining section.
-5. Arrive at the target coordinates and continue interacting with the world.
+`7c473705b49a5716390203ccac310ecaebdb892b`
 
-Public-transport routes use the same street walker for the approach to their first stop. The transit overlay opens only after the player reaches the stop.
+## Добавлено
 
-## Save compatibility
+- постоянные пешие маршруты по реальной уличной сети;
+- A* по перекрёсткам и связанным воротам соседних секторов;
+- цели маршрута: точка, улица, здание, остановка, машина, NPC и именованная локация;
+- пошаговое движение с сохранением прогресса;
+- восстановление и перестроение маршрута;
+- полноэкранная сцена пешего перемещения;
+- единая маршрутизация для карты, Nearby и подхода к транспорту;
+- отдельные проверки локального движения.
 
-`GameSession.localMovement` is optional. Existing schema-29 saves load without migration. Once a route starts, its geometry and progress are saved with the normal world payload.
+## Установка
 
-## Limits
+```powershell
+cd C:\NeonLife
+powershell -ExecutionPolicy Bypass -File "ПУТЬ_К_ПАТЧУ\APPLY_PATCH.ps1" -ProjectRoot C:\NeonLife
+```
 
-The local planner is intentionally capped at eight sector steps. Longer journeys still use metropolitan travel and public transport. NPC and vehicle movement over the same graph are scheduled for later patches.
+С проверками:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "ПУТЬ_К_ПАТЧУ\APPLY_PATCH.ps1" -ProjectRoot C:\NeonLife -RunChecks
+```
