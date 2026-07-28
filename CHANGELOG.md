@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.36.0 — Immersive City Map Rebuild
+
+- removed fake district clip masks and rebuilt district geometry from real sectors;
+- made the map a standalone fullscreen experience with its own HUD;
+- added real pan, pinch, wheel zoom and inertia to the active global map;
+- rebuilt the local map as a top-down street, parcel, roof, entrance and POI view;
+- restricted dynamic people and vehicles to the player’s actual physical context;
+- separated compact map sheets from full venue and building profiles;
+- added real district key-location navigation, floor previews and physical floor movement;
+- reduced MapScreen from a 1200-line monolith to bounded components;
+- replaced false-positive map tests with checks against the active UI.
+
 ## 0.35.0 — City Map & Profile Overhaul
 
 - replaced the primary global and local map UI;

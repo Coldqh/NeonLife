@@ -33,7 +33,7 @@ interface PinchState { distance: number; zoom: number; worldX: number; worldY: n
 const CAMERA_KEY = "neon-life/global-map-camera/v2";
 const MIN_ZOOM = 0.9;
 const MAX_ZOOM = 8;
-const DISTRICT_PALETTE = ["#17243a", "#1d2639", "#172d36", "#26233a", "#15283a", "#262b37", "#1d2433", "#132b32", "#252139", "#1b2d3a", "#2b2534", "#152536", "#222b3e", "#1a2831"];
+const DISTRICT_PALETTE = ["#ff4058", "#3f91ff", "#ff8b35", "#42d896", "#a565ff", "#23c8cb", "#ffc348", "#e76aa3", "#7b8cff", "#65d6a5", "#ff635f", "#5cc0ff", "#c46cff", "#e2b84f"];
 const RAIL_PALETTE = ["#ff3854", "#a86dff", "#2fc7c0", "#ffb33e", "#4b9cff", "#e66d9d"];
 
 function clamp(value: number, min: number, max: number): number {
@@ -66,6 +66,39 @@ function districtBounds(district: MapDistrictState): MetricBounds {
 
 function districtColor(index: number): string {
   return DISTRICT_PALETTE[index % DISTRICT_PALETTE.length];
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const value = hex.replace("#", "");
+  const red = Number.parseInt(value.slice(0, 2), 16);
+  const green = Number.parseInt(value.slice(2, 4), 16);
+  const blue = Number.parseInt(value.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
+function drawDistrictBoundary(
+  context: CanvasRenderingContext2D,
+  districtId: string,
+  sectors: MetropolitanSectorState[],
+  byCoordinate: Map<string, MetropolitanSectorState>,
+  originX: number,
+  originY: number,
+  scale: number
+): void {
+  context.beginPath();
+  for (const sector of sectors) {
+    if (sector.mapDistrictId !== districtId) continue;
+    const x = originX + sector.xIndex * scale;
+    const y = originY + sector.yIndex * scale;
+    const left = byCoordinate.get(`${sector.xIndex - 1}:${sector.yIndex}`);
+    const top = byCoordinate.get(`${sector.xIndex}:${sector.yIndex - 1}`);
+    const right = byCoordinate.get(`${sector.xIndex + 1}:${sector.yIndex}`);
+    const bottom = byCoordinate.get(`${sector.xIndex}:${sector.yIndex + 1}`);
+    if (!left || left.mapDistrictId !== districtId) { context.moveTo(x, y); context.lineTo(x, y + scale); }
+    if (!top || top.mapDistrictId !== districtId) { context.moveTo(x, y); context.lineTo(x + scale, y); }
+    if (!right || right.mapDistrictId !== districtId) { context.moveTo(x + scale, y); context.lineTo(x + scale, y + scale); }
+    if (!bottom || bottom.mapDistrictId !== districtId) { context.moveTo(x, y + scale); context.lineTo(x + scale, y + scale); }
+  }
 }
 
 export function GlobalCityMap({
@@ -175,8 +208,16 @@ export function GlobalCityMap({
     if (!context) return;
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, bounds.width, bounds.height);
-    context.fillStyle = "#050a12";
+    const background = context.createRadialGradient(bounds.width * .48, bounds.height * .44, 0, bounds.width * .48, bounds.height * .44, Math.max(bounds.width, bounds.height) * .72);
+    background.addColorStop(0, "#0a1320");
+    background.addColorStop(.58, "#050a12");
+    background.addColorStop(1, "#02050a");
+    context.fillStyle = background;
     context.fillRect(0, 0, bounds.width, bounds.height);
+    context.strokeStyle = "rgba(89, 116, 148, .055)";
+    context.lineWidth = 1;
+    for (let x = 0; x < bounds.width; x += 38) { context.beginPath(); context.moveTo(x, 0); context.lineTo(x, bounds.height); context.stroke(); }
+    for (let y = 0; y < bounds.height; y += 38) { context.beginPath(); context.moveTo(0, y); context.lineTo(bounds.width, y); context.stroke(); }
 
     const geometry = mapGeometry(bounds.width, bounds.height);
     const { scale, originX, originY } = geometry;
@@ -188,36 +229,42 @@ export function GlobalCityMap({
       const x = originX + sector.xIndex * scale;
       const y = originY + sector.yIndex * scale;
       const mapDistrict = session.metropolitan.mapDistricts.find((district) => district.id === sector.mapDistrictId);
-      context.fillStyle = layers.districts ? districtColor(districtIndex.get(sector.mapDistrictId) ?? 0) : "#101b2b";
-      context.fillRect(x, y, Math.ceil(scale + 0.4), Math.ceil(scale + 0.4));
+      const color = districtColor(districtIndex.get(sector.mapDistrictId) ?? 0);
+      context.fillStyle = layers.districts ? hexToRgba(color, sector.mapDistrictId === selectedDistrictId ? .28 : .17) : "rgba(18, 31, 48, .84)";
+      context.fillRect(x, y, Math.ceil(scale + .65), Math.ceil(scale + .65));
+      const density = clamp(sector.densityPerKm2 / 90000, .08, .92);
+      if (zoom >= 1.15) {
+        context.fillStyle = `rgba(226, 235, 247, ${.025 + density * .055})`;
+        const inset = Math.max(1, scale * .14);
+        const unit = Math.max(.65, scale * .16);
+        context.fillRect(x + inset, y + inset, Math.max(.8, scale - inset * 2), unit);
+        context.fillRect(x + inset, y + inset + unit * 1.65, Math.max(.8, (scale - inset * 2) * .56), unit * .78);
+        context.fillRect(x + inset + Math.max(.8, (scale - inset * 2) * .63), y + inset + unit * 1.65, Math.max(.5, (scale - inset * 2) * .27), unit * .78);
+      }
       if (layers.risk && mapDistrict) {
-        context.fillStyle = `rgba(255, 45, 70, ${clamp(mapDistrict.riskScore / 230, 0.05, 0.42)})`;
-        context.fillRect(x, y, Math.ceil(scale + 0.4), Math.ceil(scale + 0.4));
+        context.fillStyle = `rgba(255, 43, 68, ${clamp(mapDistrict.riskScore / 180, .08, .52)})`;
+        context.fillRect(x, y, Math.ceil(scale + .5), Math.ceil(scale + .5));
       }
       if (layers.activity) {
         const activity = clamp((sector.crowdLoad + sector.trafficLoad) / 200, 0, 1);
-        context.fillStyle = `rgba(64, 185, 255, ${activity * 0.36})`;
-        context.fillRect(x, y, Math.ceil(scale + 0.4), Math.ceil(scale + 0.4));
+        context.fillStyle = `rgba(66, 213, 162, ${activity * .42})`;
+        context.fillRect(x, y, Math.ceil(scale + .5), Math.ceil(scale + .5));
       }
     }
 
     if (layers.districts) {
-      context.beginPath();
-      for (const sector of session.metropolitan.sectors) {
-        const x = originX + sector.xIndex * scale;
-        const y = originY + sector.yIndex * scale;
-        const left = byCoordinate.get(`${sector.xIndex - 1}:${sector.yIndex}`);
-        const top = byCoordinate.get(`${sector.xIndex}:${sector.yIndex - 1}`);
-        const right = byCoordinate.get(`${sector.xIndex + 1}:${sector.yIndex}`);
-        const bottom = byCoordinate.get(`${sector.xIndex}:${sector.yIndex + 1}`);
-        if (!left || left.mapDistrictId !== sector.mapDistrictId) { context.moveTo(x, y); context.lineTo(x, y + scale); }
-        if (!top || top.mapDistrictId !== sector.mapDistrictId) { context.moveTo(x, y); context.lineTo(x + scale, y); }
-        if (!right || right.mapDistrictId !== sector.mapDistrictId) { context.moveTo(x + scale, y); context.lineTo(x + scale, y + scale); }
-        if (!bottom || bottom.mapDistrictId !== sector.mapDistrictId) { context.moveTo(x, y + scale); context.lineTo(x + scale, y + scale); }
-      }
-      context.strokeStyle = "rgba(225, 232, 244, .48)";
-      context.lineWidth = zoom < 1.6 ? 1.15 : 1.65;
-      context.stroke();
+      session.metropolitan.mapDistricts.forEach((district, index) => {
+        const color = districtColor(index);
+        const selected = district.id === selectedDistrictId;
+        drawDistrictBoundary(context, district.id, session.metropolitan.sectors, byCoordinate, originX, originY, scale);
+        context.save();
+        context.shadowBlur = selected ? 18 : 8;
+        context.shadowColor = hexToRgba(color, selected ? .95 : .48);
+        context.strokeStyle = hexToRgba(color, selected ? .98 : .72);
+        context.lineWidth = selected ? Math.max(2.4, zoom * 1.35) : Math.max(1.1, zoom * .72);
+        context.stroke();
+        context.restore();
+      });
     }
 
     if (zoom >= 2.05) {
@@ -300,19 +347,31 @@ export function GlobalCityMap({
       }
     }
 
-    if (layers.districts && zoom < 3.6) {
+    if (layers.districts && zoom < 3.8) {
       context.textAlign = "center";
       context.textBaseline = "middle";
-      for (const district of session.metropolitan.mapDistricts) {
+      for (const [index, district] of session.metropolitan.mapDistricts.entries()) {
         const x = originX + district.center.xM / sectorSizeM * scale;
         const y = originY + district.center.yM / sectorSizeM * scale;
         const selected = district.id === selectedDistrictId;
-        context.font = `${selected ? 700 : 600} ${Math.round(clamp(10 + zoom * 1.4, 11, 16))}px Inter, sans-serif`;
-        const width = context.measureText(district.name).width + 14;
-        context.fillStyle = selected ? "rgba(255, 42, 68, .88)" : "rgba(4, 9, 17, .78)";
-        context.fillRect(x - width / 2, y - 10, width, 20);
-        context.fillStyle = "rgba(247, 249, 253, .94)";
-        context.fillText(district.name, x, y + 0.5);
+        const color = districtColor(index);
+        const titleSize = Math.round(clamp(10 + zoom * 1.7, 12, 18));
+        context.font = `${selected ? 800 : 700} ${titleSize}px Inter, sans-serif`;
+        const titleWidth = context.measureText(district.name).width;
+        context.font = `600 ${Math.round(clamp(8 + zoom, 9, 12))}px Inter, sans-serif`;
+        const riskText = `${district.riskScore >= 60 ? "ВЫСОКИЙ" : district.riskScore >= 40 ? "СРЕДНИЙ" : "НИЗКИЙ"} РИСК`;
+        const panelWidth = Math.max(titleWidth + 26, context.measureText(riskText).width + 26);
+        context.fillStyle = "rgba(2, 7, 13, .78)";
+        context.fillRect(x - panelWidth / 2, y - 22, panelWidth, 44);
+        context.strokeStyle = hexToRgba(color, selected ? .95 : .42);
+        context.lineWidth = selected ? 1.6 : .8;
+        context.strokeRect(x - panelWidth / 2, y - 22, panelWidth, 44);
+        context.font = `${selected ? 800 : 700} ${titleSize}px Inter, sans-serif`;
+        context.fillStyle = selected ? "#fff" : hexToRgba(color, .96);
+        context.fillText(district.name.toUpperCase(), x, y - 5);
+        context.font = `600 ${Math.round(clamp(8 + zoom, 9, 12))}px Inter, sans-serif`;
+        context.fillStyle = hexToRgba(color, .88);
+        context.fillText(riskText, x, y + 11);
       }
     }
 

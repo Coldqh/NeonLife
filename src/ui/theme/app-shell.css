@@ -250,3 +250,16 @@
 
 .compact-mode .screen { padding-top: 16px; padding-bottom: 22px; }
 .compact-mode .screen-heading { margin-bottom: 12px; }
+
+/* Immersive map uses its own HUD instead of the generic shell header. */
+.game-shell[data-screen="map"] {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+.game-shell[data-screen="map"] .game-shell__content {
+  overflow: hidden;
+}
+.game-shell[data-screen="map"] .primary-nav {
+  min-height: 64px;
+  background: rgba(3, 7, 12, .985);
+  border-top-color: rgba(138, 153, 178, .16);
+}

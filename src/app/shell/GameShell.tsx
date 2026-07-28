@@ -54,7 +54,7 @@ export function GameShell({ session, screen, onScreenChange, onSettings, childre
 
   return (
     <div className="game-shell" data-screen={screen}>
-      <GameHeader session={session} onSettings={onSettings} />
+      {screen === "map" ? null : <GameHeader session={session} onSettings={onSettings} />}
       <main
         ref={contentRef}
         className="game-shell__content"

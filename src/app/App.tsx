@@ -188,6 +188,7 @@ export default function App() {
             session={session}
             requestedLocationId={requestedLocationId}
             onRequestedLocationHandled={() => setRequestedLocationId(undefined)}
+            onSettings={() => setSettingsOpen(true)}
             onTravel={travel}
             onWalk={walkTo}
             onEnterBuilding={(buildingId) => setSession((current) => enterLocalBuilding(current, buildingId))}

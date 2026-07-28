@@ -8,29 +8,37 @@ const check = (name, value) => checks.push({ name, ok: Boolean(value) });
 
 const map = read("src/app/screens/MapScreen.tsx");
 const app = read("src/app/App.tsx");
-const css = [
-  "src/ui/theme/city-map.css",
-  "src/ui/theme/city-map-render.css",
-  "src/ui/theme/city-profiles.css"
-].map(read).join("\n");
+const shell = read("src/app/shell/GameShell.tsx");
+const globalMap = read("src/app/map/GlobalCityMap.tsx");
+const localMap = read("src/app/map/LocalSectorMap.tsx");
+const topBar = read("src/app/map/MapTopBar.tsx");
+const sheet = read("src/app/map/MapSelectionSheet.tsx");
+const profile = read("src/app/map/MapProfileOverlay.tsx");
+const ui = read("src/app/map/mapUi.ts");
+const css = ["src/ui/theme/city-map.css", "src/ui/theme/city-map-render.css", "src/ui/theme/city-profiles.css"].map(read).join("\n");
 
-check("global map renders district geometry", map.includes("global-district-card") && map.includes("DISTRICT_CLIPS"));
-check("global map renders real road and transit networks", map.includes("globalRoads") && map.includes("globalTransitLines") && map.includes("global-map-network"));
-check("global filters change real markers", map.includes("globalMarkerType") && map.includes("setGlobalFilter") && map.includes("globalMarkers"));
-check("local map renders blocks and street topology", map.includes("localTopology.blocks") && map.includes("localRoads.map") && map.includes("local-map-network__roads"));
-check("local map renders named points of interest", map.includes("filteredLocations.map") && map.includes("local-poi-marker") && map.includes("PLACE_ICONS"));
-check("people are restricted to actual player context", map.includes('player.state === "inside"') && map.includes("actor.position.buildingId === player.buildingId") && map.includes("actorStreetId === playerStreetId"));
-check("vehicles are restricted to actual player context", map.includes("vehicle.position.buildingId === player.buildingId") && map.includes("vehicleStreetId === playerStreetId"));
-check("venue profile has live information and actions", map.includes("city-sheet--venue") && map.includes("actorsAtSelectedPlace") && map.includes("onEnterBuilding") && map.includes("onLeaveBuilding"));
-check("building profile has functional floors", map.includes("building-profile__floor-list") && map.includes("onMoveBuildingFloor") && map.includes("verticalMethod"));
-check("vehicle profile uses real enter and leave commands", map.includes("onEnterVehicle") && map.includes("onLeaveVehicle") && app.includes("enterPhysicalVehicle") && app.includes("leavePhysicalVehicle"));
-check("route preview is real and startable", map.includes("planLocalMovement") && map.includes("routePoints") && map.includes("city-route-banner") && map.includes("goToSelection"));
-check("favorites persist", map.includes("neon-life/map-favorites/v1") && map.includes("localStorage.setItem"));
-check("share action is implemented", map.includes("navigator.share") && map.includes("navigator.clipboard"));
-check("new map styles provide top-down roads and profiles", css.includes(".local-map-network__roads") && css.includes(".local-building-card") && css.includes(".building-profile__layout"));
-check("all new map styles are balanced", (css.match(/\{/g) ?? []).length === (css.match(/\}/g) ?? []).length);
+check("fake district clip masks are gone", !map.includes("DISTRICT_CLIPS") && !globalMap.includes("DISTRICT_CLIPS"));
+check("global map derives boundaries from real sectors", globalMap.includes("drawDistrictBoundary") && globalMap.includes("session.metropolitan.sectors") && globalMap.includes("byCoordinate"));
+check("global map is genuinely navigable", globalMap.includes("onPointerDown") && globalMap.includes("onPointerMove") && globalMap.includes("onWheel") && globalMap.includes("runInertia"));
+check("global map draws real roads and transit", globalMap.includes("session.metropolitan.roadLinks") && globalMap.includes("session.transit.routes") && globalMap.includes("route.stopIds"));
+check("global layers are functional state", topBar.includes("GLOBAL_LAYERS") && map.includes("setGlobalLayer") && map.includes("globalLayers"));
+check("local map renders real street topology and buildings", localMap.includes("getSectorStreetTopology") && localMap.includes("topology.segments") && localMap.includes("session.urban.buildings"));
+check("local map supports real pan zoom and arbitrary point selection", localMap.includes("onPointerMove") && localMap.includes("onWheel") && localMap.includes('onSelect({ kind: "point"'));
+check("local map renders top-down entrances POIs people cars and route", ["local-map__entrance", "local-map__poi", "local-map__actor", "local-map__vehicle", "local-map__route"].every((token) => localMap.includes(token)));
+check("nearby people are restricted by building or street context", map.includes('player.state === "inside"') && map.includes("actor.position.buildingId === player.buildingId") && map.includes("actorStreetId === playerStreetId"));
+check("nearby cars are restricted by immediate context", map.includes("vehicle.position.buildingId === player.buildingId") && map.includes("streetId === playerStreetId"));
+check("venue sheet uses live business state", sheet.includes("session.economy.businesses") && sheet.includes("business?.demand") && sheet.includes("isLocationOpen"));
+check("district sheet opens real key locations", sheet.includes("session.metropolitan.locations") && sheet.includes("onSelectLocation(location.id)"));
+check("venue profile uses live business and visible occupants", profile.includes("session.economy.businesses") && profile.includes("actor.position.buildingId === targetBuilding.id") && profile.includes("isLocationOpen"));
+check("building profile has floor rail apartment grid and real movement", profile.includes("building-profile__floor-rail") && profile.includes("building-profile__unit-grid") && profile.includes("onMoveFloor(selectedFloor, \"stairs\")") && profile.includes("onMoveFloor(selectedFloor, \"elevator\")"));
+check("every map action is connected to a real callback", map.includes("onWalk(target)") && map.includes("onTravel(selectedLocation.id)") && map.includes("onEnterBuilding={onEnterBuilding}") && map.includes("onEnterVehicle={onEnterVehicle}"));
+check("favorites and share are implemented", map.includes("map-favorites/v2") && map.includes("localStorage.setItem") && map.includes("navigator.share") && map.includes("navigator.clipboard"));
+check("map uses its own immersive shell", shell.includes('screen === "map" ? null : <GameHeader') && css.includes(".map-screen--immersive") && css.includes(".map-profile-overlay"));
+check("map code is split into bounded components", [map, globalMap, localMap, topBar, sheet, profile, ui].every((source) => source.split(/\r?\n/).length <= 600));
+check("all map styles are balanced", (css.match(/\{/g) ?? []).length === (css.match(/\}/g) ?? []).length);
+check("vehicle domain commands remain wired in App", app.includes("enterPhysicalVehicle") && app.includes("leavePhysicalVehicle"));
 
 const failed = checks.filter((item) => !item.ok);
 for (const item of checks) console.log(`${item.ok ? "PASS" : "FAIL"} ${item.name}`);
-console.log(`\n${checks.length - failed.length}/${checks.length} city-map overhaul checks passed.`);
+console.log(`\n${checks.length - failed.length}/${checks.length} city-map rebuild checks passed.`);
 if (failed.length) process.exit(1);

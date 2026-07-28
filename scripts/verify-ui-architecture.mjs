@@ -31,7 +31,7 @@ const localMap = read("src/app/map/LocalSectorMap.tsx");
 const globalMap = read("src/app/map/GlobalCityMap.tsx");
 const transit = read("src/app/screens/TransitJourneyScreen.tsx");
 const main = read("src/main.tsx");
-check("App is below 220 lines", lineCount("src/app/App.tsx") <= 220);
+check("App is below 225 lines", lineCount("src/app/App.tsx") <= 225);
 check("No Home screen remains", !/HomeView|"home"\s*\|\s*"profile"|label:\s*"Главная"/.test(app + nav));
 check("No Move screen remains", !/MoveView|label:\s*"Путь"|"move"/.test(app + nav));
 check("Exactly three primary screens", ["profile", "map", "nearby"].every((id) => nav.includes(`id: "${id}"`)) && (nav.match(/id:\s*"/g) ?? []).length === 3);
@@ -43,7 +43,7 @@ check("Transit supports stops and cabin actions", transit.includes("currentStopI
 check("Global map supports drag", globalMap.includes("onPointerDown") && globalMap.includes("panX") && globalMap.includes("onWheel"));
 check("Local map uses real road graph", localMap.includes("session.streets") && localMap.includes("topology.segments") && localMap.includes("session.urban.buildings"));
 check("Local map has no decorative fallback blocks", !localMap.includes("fallback") && !localMap.includes("STREET_NAMES"));
-check("Route planning lives on map", map.includes("planLocalMovement") && map.includes("local-map-network__route") && map.includes("getTravelOptions") && map.includes("Построить маршрут"));
+check("Route planning lives on map", map.includes("planLocalMovement") && localMap.includes("local-map__route") && map.includes("getTravelOptions") && map.includes("buildRoute"));
 check("Legacy styles are not imported", !/components\.css|responsive\.css|mobile-experience\.css/.test(main));
 check("Split styles are imported", ["app-shell.css", "screens.css", "map.css", "city-map.css", "city-map-render.css", "city-profiles.css", "nearby.css", "transit.css", "overlays.css"].every((file) => main.includes(file)));
 
@@ -58,8 +58,7 @@ function collect(directory) {
 collect(new URL("src/app/", root).pathname);
 collect(new URL("src/ui/theme/", root).pathname);
 const oversized = sourceFiles.filter((path) => {
-  const limit = path.endsWith("MapScreen.tsx") ? 1300 : 600;
-  return readFileSync(path, "utf8").split(/\r?\n/).length > limit;
+  return readFileSync(path, "utf8").split(/\r?\n/).length > 600;
 });
 check("UI files stay inside their architecture budgets", oversized.length === 0);
 

@@ -28,7 +28,7 @@ const css = ["src/ui/theme/map.css", "src/ui/theme/city-map.css", "src/ui/theme/
 const movementCss = read("src/ui/theme/local-movement.css");
 const pkg = JSON.parse(read("package.json"));
 
-assert(pkg.version === "0.35.0", "package version is not 0.35.0");
+assert(pkg.version === "0.36.0", "package version is not 0.36.0");
 assert(pkg.scripts["test:movement"], "movement verification script is not registered");
 assert(stateTypes.includes("localMovement?: LocalMovementState"), "saved session has no optional local movement state");
 assert(system.includes("function findPath"), "street graph pathfinder is missing");
@@ -46,7 +46,7 @@ assert(app.includes("<LocalMovementScreen"), "movement overlay is not connected"
 assert(app.includes("onWalk={walkTo}"), "map is not connected to movement start");
 assert(app.includes("session.transit.player.journey && !localMovementOverlay"), "transit overlay still hides the street walk to the stop");
 assert(map.includes("planLocalMovement"), "map route preview is missing");
-assert(map.includes("city-route-banner") && map.includes("goToSelection") && map.includes("Построить маршрут"), "map has no start route action");
+assert(map.includes("buildRoute") && map.includes("startRoute") && map.includes("routeReady") && map.includes("onWalk(target)"), "map has no start route action");
 assert(localMap.includes("local-map__route"), "local map does not render route geometry");
 assert(!read("src/app/screens/LocalMovementScreen.tsx").includes("onSelect={() => undefined}"), "walking scene contains inert map controls");
 assert(nearby.includes("onWalkTo"), "Nearby is not connected to unified route actions");
