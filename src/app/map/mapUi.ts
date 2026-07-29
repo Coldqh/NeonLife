@@ -193,7 +193,7 @@ export function venueMatchesLayer(venue: VenueState, layer: LocalLayerId): boole
 }
 
 export function venueIsOpen(venue: VenueState, timestamp: number): boolean {
-  if (!venue.active) return false;
+  if (!venue.active || venue.operatingStatus !== "operating") return false;
   if (venue.openHour === 0 && venue.closeHour === 24) return true;
   const hour = new Date(timestamp).getUTCHours();
   return venue.openHour < venue.closeHour

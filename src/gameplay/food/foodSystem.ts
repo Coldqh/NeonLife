@@ -133,6 +133,30 @@ export function canPrepare(requirement: PreparationRequirement, appliances: Home
   return appliances.foodPrinter;
 }
 
+export function receiveFood(
+  state: FoodState,
+  seed: string,
+  productId: string,
+  quantity: number,
+  timestamp: number,
+  inventory: FoodInventory = "carried"
+): FoodTransactionResult | null {
+  if (quantity <= 0) return null;
+  const product = getFoodProduct(productId);
+  if (inventory === "carried" && getCarriedMassGrams(state) + product.massGrams * quantity > state.carryingCapacityGrams) return null;
+  const stack = createStack(seed, productId, quantity, timestamp, state.purchaseSequence);
+  return {
+    product,
+    quantity,
+    inventory,
+    state: {
+      ...state,
+      purchaseSequence: state.purchaseSequence + 1,
+      [inventory]: [...state[inventory], stack]
+    }
+  };
+}
+
 export function purchaseFood(
   state: FoodState,
   seed: string,

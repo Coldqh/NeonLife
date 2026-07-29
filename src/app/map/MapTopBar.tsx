@@ -16,7 +16,8 @@ export function MapTopBar({
   onGlobalLayer,
   onLocalLayer,
   onSettings,
-  onPlayer
+  onPlayer,
+  onSearch
 }: {
   session: GameSession;
   mode: MapMode;
@@ -31,6 +32,7 @@ export function MapTopBar({
   onLocalLayer: (layer: LocalLayerId) => void;
   onSettings: () => void;
   onPlayer: () => void;
+  onSearch: () => void;
 }) {
   const layers = mode === "global" ? GLOBAL_LAYERS : mode === "local" ? LOCAL_LAYERS : [];
   const level = mode === "global" ? "УРОВЕНЬ: ГОРОД" : mode === "interior" ? `${buildingName ?? "ЗДАНИЕ"} · ЭТАЖ ${session.localScene.playerPosition.floor ?? 1}` : `${districtName} · ${sectorCode}`;
@@ -45,7 +47,7 @@ export function MapTopBar({
         </div>
         <div className="map-hud__status">
           <span>{formatGameTime(session.timestamp)}</span><strong>₵ {session.player.balance.toLocaleString("ru-RU")}</strong>
-          <button type="button" aria-label="Показать игрока" onClick={onPlayer}>◎</button><button type="button" aria-label="Настройки карты" onClick={onSettings}>☰</button>
+          <button type="button" aria-label="Найти заведение" onClick={onSearch}>⌕</button><button type="button" aria-label="Показать игрока" onClick={onPlayer}>◎</button><button type="button" aria-label="Настройки карты" onClick={onSettings}>☰</button>
         </div>
       </header>
       {layers.length ? <div className="map-layer-strip" data-no-swipe>{layers.map((layer) => <button type="button" key={layer.id} className={(mode === "global" ? globalLayer === layer.id : localLayer === layer.id) ? "is-active" : ""} onClick={() => mode === "global" ? onGlobalLayer(layer.id as GlobalLayerId) : onLocalLayer(layer.id as LocalLayerId)}><i>{layer.icon}</i><span>{layer.label}</span></button>)}</div> : null}

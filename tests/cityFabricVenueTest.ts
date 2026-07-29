@@ -3,6 +3,7 @@ import {
   approachLocalBuilding,
   enterBuildingUnit,
   enterLocalBuilding,
+  leaveLocalBuilding,
   moveInsideBuilding
 } from "../src/gameplay/life/lifeSimulation";
 import { getSectorStreetTopology } from "../src/simulation/streets/streetTopologySystem";
@@ -13,7 +14,7 @@ function assert(condition: unknown, message: string): asserts condition {
 
 const session = createWorldSession("city-fabric-venues-regression");
 assert(session.metropolitan.version === 3, "metropolitan fabric did not migrate to version 3");
-assert(session.urban.version === 2, "urban fabric did not migrate to version 2");
+assert(session.urban.version === 3, "urban fabric did not migrate to version 3");
 assert(session.urban.venues.length >= 250, `too few materialized venues: ${session.urban.venues.length}`);
 assert(session.urban.venues.length <= 900, `venue cache exceeded hard bound: ${session.urban.venues.length}`);
 
@@ -62,12 +63,12 @@ const uniqueLots = new Set(localBuildings.map((building) => `${Math.round(buildi
 assert(uniqueLots.size / localBuildings.length >= 0.9, "too many buildings share the same generated lot");
 
 let enteredVenue = null as typeof localVenues[number] | null;
-let visiting = session;
+let visiting = session.localScene.playerPosition.state === "inside" ? leaveLocalBuilding(session) : session;
 for (const venue of localVenues) {
   const building = buildingById.get(venue.buildingId);
   const unit = unitById.get(venue.unitId);
-  if (!building || !unit || venue.floor !== 1 || !session.localScene.buildings.some((local) => local.buildingId === building.id)) continue;
-  let candidate = approachLocalBuilding(session, building.id);
+  if (!building || !unit || venue.floor !== 1 || !visiting.localScene.buildings.some((local) => local.buildingId === building.id)) continue;
+  let candidate = approachLocalBuilding(visiting, building.id);
   candidate = enterLocalBuilding(candidate, building.id);
   if (candidate.localScene.playerPosition.state !== "inside" || candidate.localScene.playerPosition.buildingId !== building.id) continue;
   candidate = enterBuildingUnit(candidate, venue.unitId);

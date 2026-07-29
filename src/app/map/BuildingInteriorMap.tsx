@@ -84,6 +84,7 @@ export function BuildingInteriorMap({
   const floorUnits = session.buildingAccess.units.filter((unit) => unit.floor === selectedFloor);
   const selectedUnit = session.buildingAccess.units.find((unit) => unit.unitId === selectedUnitId);
   const currentUnit = session.buildingAccess.units.find((unit) => unit.unitId === position.unitId);
+  const currentVenue = position.unitId ? session.urban.venues.find((venue) => venue.unitId === position.unitId) : undefined;
   const currentInterior = position.unitId ? session.urban.interiors.find((item) => item.unitId === position.unitId) : session.urban.interiors.find((item) => item.buildingId === building?.id && !item.unitId);
   const roomAccess = session.buildingAccess.rooms.filter((room) => room.interiorId === currentInterior?.id);
   const visibleActors = session.localScene.actors.filter((actor) => actor.visible && actor.position.buildingId === building?.id);
@@ -111,7 +112,7 @@ export function BuildingInteriorMap({
 
       {position.unitId && currentInterior && selectedFloor === currentFloor ? (
         <section className="unit-interior-view">
-          <header><div><span>ПОМЕЩЕНИЕ</span><h2>{currentUnit ? unitLabel(currentUnit) : "Внутренняя зона"}</h2></div><button type="button" onClick={onLeaveUnit}>Выйти в коридор</button></header>
+          <header><div><span>{currentVenue ? "ЗАВЕДЕНИЕ" : "ПОМЕЩЕНИЕ"}</span><h2>{currentVenue?.name ?? (currentUnit ? unitLabel(currentUnit) : "Внутренняя зона")}</h2>{currentVenue ? <p>{currentVenue.code} · {currentVenue.unitNumber}</p> : null}</div><button type="button" onClick={onLeaveUnit}>Выйти в коридор</button></header>
           <div className="unit-plan" style={{ aspectRatio: `${Math.max(...currentInterior.rooms.map((room) => room.bounds.xM + room.bounds.widthM), 12)} / ${Math.max(...currentInterior.rooms.map((room) => room.bounds.yM + room.bounds.heightM), 8)}` }}>
             {currentInterior.rooms.map((room) => {
               const maxX = Math.max(...currentInterior.rooms.map((item) => item.bounds.xM + item.bounds.widthM));
@@ -140,6 +141,7 @@ export function BuildingInteriorMap({
           <footer className="unit-interior-actions">
             {position.roomId ? <button type="button" className="primary" onClick={onLeaveRoom}>Выйти из комнаты</button> : selectedRoomId ? <button type="button" className="primary" onClick={() => onEnterRoom(selectedRoomId)}>Войти: {roomLabel(currentInterior.rooms.find((room) => room.id === selectedRoomId)?.kind ?? "entry")}</button> : <span>Выбери комнату на плане</span>}
             {isHomeUnit ? <button type="button" onClick={() => setServiceOpen(true)}>Капсула</button> : null}
+            {currentVenue ? <button type="button" className="venue-counter-button" onClick={() => setServiceOpen(true)}>Касса и услуги</button> : null}
           </footer>
         </section>
       ) : (
@@ -155,11 +157,12 @@ export function BuildingInteriorMap({
               {floorUnits.map((unit) => {
                 const active = position.unitId === unit.unitId;
                 const actors = floorActors.filter((actor) => actor.position.unitId === unit.unitId);
+                const venue = session.urban.venues.find((item) => item.unitId === unit.unitId);
                 return (
                   <button type="button" key={unit.unitId} className={`${selectedUnitId === unit.unitId ? "is-selected" : ""}${active ? " is-player" : ""}${unit.occupied ? " is-occupied" : ""}`} onClick={() => setSelectedUnitId(unit.unitId)}>
                     <i>{unit.use === "apartment" ? "⌂" : unit.use === "shop" ? "▤" : unit.use === "clinic" ? "+" : unit.use === "office" ? "▣" : "□"}</i>
-                    <strong>{unit.unitNumber}</strong>
-                    <span>{unit.use.replace(/-/g, " ")}</span>
+                    <strong>{venue?.name ?? unit.unitNumber}</strong>
+                    <span>{venue ? `${venue.unitNumber} · ${venue.operatingStatus === "operating" ? "работает" : venue.operatingStatus}` : unit.use.replace(/-/g, " ")}</span>
                     <em>{actors.length || unit.residentCount} внутри</em>
                     {active ? <b>ВЫ</b> : null}
                   </button>
@@ -177,14 +180,15 @@ export function BuildingInteriorMap({
 
           <aside className="floor-inspector" data-no-swipe>
             <header><span>ЭТАЖ {selectedFloor}</span><strong>{floorActors.length} человек</strong></header>
-            {selectedUnit ? (
-              <>
-                <h2>{unitLabel(selectedUnit)}</h2>
-                <p>{accessLabel(selectedUnit)} · безопасность {selectedUnit.security}% · {selectedUnit.occupied ? "занято" : "свободно"}</p>
+            {selectedUnit ? (() => {
+              const selectedVenue = session.urban.venues.find((venue) => venue.unitId === selectedUnit.unitId);
+              return <>
+                <h2>{selectedVenue?.name ?? unitLabel(selectedUnit)}</h2>
+                <p>{selectedVenue ? `${selectedVenue.code} · ${selectedVenue.operatingStatus === "operating" ? "работает" : selectedVenue.operatingStatus}` : accessLabel(selectedUnit)} · безопасность {selectedUnit.security}% · {selectedUnit.occupied ? "занято" : "свободно"}</p>
                 <dl><div><dt>Жильцов</dt><dd>{selectedUnit.residentCount}</dd></div><div><dt>Состояние</dt><dd>{session.urban.units.find((unit) => unit.id === selectedUnit.unitId)?.condition ?? 0}%</dd></div><div><dt>Людей сейчас</dt><dd>{selectedUnitActors.length}</dd></div></dl>
-                <button type="button" className="primary" disabled={!onSelectedFloor || !["open", "authorized"].includes(selectedUnit.decision)} onClick={() => onEnterUnit(selectedUnit.unitId)}>Войти в помещение</button>
-              </>
-            ) : selectedFloor !== currentFloor ? position.unitId ? (
+                <button type="button" className="primary" disabled={!onSelectedFloor || !["open", "authorized"].includes(selectedUnit.decision) || selectedVenue?.operatingStatus === "vacant"} onClick={() => onEnterUnit(selectedUnit.unitId)}>{selectedVenue ? "Войти в заведение" : "Войти в помещение"}</button>
+              </>;
+            })() : selectedFloor !== currentFloor ? position.unitId ? (
               <><h2>Сначала выйди</h2><p>Лестница и лифт находятся в коридоре. Нельзя перейти на другой этаж сквозь дверь помещения.</p><button type="button" className="primary" onClick={onLeaveUnit}>Выйти в коридор</button></>
             ) : (
               <>

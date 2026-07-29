@@ -33,7 +33,7 @@ check("map removes the blocking district sidebar", !map.includes("global-distric
 check("street entities are restricted before rendering", map.includes("nearbyPedestrians") && map.includes("nearbyTraffic") && map.includes("nearbyCrossings"));
 check("nearby people are restricted by building or street context", map.includes('player.state === "inside"') && map.includes("actor.position.buildingId === player.buildingId") && map.includes("actorStreetId === playerStreetId"));
 check("nearby cars are restricted by immediate context", map.includes("vehicle.position.buildingId === player.buildingId") && map.includes("streetId === playerStreetId"));
-check("venue sheet uses real generated venue state", sheet.includes('selection.kind === "venue"') && sheet.includes("venueIsOpen") && sheet.includes("venue.demand"));
+check("venue sheet uses real generated venue state", sheet.includes('selection.kind === "venue"') && sheet.includes("venueIsOpen") && sheet.includes("venueOperations.operations"));
 check("district sheet opens real key locations", sheet.includes("session.metropolitan.locations") && sheet.includes("onSelectLocation(location.id)"));
 check("venue profile uses generated venue and visible occupants", profile.includes("venue?: VenueState") && profile.includes("venueIsOpen") && profile.includes("actor.position.buildingId === targetBuilding.id"));
 check("building profile has floor rail apartment grid and real movement", profile.includes("building-profile__floor-rail") && profile.includes("building-profile__unit-grid") && profile.includes("onMoveFloor(selectedFloor, \"stairs\")") && profile.includes("onMoveFloor(selectedFloor, \"elevator\")"));

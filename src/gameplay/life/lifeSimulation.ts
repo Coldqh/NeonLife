@@ -49,6 +49,7 @@ import { advanceLocalMovementRoute, localMovementCurrentStreet, localMovementTar
 import type { LocalMovementTargetState } from "../../simulation/localMovement/types";
 import { advanceStreetSceneState, applyStreetIncidentAction } from "../../simulation/streetScene/streetSceneSystem";
 import { advanceSocialState } from "../../simulation/social/socialSystem";
+import { joinVenueQueueState, leaveVenueQueueState, purchaseVenueOfferState, venueIsOpenAt } from "../../simulation/venues/venueOperationsSystem";
 import type { StreetIncidentAction } from "../../simulation/streetScene/types";
 import {
   advanceVehicleCrimeState,
@@ -67,7 +68,7 @@ import {
   recordAccessDenied,
   setAccessDoorOpen
 } from "../../simulation/access/buildingAccessSystem";
-import { canPrepare, consumeFood, discardSpoiledFood, purchaseFood, storeCarriedFoodAtHome as storeCarriedFoodInState } from "../food/foodSystem";
+import { canPrepare, consumeFood, discardSpoiledFood, getCarriedMassGrams, purchaseFood, receiveFood, storeCarriedFoodAtHome as storeCarriedFoodInState } from "../food/foodSystem";
 import { calculateSleepRecovery, getHousingDaysLeft } from "../housing/housingSystem";
 import { getTravelOptions, isLocationOpen } from "../travel/travelSystem";
 import {
@@ -2195,6 +2196,106 @@ export function requestEmergencyLoan(session: GameSession, personId: string): Ga
     people,
     world: { ...progressed.world, primaryContactId: person.id },
     primaryContact: toKnownNpc(getPerson(people, person.id) ?? person, progressed.world.locations, progressed.timestamp)
+  };
+}
+
+function venueAtPlayer(session: GameSession, venueId?: string) {
+  const unitId = session.localScene.playerPosition.unitId;
+  if (session.localScene.playerPosition.state !== "inside" || !unitId) return undefined;
+  return session.urban.venues.find((venue) => venue.unitId === unitId && (!venueId || venue.id === venueId));
+}
+
+export function joinVenueQueue(session: GameSession, venueId: string): GameSession {
+  const venue = venueAtPlayer(session, venueId);
+  if (!venue || !venueIsOpenAt(venue, session.timestamp)) return session;
+  const queued = joinVenueQueueState(session.urban.venueOperations, venue.id, session.timestamp);
+  if (!queued) return session;
+  if (queued.waitMinutes <= 0) return { ...session, urban: { ...session.urban, venueOperations: queued.state } };
+  return progressLife({ ...session, urban: { ...session.urban, venueOperations: queued.state } }, queued.waitMinutes, {
+    category: "personal",
+    title: `Очередь пройдена: ${venue.name}.`,
+    detail: `Ожидание ${queued.waitMinutes} мин. · касса готова принять заказ.`,
+    importance: 1,
+    stressDelta: queued.waitMinutes >= 20 ? 2 : 0,
+    activity: `Очередь: ${venue.name}`,
+    suppressTimeEvent: true
+  });
+}
+
+export function leaveVenueQueue(session: GameSession, venueId: string): GameSession {
+  const venue = venueAtPlayer(session, venueId);
+  if (!venue) return session;
+  return {
+    ...session,
+    urban: {
+      ...session.urban,
+      venueOperations: leaveVenueQueueState(session.urban.venueOperations, venue.id, session.timestamp)
+    }
+  };
+}
+
+export function purchaseVenueOffer(session: GameSession, venueId: string, offerId: string): GameSession {
+  const venue = venueAtPlayer(session, venueId);
+  if (!venue || !venueIsOpenAt(venue, session.timestamp)) return session;
+  const operation = session.urban.venueOperations.operations.find((item) => item.venueId === venue.id);
+  const offer = operation?.offers.find((item) => item.id === offerId);
+  if (!operation || !offer || session.player.balance < offer.currentPrice) return session;
+
+  if (offer.kind === "food-goods" && offer.productId) {
+    const product = getFoodProduct(offer.productId);
+    if (getCarriedMassGrams(session.life.food) + product.massGrams > session.life.food.carryingCapacityGrams) return session;
+  }
+
+  const vehicleId = session.vehicles.player.currentVehicleId ?? session.vehicles.player.ownedVehicleIds[0];
+  if (offer.kind === "vehicle-service" && !vehicleId) return session;
+
+  const purchase = purchaseVenueOfferState(session.urban.venueOperations, venue.id, offer.id, session.timestamp);
+  if (!purchase) return session;
+  const counterparty = venue.organizationId ?? venue.id;
+  const progressed = progressLife({ ...session, urban: { ...session.urban, venueOperations: purchase.state } }, Math.max(1, offer.durationMinutes), {
+    category: offer.kind === "medical" || offer.kind === "cyberware" ? "health" : "finance",
+    title: `${offer.name}: услуга завершена.`,
+    detail: `${venue.name} · −₵ ${purchase.price} · остаток ${Math.max(0, offer.stock - 1)}.`,
+    importance: offer.kind === "medical" ? 2 : 1,
+    balanceDelta: -purchase.price,
+    balanceCounterpartyEntityId: counterparty,
+    healthDelta: offer.effects.healthDelta,
+    fatigueDelta: offer.effects.fatigueDelta,
+    stressDelta: offer.effects.stressDelta,
+    hungerDelta: offer.effects.hungerDelta,
+    activity: `${venue.name}: ${offer.name}`,
+    suppressTimeEvent: offer.durationMinutes >= 60
+  });
+
+  let food = progressed.life.food;
+  if (offer.kind === "food-goods" && offer.productId) {
+    const received = receiveFood(food, progressed.world.meta.seed, offer.productId, 1, progressed.timestamp, "carried");
+    if (received) food = received.state;
+  } else if (offer.kind === "meal") {
+    food = { ...food, lastMealAt: progressed.timestamp, lastMealProductId: offer.productId ?? null };
+  }
+
+  const vehicles = offer.kind === "vehicle-service" && vehicleId
+    ? {
+        ...progressed.vehicles,
+        vehicles: progressed.vehicles.vehicles.map((vehicle) => vehicle.id === vehicleId ? {
+          ...vehicle,
+          condition: clamp(vehicle.condition + (offer.effects.vehicleConditionDelta ?? 0)),
+          fuelL: Math.min(vehicle.fuelCapacityL, vehicle.fuelL + (offer.effects.vehicleFuelDelta ?? 0))
+        } : vehicle)
+      }
+    : progressed.vehicles;
+
+  return {
+    ...progressed,
+    life: { ...progressed.life, food },
+    vehicles,
+    world: {
+      ...progressed.world,
+      organizations: progressed.world.organizations.map((organization) => organization.id === venue.organizationId
+        ? { ...organization, budget: organization.budget + purchase.price }
+        : organization)
+    }
   };
 }
 

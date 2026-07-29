@@ -21,8 +21,8 @@ if (-not (Test-Path $Manifest)) {
 }
 
 $packageJson = Get-Content (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json
-if ($packageJson.version -ne "0.39.1" -and $packageJson.version -ne "0.39.2") {
-  Write-Warning "Expected base version 0.39.1, found $($packageJson.version)."
+if ($packageJson.version -ne "0.39.2") {
+  Write-Warning "Expected base version 0.39.2, found $($packageJson.version)."
 }
 
 $files = Get-Content $Manifest | Where-Object {
@@ -44,11 +44,11 @@ foreach ($relativePath in $files) {
 }
 
 $updatedPackage = Get-Content (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json
-if ($updatedPackage.version -ne "0.39.2") {
-  throw "Patch copied, but package.json version is $($updatedPackage.version), expected 0.39.2"
+if ($updatedPackage.version -ne "0.39.3") {
+  throw "Patch copied, but package.json version is $($updatedPackage.version), expected 0.39.3"
 }
 
-Write-Host "NEON LIFE v0.39.2 CITY FABRIC & VENUES applied successfully." -ForegroundColor Green
+Write-Host "NEON LIFE v0.39.3 FUNCTIONAL VENUES applied successfully." -ForegroundColor Green
 
 if ($RunChecks) {
   Push-Location $ProjectRoot

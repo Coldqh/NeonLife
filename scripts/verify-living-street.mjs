@@ -38,7 +38,7 @@ check("incident layer is selectable", ui.includes('id: "incidents"') && ui.inclu
 check("incident sheet has working actions", ["observe", "call-help", "intervene", "move-on"].every((token) => sheet.includes(`"${token}"`)) && sheet.includes("Маршрут к месту"));
 check("living street CSS is present", css.includes("living street layer") && css.includes("physical incident inspector") && css.includes("street-incident-pulse"));
 check("street scene tests are registered", pkg.scripts["test:street-ui"] && pkg.scripts["test:street"]);
-check("version is 0.39.2", pkg.version === "0.39.2");
+check("version is 0.39.3", pkg.version === "0.39.3");
 check("map components remain bounded", [map, localMap, sheet, ui].every((source) => source.split(/\r?\n/).length <= 600));
 check("street CSS braces are balanced", (css.match(/\{/g) ?? []).length === (css.match(/\}/g) ?? []).length);
 

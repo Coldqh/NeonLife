@@ -31,6 +31,20 @@ function isOpenHour(input: BuildingAccessInput, building: BuildingState): boolea
   return openHour < closeHour ? hour >= openHour && hour < closeHour : hour >= openHour || hour < closeHour;
 }
 
+function isVenueOpenHour(input: BuildingAccessInput, venueId: string): boolean {
+  const venue = input.urban.venues.find((item) => item.id === venueId);
+  if (!venue || !venue.active || venue.operatingStatus !== "operating") return false;
+  if (venue.openHour === 0 && venue.closeHour === 24) return true;
+  const hour = new Date(input.timestamp).getUTCHours();
+  return venue.openHour < venue.closeHour
+    ? hour >= venue.openHour && hour < venue.closeHour
+    : hour >= venue.openHour || hour < venue.closeHour;
+}
+
+function buildingHasOpenVenue(input: BuildingAccessInput, building: BuildingState): boolean {
+  return input.urban.venues.some((venue) => venue.buildingId === building.id && isVenueOpenHour(input, venue.id));
+}
+
 function isPublicUse(building: BuildingState): boolean {
   return ["mixed", "retail", "medical", "education", "civic", "transport", "hotel", "entertainment"].includes(building.use);
 }
@@ -60,6 +74,7 @@ function publicEntryDecision(input: BuildingAccessInput, building: BuildingState
   if (building.publicEntrances <= 0) return { decision: "unavailable", reason: "Нет публичного входа", authorized: false, locked: true, lockType: "none", alarmed: false };
   if (isPlayerHomeBuilding(input, building)) return { decision: "authorized", reason: "Доступ жильца", authorized: true, locked: false, lockType: "electronic", alarmed: building.security >= 55 };
   if (building.use === "vacant") return { decision: "open", reason: "Объект не контролируется", authorized: false, locked: false, lockType: "mechanical", alarmed: false };
+  if (buildingHasOpenVenue(input, building)) return { decision: "open", reason: "В здании работает публичное заведение", authorized: false, locked: false, lockType: building.security >= 70 ? "corporate" : "electronic", alarmed: building.security >= 65 };
   if (isPublicUse(building)) {
     if (!isOpenHour(input, building)) return { decision: "closed", reason: "Объект закрыт по времени", authorized: false, locked: true, lockType: building.security >= 70 ? "corporate" : "electronic", alarmed: building.security >= 50 };
     return { decision: "open", reason: "Публичный вход открыт", authorized: false, locked: false, lockType: building.security >= 70 ? "corporate" : "electronic", alarmed: building.security >= 65 };
@@ -176,7 +191,11 @@ function unitDecision(input: BuildingAccessInput, building: BuildingState, unit:
   if (isPlayerHomeBuilding(input, building) && unit.unitNumber.endsWith("P1")) {
     return { decision: "authorized", reason: "Твоя жилая ячейка", authorized: true, locked: false, lockType: "electronic", alarmed: unit.security >= 60 };
   }
-  if (["shop", "clinic", "office", "hotel-room", "service"].includes(unit.use) && isOpenHour(input, building)) {
+  if (unit.venueId) {
+    if (isVenueOpenHour(input, unit.venueId)) return { decision: "open", reason: "Заведение принимает посетителей", authorized: false, locked: false, lockType: "electronic", alarmed: unit.security >= 70 };
+    return { decision: "closed", reason: "Заведение сейчас закрыто", authorized: false, locked: true, lockType: "electronic", alarmed: unit.security >= 55 };
+  }
+  if (["shop", "clinic", "office", "hotel-room", "service", "workshop"].includes(unit.use) && isOpenHour(input, building)) {
     return { decision: "open", reason: "Помещение принимает посетителей", authorized: false, locked: false, lockType: "electronic", alarmed: unit.security >= 70 };
   }
   if (!unit.occupied && building.use === "vacant" && unit.security <= 25) {

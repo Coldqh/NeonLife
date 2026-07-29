@@ -2,6 +2,7 @@ import { createStableEntityId } from "../../core/ids/entityId";
 import { SeededRandom } from "../../core/random/seededRandom";
 import type { DistrictState, LocationState, OrganizationState } from "../../world/state/types";
 import type { HouseholdState, PopulationState } from "../population/types";
+import { advanceVenueOperationsState, createVenueOperationsState } from "../venues/venueOperationsSystem";
 import type { LocationSpatialState, MetropolitanSectorState, MetropolitanState, MetricBounds, SectorLandUse, SpatialDetailLevel } from "../spatial/types";
 import type {
   BuildingScale,
@@ -534,10 +535,13 @@ function generatedVenueName(seed: string, category: VenueCategory, building: Bui
 
 function venueCountForBuilding(building: BuildingState): number {
   if (building.use === "vacant" || building.use === "residential" && building.commercialUnits <= 0) return 0;
-  if (building.use === "retail" || building.use === "entertainment") return Math.min(4, Math.max(2, building.commercialUnits || 2));
-  if (building.use === "mixed") return Math.min(3, Math.max(1, building.commercialUnits));
-  if (["medical", "hotel", "transport"].includes(building.use)) return Math.min(2, Math.max(1, building.commercialUnits || 1));
-  return building.commercialUnits > 0 || ["office", "industrial", "warehouse", "civic", "education"].includes(building.use) ? 1 : 0;
+  const rng = new SeededRandom(`${building.seed}:venue-count:v2`);
+  if (building.use === "retail" || building.use === "entertainment") return Math.min(3, Math.max(1, Math.min(building.commercialUnits || 2, rng.integer(1, 3))));
+  if (building.use === "mixed") return building.commercialUnits > 0 ? Math.min(2, Math.max(1, rng.integer(1, 2))) : 0;
+  if (["medical", "hotel", "transport"].includes(building.use)) return 1;
+  if (building.use === "industrial" || building.use === "warehouse") return rng.chance(.48) ? 1 : 0;
+  if (["office", "civic", "education"].includes(building.use)) return rng.chance(.32) ? 1 : 0;
+  return 0;
 }
 
 function buildVenue(
@@ -556,6 +560,12 @@ function buildVenue(
     : venueHours(category, rng);
   const floor = building.floors > 1 && category === "office-service" && rng.chance(.35) ? rng.integer(2, Math.min(building.floors, 6)) : 1;
   const unitNumber = `${floor.toString().padStart(2, "0")}-V${(ordinal + 1).toString().padStart(2, "0")}`;
+  const statusRoll = anchorLocation ? 1 : rng.next();
+  const operatingStatus = anchorLocation ? "operating" as const
+    : statusRoll < .07 ? "vacant" as const
+    : statusRoll < .13 ? "renovation" as const
+    : statusRoll < .18 ? "closed" as const
+    : "operating" as const;
   return {
     id,
     sectorId: building.sectorId,
@@ -580,7 +590,8 @@ function buildVenue(
     popularity: clamp(20 + rng.integer(0, 78)),
     tags: venueTags(category),
     mapPriority: anchorLocation ? 100 : category === "clinic" || category === "market" ? 78 : category === "food" || category === "pharmacy" ? 68 : 48 + rng.integer(0, 18),
-    active: anchorLocation?.open ?? !rng.chance(.06),
+    operatingStatus,
+    active: operatingStatus === "operating" && (anchorLocation?.open ?? true),
     permanent: Boolean(anchorLocation),
     lastUpdatedAt: input.timestamp
   };
@@ -1007,6 +1018,7 @@ export function createUrbanFabricState(input: UrbanFabricInput): UrbanFabricStat
   const buildings = materializeSectorBuildings(input, catalogs, anchors);
   const assigned = assignDetailedHouseholds(input, buildings, [], []);
   const venues = materializeVenues(input, buildings, []);
+  const venueOperations = createVenueOperationsState({ seed: input.seed, timestamp: input.timestamp, venues });
   const units = mergeVenueUnits(input, buildings, assigned.units, venues, []);
   const interiors = updateInteriorCache(input, buildings, units, []);
   const cohorts = input.metropolitan.sectors.map((sector) => {
@@ -1016,11 +1028,12 @@ export function createUrbanFabricState(input: UrbanFabricInput): UrbanFabricStat
   const totals = demographyTotals(cohorts);
   const memory = memoryState(undefined, buildings, units, venues, interiors, input.timestamp);
   const state: UrbanFabricState = {
-    version: 2,
+    version: 3,
     catalogs: updatedCatalogs(input.timestamp, catalogs, cohorts, buildings),
     buildings,
     units,
     venues,
+    venueOperations,
     householdAddresses: assigned.addresses,
     interiors,
     interiorDeltas: [],
@@ -1074,6 +1087,7 @@ export function advanceUrbanFabricState(state: UrbanFabricState, input: UrbanFab
   const buildings = materializeSectorBuildings(input, catalogs, state.buildings);
   const assigned = assignDetailedHouseholds(input, buildings, state.householdAddresses, state.units);
   const venues = materializeVenues(input, buildings, state.venues);
+  const venueOperations = advanceVenueOperationsState(state.venueOperations, { seed: input.seed, timestamp: input.timestamp, venues });
   const permanentUnitIds = new Set(assigned.units.map((unit) => unit.id));
   const activeSectors = new Set(input.metropolitan.streaming.activeSectorIds);
   const cachedUnits = state.units
@@ -1101,6 +1115,7 @@ export function advanceUrbanFabricState(state: UrbanFabricState, input: UrbanFab
     buildings,
     units,
     venues,
+    venueOperations,
     householdAddresses: assigned.addresses,
     interiors,
     demography,
@@ -1125,18 +1140,19 @@ function populationByDistrict(cohorts: MassDemographyCohortState[]): Record<stri
 export function normalizeUrbanFabricState(value: unknown, input: UrbanFabricInput): UrbanFabricState {
   if (!value || typeof value !== "object") return createUrbanFabricState(input);
   const raw = value as Partial<UrbanFabricState>;
-  if (raw.version !== 2 || !Array.isArray(raw.catalogs) || !Array.isArray(raw.buildings) || !Array.isArray(raw.venues) || !raw.demography || !raw.memory) {
+  if (![2, 3].includes(raw.version ?? 0) || !Array.isArray(raw.catalogs) || !Array.isArray(raw.buildings) || !Array.isArray(raw.venues) || !raw.demography || !raw.memory) {
     return createUrbanFabricState(input);
   }
   const fresh = createUrbanFabricState(input);
   const normalized: UrbanFabricState = {
     ...fresh,
     ...raw,
-    version: 2,
+    version: 3,
     catalogs: raw.catalogs.length === input.metropolitan.sectors.length ? raw.catalogs : fresh.catalogs,
     buildings: Array.isArray(raw.buildings) ? raw.buildings : fresh.buildings,
     units: Array.isArray(raw.units) ? raw.units : fresh.units,
-    venues: Array.isArray(raw.venues) ? raw.venues : fresh.venues,
+    venues: Array.isArray(raw.venues) ? raw.venues.map((venue) => ({ ...venue, operatingStatus: venue.operatingStatus ?? (venue.active ? "operating" : "closed") })) : fresh.venues,
+    venueOperations: advanceVenueOperationsState(raw.venueOperations, { seed: input.seed, timestamp: input.timestamp, venues: Array.isArray(raw.venues) ? raw.venues.map((venue) => ({ ...venue, operatingStatus: venue.operatingStatus ?? (venue.active ? "operating" : "closed") })) : fresh.venues }),
     householdAddresses: Array.isArray(raw.householdAddresses) ? raw.householdAddresses : fresh.householdAddresses,
     interiors: Array.isArray(raw.interiors) ? raw.interiors : [],
     interiorDeltas: Array.isArray(raw.interiorDeltas) ? raw.interiorDeltas as InteriorPersistentDeltaState[] : [],

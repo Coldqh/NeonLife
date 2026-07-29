@@ -9,6 +9,9 @@ import {
   leaveBuildingUnit,
   payPlayerObligationAtHome,
   pickupCourierOrder,
+  joinVenueQueue,
+  leaveVenueQueue,
+  purchaseVenueOffer,
   receiveClinicCare,
   sleepAtHome,
   sleepOutside,
@@ -28,7 +31,10 @@ export type LocalLifeAction =
   | { kind: "pickup-courier" }
   | { kind: "deliver-courier" }
   | { kind: "pay-obligation"; obligationId: string }
-  | { kind: "clinic-care"; care: "checkup" | "stabilize" };
+  | { kind: "clinic-care"; care: "checkup" | "stabilize" }
+  | { kind: "join-venue-queue"; venueId: string }
+  | { kind: "leave-venue-queue"; venueId: string }
+  | { kind: "buy-venue-offer"; venueId: string; offerId: string };
 
 export function applyLocalLifeAction(session: GameSession, action: LocalLifeAction): GameSession {
   switch (action.kind) {
@@ -45,5 +51,8 @@ export function applyLocalLifeAction(session: GameSession, action: LocalLifeActi
     case "deliver-courier": return deliverCourierOrder(session);
     case "pay-obligation": return payPlayerObligationAtHome(session, action.obligationId);
     case "clinic-care": return receiveClinicCare(session, action.care);
+    case "join-venue-queue": return joinVenueQueue(session, action.venueId);
+    case "leave-venue-queue": return leaveVenueQueue(session, action.venueId);
+    case "buy-venue-offer": return purchaseVenueOffer(session, action.venueId, action.offerId);
   }
 }

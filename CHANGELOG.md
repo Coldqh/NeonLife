@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.39.3 — Functional Venues
+
+- added persistent operational state for every materialized venue;
+- added category-specific offers with prices, stock, duration and gameplay effects;
+- added physical queues, player receipts, venue cash, revenue and expenses;
+- added autonomous customer trade, stock consumption, payroll, utilities and daily restocking;
+- restricted purchases to the exact physical venue unit;
+- connected purchases to player balance, organizations, food inventory, health and vehicles;
+- added venue search by name, category, current status, sector and distance;
+- added live operational data and offer catalogs to venue and building profiles;
+- reduced procedural venue density and added closed, vacant and renovation states;
+- migrated saves to schema 34 and added executable functional-venue regressions.
+
 ## 0.39.2 — City Fabric & Venues
 
 - replaced fragile per-building SVG clicks with one screen-space hit-test and object priority;

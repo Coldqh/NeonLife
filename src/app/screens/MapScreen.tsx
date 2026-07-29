@@ -9,6 +9,7 @@ import { MapTopBar } from "../map/MapTopBar";
 import { MapSelectionSheet } from "../map/MapSelectionSheet";
 import { MapProfileOverlay } from "../map/MapProfileOverlay";
 import { BuildingInteriorMap } from "../map/BuildingInteriorMap";
+import { VenueSearchPanel } from "../map/VenueSearchPanel";
 import type { LocalLifeAction } from "../actions/localLifeActions";
 import type { StreetIncidentAction } from "../../simulation/streetScene/types";
 import type { CityMapSelection, GlobalLayerId, LocalLayerId, MapMode } from "../map/mapUi";
@@ -131,6 +132,7 @@ export function MapScreen({
   const [selectedSectorId, setSelectedSectorId] = useState(playerSector.id);
   const [selection, setSelection] = useState<CityMapSelection | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [routeReady, setRouteReady] = useState(false);
   const [globalFocusRevision, setGlobalFocusRevision] = useState(0);
   const [localFocusRevision, setLocalFocusRevision] = useState(0);
@@ -289,6 +291,17 @@ export function MapScreen({
     setSelection(localSelectionToCity(local, selectedSector));
   }
 
+  function selectVenueFromSearch(venue: GameSession["urban"]["venues"][number]): void {
+    const sector = session.metropolitan.sectors.find((item) => item.id === venue.sectorId);
+    if (!sector) return;
+    setSelectedSectorId(sector.id);
+    setSelection({ kind: "venue", venue });
+    setMode("local");
+    setProfileOpen(false);
+    setSearchOpen(false);
+    setLocalFocusRevision((value) => value + 1);
+  }
+
   function openSelectedArea(): void {
     if (selection?.kind === "district") {
       const sector = session.metropolitan.sectors.find((item) => item.mapDistrictId === selection.district.id) ?? selectedSector;
@@ -350,6 +363,7 @@ export function MapScreen({
         onLocalLayer={setLocalLayer}
         onSettings={onSettings}
         onPlayer={showPlayer}
+        onSearch={() => setSearchOpen(true)}
       />
 
       <div className="map-viewport">
@@ -449,10 +463,15 @@ export function MapScreen({
           onEnterUnit={onEnterBuildingUnit}
           onLeaveUnit={onLeaveBuildingUnit}
           onMoveFloor={onMoveBuildingFloor}
+          onSelectVenue={(venueId) => {
+            const nextVenue = session.urban.venues.find((item) => item.id === venueId);
+            if (nextVenue) { setSelection({ kind: "venue", venue: nextVenue }); setProfileOpen(true); }
+          }}
           onNotice={setFlash}
         />
       ) : null}
 
+      {searchOpen ? <VenueSearchPanel session={session} currentSectorId={selectedSector.id} onClose={() => setSearchOpen(false)} onSelectVenue={selectVenueFromSearch} /> : null}
       {flash ? <div className="map-toast" role="status">{flash}</div> : null}
     </section>
   );

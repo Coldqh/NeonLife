@@ -116,12 +116,6 @@ export function LocalSectorMap({
   const [camera, setCamera] = useState<CameraState>({ zoom: 1, centerX: 50, centerY: 50 });
 
   useEffect(() => { setCamera({ zoom: 1, centerX: 50, centerY: 50 }); }, [sector.id]);
-  useEffect(() => {
-    if (!focusRevision || session.localScene.playerPosition.sectorId !== sector.id) return;
-    const x = (session.localScene.playerPosition.xM - sector.bounds.xM) / sector.bounds.widthM * 100;
-    const y = (session.localScene.playerPosition.yM - sector.bounds.yM) / sector.bounds.heightM * 100;
-    setCamera((current) => ({ ...current, zoom: Math.max(current.zoom, 2.2), centerX: clamp(x, 12, 88), centerY: clamp(y, 12, 88) }));
-  }, [focusRevision, sector.bounds.heightM, sector.bounds.widthM, sector.bounds.xM, sector.bounds.yM, sector.id, session.localScene.playerPosition]);
 
   const buildings = useMemo(() => session.urban.buildings.filter((building) => building.sectorId === sector.id), [sector.id, session.urban.buildings]);
   const buildingById = useMemo(() => new Map(buildings.map((building) => [building.id, building])), [buildings]);
@@ -176,6 +170,29 @@ export function LocalSectorMap({
   const renderedVenues = useMemo(() => positionedVenues
     .sort((left, right) => Number(selectedKey === `venue:${right.venue.id}`) - Number(selectedKey === `venue:${left.venue.id}`) || right.venue.mapPriority - left.venue.mapPriority)
     .slice(0, venueLimit), [positionedVenues, selectedKey, venueLimit]);
+
+  useEffect(() => {
+    if (!focusRevision) return;
+    let point: { xM: number; yM: number } | null = null;
+    if (selected?.kind === "venue") {
+      const positioned = positionedVenues.find((item) => item.venue.id === selected.venue.id);
+      const building = buildingById.get(selected.venue.buildingId);
+      point = positioned ? { xM: positioned.xM, yM: positioned.yM } : building ? { xM: building.bounds.xM + building.bounds.widthM / 2, yM: building.bounds.yM + building.bounds.heightM / 2 } : null;
+    } else if (selected?.kind === "building") point = { xM: selected.building.bounds.xM + selected.building.bounds.widthM / 2, yM: selected.building.bounds.yM + selected.building.bounds.heightM / 2 };
+    else if (selected?.kind === "location") {
+      const placement = session.metropolitan.locations.find((item) => item.locationId === selected.location.id);
+      if (placement) point = { xM: placement.bounds.xM + placement.bounds.widthM / 2, yM: placement.bounds.yM + placement.bounds.heightM / 2 };
+    } else if (selected?.kind === "stop") point = { xM: selected.stop.xM, yM: selected.stop.yM };
+    else if (selected?.kind === "actor") point = { xM: selected.actor.position.xM, yM: selected.actor.position.yM };
+    else if (selected?.kind === "vehicle") point = { xM: selected.vehicle.position.xM, yM: selected.vehicle.position.yM };
+    else if (selected?.kind === "incident") point = { xM: selected.incident.xM, yM: selected.incident.yM };
+    else if (selected?.kind === "point") point = { xM: selected.xM, yM: selected.yM };
+    if (!point && session.localScene.playerPosition.sectorId === sector.id) point = { xM: session.localScene.playerPosition.xM, yM: session.localScene.playerPosition.yM };
+    if (!point) return;
+    const x = (point.xM - sector.bounds.xM) / sector.bounds.widthM * 100;
+    const y = (point.yM - sector.bounds.yM) / sector.bounds.heightM * 100;
+    setCamera((current) => ({ ...current, zoom: Math.max(current.zoom, 2.2), centerX: clamp(x, 12, 88), centerY: clamp(y, 12, 88) }));
+  }, [focusRevision, sector.id, selectedKey]);
 
   const size = 100 / camera.zoom;
   const viewX = clamp(camera.centerX - size / 2, 0, 100 - size);

@@ -1,5 +1,6 @@
 import type { EntityId } from "../../core/ids/entityId";
 import type { MetricBounds, SectorLandUse, SpatialDetailLevel } from "../spatial/types";
+import type { VenueOperationsState } from "../venues/types";
 
 export type BuildingUse = "residential" | "mixed" | "retail" | "office" | "industrial" | "warehouse" | "medical" | "education" | "civic" | "transport" | "utility" | "hotel" | "entertainment" | "vacant";
 export type BuildingScale = "house" | "lowrise" | "midrise" | "highrise" | "megablock" | "megastructure" | "warehouse" | "campus" | "infrastructure";
@@ -8,6 +9,7 @@ export type InteriorRoomKind = "entry" | "living" | "kitchen" | "bedroom" | "bat
 export type InteriorDeltaKind = "door" | "damage" | "inventory" | "occupancy" | "evidence" | "ownership" | "access";
 export type VenueCategory = "convenience" | "food" | "bar" | "pharmacy" | "clinic" | "repair" | "cyberware" | "clothing" | "entertainment" | "hotel" | "office-service" | "market";
 export type VenuePriceTier = 1 | 2 | 3 | 4;
+export type VenueOperatingStatus = "operating" | "closed" | "renovation" | "vacant";
 
 export interface SectorBuildingCatalogState {
   sectorId: EntityId;
@@ -115,6 +117,7 @@ export interface VenueState {
   popularity: number;
   tags: string[];
   mapPriority: number;
+  operatingStatus: VenueOperatingStatus;
   active: boolean;
   permanent: boolean;
   lastUpdatedAt: number;
@@ -252,11 +255,12 @@ export interface UrbanFabricTotalsState {
 }
 
 export interface UrbanFabricState {
-  version: 2;
+  version: 3;
   catalogs: SectorBuildingCatalogState[];
   buildings: BuildingState[];
   units: BuildingUnitState[];
   venues: VenueState[];
+  venueOperations: VenueOperationsState;
   householdAddresses: HouseholdAddressState[];
   interiors: InteriorState[];
   interiorDeltas: InteriorPersistentDeltaState[];

@@ -1,10 +1,11 @@
-import { FOOD_CATALOG } from "../../data/products/foodCatalog";
+import { FOOD_CATALOG, getFoodProduct } from "../../data/products/foodCatalog";
 import { getCarriedMassGrams } from "../../gameplay/food/foodSystem";
 import { getActiveCourierOrder } from "../../gameplay/jobs/courier/courierSystem";
 import { currentPhysicalLocation, isCourierDispatchLocation, isPlayerInsideHome, isPlayerInsideLocation } from "../../gameplay/life/playerPresence";
 import { getBusinessAtLocation, localPrice } from "../../gameplay/economy/localEconomy";
 import { isLocationOpen } from "../../gameplay/travel/travelSystem";
 import type { GameSession } from "../../world/state/types";
+import { venueCategoryLabel, venueIsOpen } from "./mapUi";
 import type { LocalLifeAction } from "../actions/localLifeActions";
 
 export function BuildingServicePanel({
@@ -28,17 +29,53 @@ export function BuildingServicePanel({
   const carriedMass = getCarriedMassGrams(session.life.food);
   const insideHome = isPlayerInsideHome(session);
   const open = location ? isLocationOpen(location, session.timestamp) : false;
+  const venue = session.urban.venues.find((item) => item.unitId === session.localScene.playerPosition.unitId);
+  const venueOperation = venue ? session.urban.venueOperations.operations.find((item) => item.venueId === venue.id) : undefined;
+  const venueOpen = venue ? venueIsOpen(venue, session.timestamp) && venueOperation?.status === "operating" : false;
+  const venueQueueReady = venueOperation?.queue.playerState === "ready" || (venueOperation?.queue.estimatedWaitMinutes ?? 0) <= 0;
+  const playerVehicleId = session.vehicles.player.currentVehicleId ?? session.vehicles.player.ownedVehicleIds[0];
 
   return (
     <aside className="building-service-panel" data-no-swipe>
       <header>
-        <div><span>ТОЧКА ВЗАИМОДЕЙСТВИЯ</span><h2>{insideHome ? "Личная капсула" : location?.name ?? "Сервис здания"}</h2></div>
+        <div><span>ТОЧКА ВЗАИМОДЕЙСТВИЯ</span><h2>{insideHome ? "Личная капсула" : venue?.name ?? location?.name ?? "Сервис здания"}</h2></div>
         <button type="button" onClick={onClose} aria-label="Закрыть">×</button>
       </header>
 
-      {location ? <div className="building-service-panel__status"><strong className={open ? "status-good" : "status-bad"}>{open ? "ОТКРЫТО" : "ЗАКРЫТО"}</strong><span>{location.code}</span></div> : null}
+      {venue ? <div className="building-service-panel__status"><strong className={venueOpen ? "status-good" : "status-bad"}>{venueOpen ? "ОТКРЫТО" : venueOperation?.status === "renovation" ? "РЕМОНТ" : venueOperation?.status === "vacant" ? "ПУСТУЕТ" : "ЗАКРЫТО"}</strong><span>{venue.code} · {venueCategoryLabel(venue.category)}</span></div> : location ? <div className="building-service-panel__status"><strong className={open ? "status-good" : "status-bad"}>{open ? "ОТКРЫТО" : "ЗАКРЫТО"}</strong><span>{location.code}</span></div> : null}
 
-      {shopStock && location ? (
+      {venue && venueOperation ? (
+        <section className="venue-service">
+          <header className="venue-service__summary">
+            <div><span>ОЧЕРЕДЬ</span><strong>{venueOperation.queue.waitingCount} чел. · ~{venueOperation.queue.estimatedWaitMinutes} мин.</strong></div>
+            <div><span>ПЕРСОНАЛ</span><strong>{venueOperation.staffPresent} на смене</strong></div>
+            <div><span>ВЫРУЧКА СЕГОДНЯ</span><strong>₵ {venueOperation.revenueToday}</strong></div>
+          </header>
+          {!venueOpen ? <p className="building-service-empty">Заведение сейчас не обслуживает посетителей.</p> : !venueQueueReady ? (
+            <div className="venue-queue-card">
+              <p>Перед заказом нужно дождаться кассы. Текущее ожидание: около {venueOperation.queue.estimatedWaitMinutes} мин.</p>
+              <button type="button" onClick={() => onAction({ kind: "join-venue-queue", venueId: venue.id })}>Встать в очередь</button>
+            </div>
+          ) : (
+            <div className="venue-offer-list">
+              {venueOperation.offers.filter((offer) => offer.active).map((offer) => {
+                const product = offer.productId ? getFoodProduct(offer.productId) : null;
+                const fits = !product || carriedMass + product.massGrams <= session.life.food.carryingCapacityGrams;
+                const vehicleRequired = offer.kind === "vehicle-service" && !playerVehicleId;
+                return (
+                  <article key={offer.id}>
+                    <div><strong>{offer.name}</strong><span>{offer.description}</span><small>₵ {offer.currentPrice} · остаток {offer.stock} · {offer.durationMinutes} мин.</small></div>
+                    <button type="button" disabled={!venueOpen || offer.stock <= 0 || session.player.balance < offer.currentPrice || !fits || vehicleRequired} onClick={() => onAction({ kind: "buy-venue-offer", venueId: venue.id, offerId: offer.id })}>{vehicleRequired ? "Нет машины" : offer.stock <= 0 ? "Нет в наличии" : "Купить"}</button>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+          {venueOperation.queue.playerState === "waiting" ? <button type="button" className="venue-service__leave" onClick={() => onAction({ kind: "leave-venue-queue", venueId: venue.id })}>Покинуть очередь</button> : null}
+        </section>
+      ) : null}
+
+      {!venue && shopStock && location ? (
         <section>
           <h3>КАССА</h3>
           <div className="building-service-list">
@@ -56,7 +93,7 @@ export function BuildingServicePanel({
         </section>
       ) : null}
 
-      {clinic && location ? (
+      {!venue && clinic && location ? (
         <section>
           <h3>МЕДИЦИНСКИЙ ПОСТ</h3>
           <p>Очередь {clinic.queueLength} · запас {clinic.medicalStock} · сервис {clinic.serviceLevel}%.</p>
@@ -102,7 +139,7 @@ export function BuildingServicePanel({
         </section>
       ) : null}
 
-      {!shopStock && !clinic && !atDispatch && !insideHome && !(activeOrder && location && [activeOrder.pickupLocationId, activeOrder.dropoffLocationId].includes(location.id)) ? <p className="building-service-empty">В этой зоне пока нет доступного сервиса.</p> : null}
+      {!venue && !shopStock && !clinic && !atDispatch && !insideHome && !(activeOrder && location && [activeOrder.pickupLocationId, activeOrder.dropoffLocationId].includes(location.id)) ? <p className="building-service-empty">В этой зоне пока нет доступного сервиса.</p> : null}
     </aside>
   );
 }

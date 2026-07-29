@@ -86,6 +86,7 @@ export function MapProfileOverlay({
   onEnterUnit,
   onLeaveUnit,
   onMoveFloor,
+  onSelectVenue,
   onNotice
 }: {
   session: GameSession;
@@ -104,6 +105,7 @@ export function MapProfileOverlay({
   onEnterUnit: (unitId: string) => void;
   onLeaveUnit: () => void;
   onMoveFloor: (floor: number, method: "stairs" | "elevator") => void;
+  onSelectVenue: (venueId: string) => void;
   onNotice: (message: string) => void;
 }) {
   const targetBuilding = building ?? (venue ? session.urban.buildings.find((item) => item.id === venue.buildingId) : location ? session.urban.buildings.find((item) => item.anchorLocationId === location.id) : undefined);
@@ -113,6 +115,7 @@ export function MapProfileOverlay({
     const open = venueIsOpen(venue, session.timestamp);
     const access = session.buildingAccess.buildingEntries.find((item) => item.buildingId === targetBuilding.id);
     const unit = session.urban.units.find((item) => item.id === venue.unitId);
+    const operation = session.urban.venueOperations.operations.find((item) => item.venueId === venue.id);
     const insideBuilding = session.localScene.playerPosition.buildingId === targetBuilding.id;
     const insideVenue = insideBuilding && session.localScene.playerPosition.unitId === venue.unitId;
     const actors = session.localScene.actors.filter((actor) => actor.visible && actor.position.buildingId === targetBuilding.id && (!actor.position.unitId || actor.position.unitId === venue.unitId));
@@ -129,12 +132,14 @@ export function MapProfileOverlay({
               <div><span>Качество</span><strong>{venue.quality}%</strong><em>{bars(venue.quality)}</em></div>
               <div><span>Безопасность</span><strong>{venue.security}%</strong><em>{bars(venue.security)}</em></div>
               <div><span>Спрос</span><strong>{venue.demand}%</strong><em>{bars(venue.demand)}</em></div>
-              <div><span>Персонал</span><strong>{venue.staffing}%</strong><em>{bars(venue.staffing)}</em></div>
-              <div><span>Запасы</span><strong>{venue.stock}%</strong><em>{bars(venue.stock)}</em></div>
+              <div><span>Персонал</span><strong>{operation?.staffPresent ?? 0} на смене</strong><em>{bars(venue.staffing)}</em></div>
+              <div><span>Запасы</span><strong>{operation?.offers.reduce((sum, offer) => sum + offer.stock, 0) ?? 0} ед.</strong><em>{bars(venue.stock)}</em></div>
               <div><span>Цена</span><strong>{"₵".repeat(venue.priceTier)}</strong></div>
             </section>
             <section className="map-profile__description"><span>ЗАВЕДЕНИЕ</span><p>{venue.tags.join(" · ")}. Реальное помещение {unit?.unitNumber ?? venue.unitNumber} внутри здания {targetBuilding.addressCode}.</p></section>
             <section className="generated-venue__address"><div><span>Адрес</span><strong>{targetBuilding.streetName ?? targetBuilding.addressCode} {targetBuilding.streetNumber ?? ""}</strong></div><div><span>Помещение</span><strong>{venue.floor}F · {venue.unitNumber}</strong></div><div><span>Популярность</span><strong>{venue.popularity}%</strong></div><div><span>Сейчас внутри</span><strong>{actors.length}</strong></div></section>
+            {operation ? <section className="venue-profile__operations"><header><span>РАБОТА ЗАВЕДЕНИЯ</span><strong className={open ? "status-good" : "status-bad"}>{operation.status === "operating" ? (open ? "ОТКРЫТО" : "ВНЕ ГРАФИКА") : operation.status.toUpperCase()}</strong></header><div><span>Очередь <b>{operation.queue.waitingCount} чел. · ~{operation.queue.estimatedWaitMinutes} мин.</b></span><span>Выручка сегодня <b>₵ {operation.revenueToday}</b></span><span>Обслужено <b>{operation.queue.servedToday}</b></span></div></section> : null}
+            {operation ? <section className="venue-profile__offers"><header><span>АССОРТИМЕНТ И УСЛУГИ</span><strong>{operation.offers.filter((offer) => offer.active).length}</strong></header><div>{operation.offers.filter((offer) => offer.active).map((offer) => <article key={offer.id}><div><strong>{offer.name}</strong><small>{offer.description}</small></div><span>₵ {offer.currentPrice}</span><em>{offer.stock} шт.</em></article>)}</div></section> : null}
             <section className="map-profile__inside"><header><span>СЕЙЧАС ВНУТРИ</span><strong>{actors.length}</strong></header><div>{actors.slice(0, 6).map((actor) => <div key={actor.id}><img src={personPortrait(actor.id)} alt=""/><span>{actor.name}</span><small>{actor.activityLabel}</small></div>)}{!actors.length ? <p>Видимых посетителей нет.</p> : null}</div></section>
             <section className="map-profile__route"><div><span>МАРШРУТ</span><strong>{routeCaption}</strong></div><button type="button" onClick={onBuildRoute}>Построить</button></section>
           </div>
@@ -222,7 +227,7 @@ export function MapProfileOverlay({
 
             <FloorGrid building={targetBuilding} session={session} selectedFloor={selectedFloor} onSelectFloor={setSelectedFloor} onMoveFloor={onMoveFloor} />
 
-            {buildingVenues.length ? <section className="building-profile__venues"><header><span>ЗАВЕДЕНИЯ ВНУТРИ</span><strong>{buildingVenues.length}</strong></header><div>{buildingVenues.slice(0, 8).map((venue) => <article key={venue.id}><strong>{venue.name}</strong><small>{venueCategoryLabel(venue.category)} · {venue.floor}F · {venue.unitNumber}</small></article>)}</div></section> : null}
+            {buildingVenues.length ? <section className="building-profile__venues"><header><span>ЗАВЕДЕНИЯ ВНУТРИ</span><strong>{buildingVenues.length}</strong></header><div>{buildingVenues.slice(0, 12).map((venue) => <button type="button" key={venue.id} onClick={() => onSelectVenue(venue.id)}><strong>{venue.name}</strong><small>{venueCategoryLabel(venue.category)} · {venue.floor}F · {venue.unitNumber}</small><b>›</b></button>)}</div></section> : null}
 
             <section className="map-profile__inside"><header><span>РЯДОМ СЕЙЧАС</span><strong>{residents.length}</strong></header><div>{residents.slice(0, 7).map((actor) => <div key={actor.id}><img src={personPortrait(actor.id)} alt="" /><span>{actor.name}</span><small>{actor.position.floor ? `${actor.position.floor} этаж` : actor.activityLabel}</small></div>)}{!residents.length ? <p>Видимых жильцов нет.</p> : null}</div></section>
           </div>
