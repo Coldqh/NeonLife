@@ -14,6 +14,7 @@ import type { LocalActorState } from "../../simulation/localScene/types";
 import type { PhysicalVehicleEntityState } from "../../simulation/vehicles/types";
 import type { StreetSegmentState } from "../../simulation/streets/types";
 import type { LocalMovementState } from "../../simulation/localMovement/types";
+import type { StreetCrossingState, StreetIncidentState, StreetPedestrianState, StreetTrafficState } from "../../simulation/streetScene/types";
 import { getSectorStreetTopology } from "../../simulation/streets/streetTopologySystem";
 import { PLACE_ICONS } from "../shared/presentation";
 
@@ -28,6 +29,7 @@ export type LocalMapSelection =
   | { kind: "street"; segment: StreetSegmentState }
   | { kind: "actor"; actor: LocalActorState }
   | { kind: "vehicle"; vehicle: PhysicalVehicleEntityState }
+  | { kind: "incident"; incident: StreetIncidentState }
   | { kind: "point"; xM: number; yM: number };
 
 function clamp(value: number, min: number, max: number): number { return Math.max(min, Math.min(max, value)); }
@@ -40,6 +42,7 @@ function selectionKey(selection: LocalMapSelection | null): string | null {
   if (selection.kind === "stop") return `stop:${selection.stop.id}`;
   if (selection.kind === "actor") return `actor:${selection.actor.id}`;
   if (selection.kind === "vehicle") return `vehicle:${selection.vehicle.id}`;
+  if (selection.kind === "incident") return `incident:${selection.incident.id}`;
   return `street:${selection.segment.id}`;
 }
 
@@ -52,6 +55,10 @@ export function LocalSectorMap({
   showStops = true,
   actors = [],
   vehicles = [],
+  pedestrians = [],
+  traffic = [],
+  incidents = [],
+  crossings = [],
   focusRevision = 0,
   onSelect
 }: {
@@ -63,6 +70,10 @@ export function LocalSectorMap({
   showStops?: boolean;
   actors?: LocalActorState[];
   vehicles?: PhysicalVehicleEntityState[];
+  pedestrians?: StreetPedestrianState[];
+  traffic?: StreetTrafficState[];
+  incidents?: StreetIncidentState[];
+  crossings?: StreetCrossingState[];
   focusRevision?: number;
   onSelect?: (selection: LocalMapSelection) => void;
 }) {
@@ -211,6 +222,8 @@ export function LocalSectorMap({
           );
         })}
 
+        {crossings.map((crossing) => <g key={crossing.id} transform={`translate(${toX(crossing.xM)} ${toY(crossing.yM)})`} className={`local-map__crossing local-map__crossing--${crossing.signal}`} aria-hidden="true"><rect x="-2.8" y="-1.25" width="5.6" height="2.5" rx=".4"/><path d="M-2.1-1v2M-1.05-1v2M0-1v2M1.05-1v2M2.1-1v2"/></g>)}
+
         {topology.parcels.map((parcel) => <rect key={parcel.id} x={toX(parcel.bounds.xM)} y={toY(parcel.bounds.yM)} width={Math.max(.5, parcel.bounds.widthM / sector.bounds.widthM * 100)} height={Math.max(.5, parcel.bounds.heightM / sector.bounds.heightM * 100)} rx=".35" className={`local-map__parcel local-map__parcel--${parcel.kind}`} />)}
 
         {buildings.map((building) => {
@@ -245,14 +258,23 @@ export function LocalSectorMap({
           );
         })}
 
-        {actors.map((actor) => {
+        {(pedestrians.length ? pedestrians : actors.map((actor) => ({ id: actor.id, actorId: actor.id, segmentId: "", xM: actor.position.xM, yM: actor.position.yM, headingDeg: 0, speedMPerMinute: 0, motion: "waiting" as const, sidewalkSide: "left" as const, updatedAt: session.timestamp }))).map((pedestrian) => {
+          const actor = actors.find((item) => item.id === pedestrian.actorId) ?? session.localScene.actors.find((item) => item.id === pedestrian.actorId);
+          if (!actor) return null;
           const active = selectedKey === `actor:${actor.id}`;
-          return <g key={actor.id} transform={`translate(${toX(actor.position.xM)} ${toY(actor.position.yM)})`} className={`local-map__actor${active ? " is-selected" : ""}`} role={onSelect ? "button" : undefined} tabIndex={onSelect ? 0 : undefined} onClick={onSelect ? (event) => { event.stopPropagation(); onSelect({ kind: "actor", actor }); } : undefined} onKeyDown={onSelect ? (event) => interactiveKey(event, () => onSelect({ kind: "actor", actor })) : undefined}><circle r="2.2"/><path d="M0-1.2v2.4M-1.2.2 0-.7 1.2.2M-.8 2 0 1.1.8 2"/>{active || camera.zoom >= 3.4 ? <text x="2.8" y=".7">{Math.round(actor.distanceToPlayerM)}м</text> : null}</g>;
+          return <g key={pedestrian.id} transform={`translate(${toX(pedestrian.xM)} ${toY(pedestrian.yM)}) rotate(${pedestrian.headingDeg})`} className={`local-map__actor local-map__actor--${pedestrian.motion}${active ? " is-selected" : ""}`} role={onSelect ? "button" : undefined} tabIndex={onSelect ? 0 : undefined} onClick={onSelect ? (event) => { event.stopPropagation(); onSelect({ kind: "actor", actor }); } : undefined} onKeyDown={onSelect ? (event) => interactiveKey(event, () => onSelect({ kind: "actor", actor })) : undefined}><circle r="1.7"/><path d="M0-1v2M-1 .15 0-.55 1 .15M-.7 1.7 0 .9.7 1.7"/><path className="local-map__actor-direction" d="M0-3 1.1-1.9H-1.1z"/>{active || camera.zoom >= 3.8 ? <text transform={`rotate(${-pedestrian.headingDeg})`} x="2.7" y=".7">{Math.round(actor.distanceToPlayerM)}м</text> : null}</g>;
         })}
 
-        {vehicles.map((vehicle) => {
+        {(traffic.length ? traffic : vehicles.map((vehicle) => ({ id: vehicle.id, vehicleId: vehicle.id, xM: vehicle.position.xM, yM: vehicle.position.yM, headingDeg: 0, speedKph: 0, laneIndex: 0, motion: "parked" as const, brakeLights: false, updatedAt: session.timestamp }))).map((streetVehicle) => {
+          const vehicle = vehicles.find((item) => item.id === streetVehicle.vehicleId) ?? session.vehicles.vehicles.find((item) => item.id === streetVehicle.vehicleId);
+          if (!vehicle) return null;
           const active = selectedKey === `vehicle:${vehicle.id}`;
-          return <g key={vehicle.id} transform={`translate(${toX(vehicle.position.xM)} ${toY(vehicle.position.yM)})`} className={`local-map__vehicle${active ? " is-selected" : ""}`} role={onSelect ? "button" : undefined} tabIndex={onSelect ? 0 : undefined} onClick={onSelect ? (event) => { event.stopPropagation(); onSelect({ kind: "vehicle", vehicle }); } : undefined} onKeyDown={onSelect ? (event) => interactiveKey(event, () => onSelect({ kind: "vehicle", vehicle })) : undefined}><rect x="-2.4" y="-1.2" width="4.8" height="2.4" rx=".7"/><circle cx="-1.4" cy="1.35" r=".45"/><circle cx="1.4" cy="1.35" r=".45"/>{active || camera.zoom >= 3.4 ? <text x="3.2" y=".7">{Math.round(vehicle.distanceToPlayerM)}м</text> : null}</g>;
+          return <g key={streetVehicle.id} transform={`translate(${toX(streetVehicle.xM)} ${toY(streetVehicle.yM)}) rotate(${streetVehicle.headingDeg})`} className={`local-map__vehicle local-map__vehicle--${streetVehicle.motion}${active ? " is-selected" : ""}`} role={onSelect ? "button" : undefined} tabIndex={onSelect ? 0 : undefined} onClick={onSelect ? (event) => { event.stopPropagation(); onSelect({ kind: "vehicle", vehicle }); } : undefined} onKeyDown={onSelect ? (event) => interactiveKey(event, () => onSelect({ kind: "vehicle", vehicle })) : undefined}><rect x="-2.4" y="-1.15" width="4.8" height="2.3" rx=".65"/><path className="local-map__vehicle-windshield" d="M-.8-.85H1.1l.7.65H-1.5z"/><circle cx="-1.35" cy="1.2" r=".4"/><circle cx="1.35" cy="1.2" r=".4"/>{streetVehicle.brakeLights ? <path className="local-map__brake-lights" d="M-2.25-.72v1.44M2.25-.72v1.44"/> : null}{active || camera.zoom >= 4 ? <text transform={`rotate(${-streetVehicle.headingDeg})`} x="3.1" y=".7">{streetVehicle.speedKph ? `${Math.round(streetVehicle.speedKph)}км/ч` : `${Math.round(vehicle.distanceToPlayerM)}м`}</text> : null}</g>;
+        })}
+
+        {incidents.filter((incident) => incident.status !== "resolved").map((incident) => {
+          const active = selectedKey === `incident:${incident.id}`;
+          return <g key={incident.id} transform={`translate(${toX(incident.xM)} ${toY(incident.yM)})`} className={`local-map__incident local-map__incident--${incident.type} local-map__incident--${incident.status}${active ? " is-selected" : ""}`} role={onSelect ? "button" : undefined} tabIndex={onSelect ? 0 : undefined} onClick={onSelect ? (event) => { event.stopPropagation(); onSelect({ kind: "incident", incident }); } : undefined} onKeyDown={onSelect ? (event) => interactiveKey(event, () => onSelect({ kind: "incident", incident })) : undefined}><circle className="local-map__incident-pulse" r="5"/><path d="M0-4 3.7-2 3.7 2 0 4-3.7 2-3.7-2z"/><text textAnchor="middle" y="1.2">!</text>{active || camera.zoom >= 2.8 ? <g className="local-map__incident-label"><rect x="-11" y="5.2" width="22" height="4.4" rx="1.2"/><text textAnchor="middle" y="8.2">{incident.title.slice(0, 21)}</text></g> : null}</g>;
         })}
 
         {route?.points.length ? <g className="local-map__route" aria-hidden="true"><polyline className="local-map__route-base" points={route.points.map((point) => `${toX(point.xM)},${toY(point.yM)}`).join(" ")} /><polyline className="local-map__route-remaining" points={remainingRoutePoints.map((point) => `${toX(point.xM)},${toY(point.yM)}`).join(" ")} /><circle className="local-map__route-start" cx={toX(route.points[0].xM)} cy={toY(route.points[0].yM)} r="1.5" /><circle className="local-map__route-target" cx={toX(route.target.xM)} cy={toY(route.target.yM)} r="2.2" /></g> : null}

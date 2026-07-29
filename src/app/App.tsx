@@ -17,6 +17,7 @@ import type { TransitPhoneActivity } from "../simulation/transit/types";
 import type { LocalMovementTargetState } from "../simulation/localMovement/types";
 import { applyLocalLifeAction } from "./actions/localLifeActions";
 import {
+  actOnStreetIncident,
   alightTransitVehicle,
   boardTransitVehicle,
   cancelLocalMovement,
@@ -48,9 +49,7 @@ import {
   usePhoneInTransit,
   yieldTransitSeat
 } from "../gameplay/life/lifeSimulation";
-
 const UI_SETTINGS_KEY = "neon-life/ui-settings/v1";
-
 export default function App() {
   const [settings, setSettings] = useState<UiSettings>(() => readLocal(UI_SETTINGS_KEY, defaultUiSettings));
   const [screen, setScreen] = useState<GameScreen>("map");
@@ -200,6 +199,7 @@ export default function App() {
             onLifeAction={(action) => setSession((current) => applyLocalLifeAction(current, action))}
             onEnterVehicle={(vehicleId) => setSession((current) => enterPhysicalVehicle(current, vehicleId))}
             onLeaveVehicle={() => setSession((current) => leavePhysicalVehicle(current))}
+            onStreetIncidentAction={(incidentId, action) => setSession((current) => actOnStreetIncident(current, incidentId, action))}
           />
         ) : null}
         {screen === "nearby" ? (

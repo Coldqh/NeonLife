@@ -47,6 +47,8 @@ import type { TransitCommand, TransitPhoneActivity } from "../../simulation/tran
 import { advanceStreetTopologyState, alignUrbanFabricToStreetTopology, snapPhysicalVehicleParkingToStreetTopology, snapTransitStopsToStreetTopology } from "../../simulation/streets/streetTopologySystem";
 import { advanceLocalMovementRoute, localMovementCurrentStreet, localMovementTargetForStop, planLocalMovement, refreshLocalMovementRoute, WALKING_SPEED_M_PER_MINUTE } from "../../simulation/localMovement/localMovementSystem";
 import type { LocalMovementTargetState } from "../../simulation/localMovement/types";
+import { advanceStreetSceneState, applyStreetIncidentAction } from "../../simulation/streetScene/streetSceneSystem";
+import type { StreetIncidentAction } from "../../simulation/streetScene/types";
 import {
   advanceVehicleCrimeState,
   appendVehicleCrimeObservations,
@@ -470,6 +472,17 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     playerPosition: transitState.player.position
   });
 
+  const streetAdvance = advanceStreetSceneState(session.streetScene, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    metropolitan: metropolitanState,
+    urban: urbanState,
+    streets: streetsState,
+    localScene: localSceneState,
+    vehicles: crimeVehiclesState
+  });
+
   const generated: WorldEvent[] = [];
   if (options.title && options.category) {
     generated.push(createEvent(
@@ -524,6 +537,9 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
       incident.status === "investigating" ? 3 : 2
     ));
   }
+  for (const notice of streetAdvance.notices) {
+    generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
+  }
 
   // Needs must not depend on whether time advanced in one large action or
   // many small actions. Player condition supports fractional accumulation.
@@ -540,7 +556,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   );
   const selectedPerson = getPerson(peopleState, session.world.primaryContactId)
     ?? getPerson(peopleState, peopleState.selectedPersonId);
-  const worldEventCount = options.worldEvents ?? (queued.events.length + pulse.events.length + network.notices.length + economyAdvance.notices.length + populationAdvance.notices.length + infrastructureAdvance.notices.length + productionAdvance.notices.length + organizationAdvance.notices.length + governmentAdvance.notices.length + healthAdvance.notices.length + dataAdvance.notices.length + pressureAdvance.notices.length + crimeAdvance.newlyReported.length);
+  const worldEventCount = options.worldEvents ?? (queued.events.length + pulse.events.length + network.notices.length + economyAdvance.notices.length + populationAdvance.notices.length + infrastructureAdvance.notices.length + productionAdvance.notices.length + organizationAdvance.notices.length + governmentAdvance.notices.length + healthAdvance.notices.length + dataAdvance.notices.length + pressureAdvance.notices.length + crimeAdvance.newlyReported.length + streetAdvance.notices.length);
   const pressure = trackPressureMetrics(pressureAdvance.state, {
     balanceDelta: options.trackBalance === false ? 0 : options.balanceDelta,
     deliveries: options.deliveryCompleted ? 1 : 0,
@@ -651,6 +667,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     streets: streetsState,
     mobility: mobilityState,
     localScene: localSceneState,
+    streetScene: streetAdvance.state,
     buildingAccess: buildingAccessState,
     vehicles: crimeVehiclesState,
     transit: transitState,
@@ -674,6 +691,28 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   };
 }
 
+
+export function actOnStreetIncident(session: GameSession, incidentId: string, action: StreetIncidentAction): GameSession {
+  const incident = session.streetScene.incidents.find((item) => item.id === incidentId);
+  if (!incident || incident.status === "resolved") return session;
+  const distance = Math.hypot(incident.xM - session.localScene.playerPosition.xM, incident.yM - session.localScene.playerPosition.yM);
+  if (session.localScene.playerPosition.state !== "outside" || distance > 24) return session;
+  const minutes = action === "observe" ? 2 : action === "call-help" ? 1 : action === "intervene" ? 6 : 0;
+  const progressed = minutes > 0 ? progressLife(session, minutes, {
+    category: "local",
+    title: action === "observe" ? `Осмотр: ${incident.title}` : action === "call-help" ? `Вызвана помощь: ${incident.title}` : action === "intervene" ? `Вмешательство: ${incident.title}` : undefined,
+    detail: action === "intervene" ? "Игрок физически вмешался в уличную ситуацию." : incident.detail,
+    importance: action === "intervene" ? 2 : 1,
+    fatigueDelta: action === "intervene" ? 2 : 0,
+    stressDelta: action === "intervene" ? 3 : 0,
+    suppressTimeEvent: true,
+    activity: action === "intervene" ? `Вмешательство: ${incident.title}` : `Наблюдение: ${incident.title}`
+  }) : session;
+  return {
+    ...progressed,
+    streetScene: applyStreetIncidentAction(progressed.streetScene, incidentId, action, progressed.timestamp)
+  };
+}
 
 function applyLocalMovementDistrict(session: GameSession): GameSession {
   const position = session.localScene.playerPosition;

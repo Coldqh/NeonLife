@@ -4,10 +4,11 @@ import type { BuildingState } from "../../simulation/urban/types";
 import type { LocalActorState } from "../../simulation/localScene/types";
 import type { PhysicalVehicleEntityState } from "../../simulation/vehicles/types";
 import type { TransitStopState } from "../../simulation/transit/types";
+import type { StreetIncidentState } from "../../simulation/streetScene/types";
 
 export type MapMode = "global" | "local" | "interior";
 export type GlobalLayerId = "districts" | "transport" | "work" | "risk" | "services";
-export type LocalLayerId = "all" | "markets" | "food" | "clinic" | "transport" | "work" | "people" | "cars";
+export type LocalLayerId = "all" | "markets" | "food" | "clinic" | "transport" | "work" | "people" | "cars" | "incidents";
 
 export type CityMapSelection =
   | { kind: "district"; district: MapDistrictState }
@@ -17,6 +18,7 @@ export type CityMapSelection =
   | { kind: "actor"; actor: LocalActorState }
   | { kind: "vehicle"; vehicle: PhysicalVehicleEntityState }
   | { kind: "stop"; stop: TransitStopState }
+  | { kind: "incident"; incident: StreetIncidentState }
   | { kind: "point"; sector: MetropolitanSectorState; xM: number; yM: number };
 
 export const GLOBAL_LAYERS: Array<{ id: GlobalLayerId; label: string; icon: string }> = [
@@ -35,7 +37,8 @@ export const LOCAL_LAYERS: Array<{ id: LocalLayerId; label: string; icon: string
   { id: "transport", label: "Транспорт", icon: "▰" },
   { id: "work", label: "Работа", icon: "▣" },
   { id: "people", label: "Люди рядом", icon: "♙" },
-  { id: "cars", label: "Машины рядом", icon: "◆" }
+  { id: "cars", label: "Машины рядом", icon: "◆" },
+  { id: "incidents", label: "Происшествия", icon: "!" }
 ];
 
 export function landUseLabel(value: MetropolitanSectorState["landUse"]): string {
@@ -126,6 +129,7 @@ export function selectionKey(selection: CityMapSelection | null): string | null 
   if (selection.kind === "actor") return `actor:${selection.actor.id}`;
   if (selection.kind === "vehicle") return `vehicle:${selection.vehicle.id}`;
   if (selection.kind === "stop") return `stop:${selection.stop.id}`;
+  if (selection.kind === "incident") return `incident:${selection.incident.id}`;
   return `point:${selection.sector.id}:${Math.round(selection.xM)}:${Math.round(selection.yM)}`;
 }
 
@@ -154,5 +158,6 @@ export function selectionTitle(selection: CityMapSelection): string {
   if (selection.kind === "actor") return selection.actor.name;
   if (selection.kind === "vehicle") return selection.vehicle.modelName;
   if (selection.kind === "stop") return selection.stop.name;
+  if (selection.kind === "incident") return selection.incident.title;
   return "Точка на карте";
 }

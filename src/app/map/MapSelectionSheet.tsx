@@ -4,6 +4,7 @@ import type { TravelOption } from "../../gameplay/travel/travelSystem";
 import { isLocationOpen } from "../../gameplay/travel/travelSystem";
 import { PLACE_ICONS, personPortrait, vehicleStateLabel } from "../shared/presentation";
 import type { CityMapSelection } from "./mapUi";
+import type { StreetIncidentAction } from "../../simulation/streetScene/types";
 import { activityLabel, buildingUseLabel, landUseLabel, locationTypeLabel, riskLabel, selectionTitle } from "./mapUi";
 
 function routeCaption(preview: LocalMovementState | null, travel?: TravelOption): string {
@@ -34,7 +35,8 @@ export function MapSelectionSheet({
   onEnterBuilding,
   onLeaveBuilding,
   onEnterVehicle,
-  onLeaveVehicle
+  onLeaveVehicle,
+  onStreetIncidentAction
 }: {
   session: GameSession;
   selection: CityMapSelection;
@@ -54,6 +56,7 @@ export function MapSelectionSheet({
   onLeaveBuilding: () => void;
   onEnterVehicle: (vehicleId: string) => void;
   onLeaveVehicle: () => void;
+  onStreetIncidentAction: (incidentId: string, action: StreetIncidentAction) => void;
 }) {
   if (selection.kind === "district") {
     const sectorIds = new Set(selection.district.sectorIds);
@@ -134,6 +137,32 @@ export function MapSelectionSheet({
           <p className="map-selection-sheet__route">{routeCaption(preview, travel)}</p>
           <div className="map-selection-sheet__actions"><button type="button" className="map-action map-action--primary" disabled={!target} onClick={onBuildRoute}>Ко входу</button><button type="button" className="map-action" onClick={onDetails}>Профиль дома</button>{inside ? <button type="button" className="map-action" onClick={onLeaveBuilding}>Выйти</button> : access && access.distanceToPlayerM <= 12 ? <button type="button" className="map-action" onClick={() => onEnterBuilding(selection.building.id)}>Войти</button> : null}</div>
           {preview ? <button type="button" className="map-route-start" onClick={onStartRoute}>Начать · {routeCaption(preview)}</button> : null}
+        </div>
+      </aside>
+    );
+  }
+
+  if (selection.kind === "incident") {
+    const incident = selection.incident;
+    const distance = Math.round(Math.hypot(incident.xM - session.localScene.playerPosition.xM, incident.yM - session.localScene.playerPosition.yM));
+    const inRange = session.localScene.playerPosition.state === "outside" && distance <= 24;
+    const status = incident.status === "active" ? "ИДЁТ СЕЙЧАС" : incident.status === "reported" ? "ПОМОЩЬ ВЫЗВАНА" : incident.status === "responding" ? "СЛУЖБЫ НА МЕСТЕ" : "ЗАВЕРШЕНО";
+    return (
+      <aside className={`map-selection-sheet map-selection-sheet--incident incident-sheet--${incident.severity}`} data-no-swipe>
+        <div className="incident-sheet__signal"><i>!</i><span>{incident.type.toUpperCase()}</span></div>
+        <div className="map-selection-sheet__body">
+          <header><div><span>{status}</span><h2>{incident.title}</h2><p>{incident.detail}</p></div><button type="button" className="icon-button" onClick={onClose}>×</button></header>
+          <div className="venue-sheet__metrics"><span>Расстояние <strong>{distance} м</strong></span><span>Опасность <strong>{incident.severity}/3</strong></span><span>Участников <strong>{incident.participantActorIds.length}</strong></span><span>Служба <strong>{incident.responder ?? "нет"}</strong></span></div>
+          {!inRange ? <p className="map-selection-sheet__route">Подойди ближе: действие доступно в радиусе 24 м. · {routeCaption(preview)}</p> : null}
+          <div className="map-selection-sheet__actions">
+            {!inRange ? <button type="button" className="map-action map-action--primary" disabled={!target} onClick={onBuildRoute}>Маршрут к месту</button> : null}
+            <button type="button" className="map-action" disabled={!inRange} onClick={() => onStreetIncidentAction(incident.id, "observe")}>Осмотреть · 2 мин</button>
+            <button type="button" className="map-action map-action--primary" disabled={!inRange || incident.status !== "active" || !incident.responder} onClick={() => onStreetIncidentAction(incident.id, "call-help")}>Вызвать помощь</button>
+            <button type="button" className="map-action map-action--danger" disabled={!inRange || incident.status === "resolved"} onClick={() => onStreetIncidentAction(incident.id, "intervene")}>Вмешаться · 6 мин</button>
+            <button type="button" className="map-action" onClick={() => { onStreetIncidentAction(incident.id, "move-on"); onClose(); }}>Пройти мимо</button>
+          </div>
+          {!inRange && preview ? <button type="button" className="map-route-start" onClick={onStartRoute}>Идти · {routeCaption(preview)}</button> : null}
+          {incident.outcome ? <p className="incident-sheet__outcome">{incident.outcome}</p> : null}
         </div>
       </aside>
     );

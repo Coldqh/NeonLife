@@ -1,14 +1,14 @@
 {
   "name": "neon-life",
   "private": true,
-  "version": "0.37.0",
+  "version": "0.38.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json --pretty false && tsc --noEmit -p tsconfig.node.json --pretty false",
-    "test:ui": "npm run test:ui:architecture && npm run test:ui:recovery && npm run test:recovery && npm run test:movement && npm run test:map-ui && npm run test:building-ui",
+    "test:ui": "npm run test:ui:architecture && npm run test:ui:recovery && npm run test:recovery && npm run test:movement && npm run test:map-ui && npm run test:building-ui && npm run test:street-ui",
     "test:ui:architecture": "node scripts/verify-ui-architecture.mjs",
     "test:ui:recovery": "node scripts/verify-ui-recovery.mjs",
     "test:map": "node scripts/verify-map-foundation.mjs",
@@ -16,12 +16,14 @@
     "test:recovery": "node scripts/verify-map-profile-recovery.mjs",
     "test:movement": "node scripts/verify-local-movement.mjs",
     "test:movement:domain": "node scripts/run-local-movement-domain-test.mjs",
-    "test": "npm run typecheck && npm run test:ui && npm run test:integrity && npm run test:life && npm run test:building",
+    "test": "npm run typecheck && npm run test:ui && npm run test:integrity && npm run test:life && npm run test:building && npm run test:street",
     "test:integrity": "node scripts/run-world-integrity-domain-test.mjs",
     "test:life": "node scripts/run-physical-life-domain-test.mjs",
     "test:map-ui": "node scripts/verify-city-map-overhaul.mjs",
     "test:building-ui": "node scripts/verify-living-buildings.mjs",
-    "test:building": "node scripts/run-living-building-domain-test.mjs"
+    "test:building": "node scripts/run-living-building-domain-test.mjs",
+    "test:street-ui": "node scripts/verify-living-street.mjs",
+    "test:street": "node scripts/run-street-scene-domain-test.mjs"
   },
   "dependencies": {
     "react": "18.3.1",

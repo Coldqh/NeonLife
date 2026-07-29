@@ -141,3 +141,42 @@
   .map-viewport .map-controls { top: 158px; right: 10px; }
   .map-viewport .map-controls button { width: 38px; height: 38px; }
 }
+
+/* v0.38.0 — living street layer */
+.local-map__crossing { pointer-events: none; }
+.local-map__crossing rect { fill: rgba(5, 10, 16, .92); stroke: rgba(215, 225, 238, .2); stroke-width: .12; }
+.local-map__crossing path { fill: none; stroke: rgba(235, 241, 248, .66); stroke-width: .22; }
+.local-map__crossing--walk rect { stroke: rgba(62, 226, 141, .65); filter: drop-shadow(0 0 .8px rgba(62, 226, 141, .5)); }
+.local-map__crossing--wait rect { stroke: rgba(255, 83, 105, .56); }
+
+.local-map__actor,
+.local-map__vehicle { transition: transform .28s linear; }
+.local-map__actor--walking circle,
+.local-map__actor--crossing circle { filter: drop-shadow(0 0 .75px rgba(255, 184, 61, .72)); }
+.local-map__actor--waiting circle { fill: #d28b31; opacity: .82; }
+.local-map__actor--crossing circle { fill: #f8e46e; }
+.local-map__actor-direction { fill: #ffe7a5 !important; stroke: none !important; opacity: .9; }
+
+.local-map__vehicle--moving rect { fill: #38c9d2; filter: drop-shadow(0 0 .75px rgba(43, 200, 204, .48)); }
+.local-map__vehicle--stopped rect { fill: #2f7e8c; }
+.local-map__vehicle--responding rect { fill: #2d72ff; stroke: #eaf3ff; animation: street-response-flash .75s steps(2, end) infinite; }
+.local-map__vehicle--disabled rect { fill: #795f50; stroke: #ffad65; }
+.local-map__vehicle-windshield { fill: rgba(224, 247, 255, .58); stroke: none; }
+.local-map__brake-lights { fill: none; stroke: #ff334f; stroke-width: .48; filter: drop-shadow(0 0 .55px #ff334f); }
+@keyframes street-response-flash { 0%, 49% { filter: drop-shadow(0 0 1px #3d8cff); } 50%, 100% { filter: drop-shadow(0 0 1px #ff3e5c); } }
+
+.local-map__incident { cursor: pointer; outline: none; }
+.local-map__incident > path { fill: #1c0a0f; stroke: #ff4b63; stroke-width: .48; filter: drop-shadow(0 0 1.4px rgba(255, 50, 78, .74)); }
+.local-map__incident > text { fill: #fff; font-size: 2.5px; font-weight: 950; pointer-events: none; }
+.local-map__incident-pulse { fill: rgba(255, 44, 74, .05); stroke: rgba(255, 63, 88, .42); stroke-width: .25; animation: street-incident-pulse 1.45s ease-out infinite; }
+.local-map__incident--reported > path { stroke: #ffb83d; }
+.local-map__incident--responding > path { stroke: #4a94ff; }
+.local-map__incident.is-selected > path { stroke: #fff; stroke-width: .7; }
+.local-map__incident-label rect { fill: rgba(8, 10, 16, .96); stroke: rgba(255, 77, 101, .48); stroke-width: .16; }
+.local-map__incident-label text { fill: #fff0f2; font-size: 1.12px; font-weight: 760; }
+@keyframes street-incident-pulse { from { r: 3.8; opacity: .9; } to { r: 8.2; opacity: 0; } }
+
+.reduce-motion .local-map__actor,
+.reduce-motion .local-map__vehicle { transition: none; }
+.reduce-motion .local-map__incident-pulse,
+.reduce-motion .local-map__vehicle--responding rect { animation: none; }

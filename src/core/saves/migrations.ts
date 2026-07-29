@@ -30,6 +30,7 @@ import { normalizeBuildingAccessState } from "../../simulation/access/buildingAc
 import { normalizePhysicalVehiclesState, refreshPhysicalVehicleSpatialPresentation } from "../../simulation/vehicles/physicalVehicleSystem";
 import { normalizeTransitOperationsState } from "../../simulation/transit/transitOperationsSystem";
 import { normalizeVehicleCrimeState } from "../../simulation/crime/vehicleCrimeSystem";
+import { normalizeStreetSceneState } from "../../simulation/streetScene/streetSceneSystem";
 import { alignUrbanFabricToStreetTopology, normalizeStreetTopologyState, snapPhysicalVehicleParkingToStreetTopology, snapTransitStopsToStreetTopology } from "../../simulation/streets/streetTopologySystem";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
@@ -690,6 +691,16 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     mobility,
     physicalVehicles: vehicles
   }), streets, { timestamp, seed, metropolitan: mobilitySynchronizedMetropolitan, urban });
+  const streetScene = normalizeStreetSceneState(payload.streetScene, {
+    timestamp,
+    seed,
+    playerId: playerState.id,
+    metropolitan: mobilitySynchronizedMetropolitan,
+    urban,
+    streets,
+    localScene,
+    vehicles
+  });
   const vehicleCrime = normalizeVehicleCrimeState(payload.vehicleCrime, timestamp);
   const kernel = advanceSimulationKernel(baseKernel, {
     timestamp,
@@ -734,6 +745,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     streets,
     mobility,
     localScene,
+    streetScene,
     buildingAccess,
     vehicles,
     transit,

@@ -10,6 +10,7 @@ import { MapSelectionSheet } from "../map/MapSelectionSheet";
 import { MapProfileOverlay } from "../map/MapProfileOverlay";
 import { BuildingInteriorMap } from "../map/BuildingInteriorMap";
 import type { LocalLifeAction } from "../actions/localLifeActions";
+import type { StreetIncidentAction } from "../../simulation/streetScene/types";
 import type { CityMapSelection, GlobalLayerId, LocalLayerId, MapMode } from "../map/mapUi";
 import {
   locationMatchesLayer,
@@ -57,6 +58,7 @@ function localSelectionToCity(selection: LocalMapSelection, sector: GameSession[
   if (selection.kind === "building") return { kind: "building", building: selection.building };
   if (selection.kind === "actor") return { kind: "actor", actor: selection.actor };
   if (selection.kind === "vehicle") return { kind: "vehicle", vehicle: selection.vehicle };
+  if (selection.kind === "incident") return { kind: "incident", incident: selection.incident };
   if (selection.kind === "stop") return { kind: "stop", stop: selection.stop };
   if (selection.kind === "point") return { kind: "point", sector, xM: selection.xM, yM: selection.yM };
   return {
@@ -73,6 +75,7 @@ function citySelectionToLocal(selection: CityMapSelection | null): LocalMapSelec
   if (selection.kind === "building") return { kind: "building", building: selection.building };
   if (selection.kind === "actor") return { kind: "actor", actor: selection.actor };
   if (selection.kind === "vehicle") return { kind: "vehicle", vehicle: selection.vehicle };
+  if (selection.kind === "incident") return { kind: "incident", incident: selection.incident };
   if (selection.kind === "stop") return { kind: "stop", stop: selection.stop };
   if (selection.kind === "point") return { kind: "point", xM: selection.xM, yM: selection.yM };
   return null;
@@ -94,7 +97,8 @@ export function MapScreen({
   onLeaveInteriorRoom,
   onLifeAction,
   onEnterVehicle,
-  onLeaveVehicle
+  onLeaveVehicle,
+  onStreetIncidentAction
 }: {
   session: GameSession;
   requestedLocationId?: string;
@@ -112,6 +116,7 @@ export function MapScreen({
   onLifeAction: (action: LocalLifeAction) => void;
   onEnterVehicle: (vehicleId: string) => void;
   onLeaveVehicle: () => void;
+  onStreetIncidentAction: (incidentId: string, action: StreetIncidentAction) => void;
 }) {
   const focusSector = session.metropolitan.sectors.find((sector) => sector.id === session.metropolitan.streaming.focusSectorId) ?? session.metropolitan.sectors[0];
   const playerSector = session.metropolitan.sectors.find((sector) => sector.id === session.localScene.playerPosition.sectorId) ?? focusSector;
@@ -199,9 +204,16 @@ export function MapScreen({
     if (!selection) return null;
     if (selection.kind === "location") return localMovementTargetForLocation(session, selection.location.id);
     if (selection.kind === "building") return localMovementTargetForBuilding(session, selection.building.id);
-    if (selection.kind === "actor") return localMovementTargetForActor(session, selection.actor.id);
-    if (selection.kind === "vehicle") return localMovementTargetForVehicle(session, selection.vehicle.id);
+    if (selection.kind === "actor") {
+      const pedestrian = session.streetScene.pedestrians.find((item) => item.actorId === selection.actor.id);
+      return pedestrian ? localMovementTargetForPoint(session, session.streetScene.focusSectorId, pedestrian.xM, pedestrian.yM) : localMovementTargetForActor(session, selection.actor.id);
+    }
+    if (selection.kind === "vehicle") {
+      const trafficVehicle = session.streetScene.traffic.find((item) => item.vehicleId === selection.vehicle.id);
+      return trafficVehicle && trafficVehicle.motion !== "parked" ? localMovementTargetForPoint(session, session.streetScene.focusSectorId, trafficVehicle.xM, trafficVehicle.yM) : localMovementTargetForVehicle(session, selection.vehicle.id);
+    }
     if (selection.kind === "stop") return localMovementTargetForStop(session, selection.stop.id);
+    if (selection.kind === "incident") return localMovementTargetForPoint(session, selection.incident.sectorId, selection.incident.xM, selection.incident.yM);
     if (selection.kind === "point") return localMovementTargetForPoint(session, selection.sector.id, selection.xM, selection.yM);
     return null;
   }, [selection, session]);
@@ -213,6 +225,16 @@ export function MapScreen({
   const favorite = Boolean(favoriteKey && favorites.includes(favoriteKey));
   const profileLocation = profileOpen && selection?.kind === "location" ? selection.location : undefined;
   const profileBuilding = profileOpen && selection?.kind === "building" ? selection.building : undefined;
+  const streetSceneVisible = session.streetScene.focusSectorId === selectedSector.id;
+
+  useEffect(() => {
+    if (selection?.kind !== "incident") return;
+    const current = session.streetScene.incidents.find((item) => item.id === selection.incident.id);
+    if (!current) { setSelection(null); return; }
+    if (current.status !== selection.incident.status || current.outcome !== selection.incident.outcome || current.playerObserved !== selection.incident.playerObserved) {
+      setSelection({ kind: "incident", incident: current });
+    }
+  }, [selection, session.streetScene.incidents]);
 
   const globalLayers: MapLayers = {
     districts: true,
@@ -350,6 +372,10 @@ export function MapScreen({
             showStops={localLayer === "all" || localLayer === "transport"}
             actors={localLayer === "all" || localLayer === "people" ? nearbyActors : []}
             vehicles={localLayer === "all" || localLayer === "cars" ? nearbyVehicles : []}
+            pedestrians={streetSceneVisible && (localLayer === "all" || localLayer === "people") ? session.streetScene.pedestrians : []}
+            traffic={streetSceneVisible && (localLayer === "all" || localLayer === "cars") ? session.streetScene.traffic : []}
+            incidents={streetSceneVisible && (localLayer === "all" || localLayer === "incidents") ? session.streetScene.incidents.filter((item) => item.sectorId === selectedSector.id) : []}
+            crossings={streetSceneVisible ? session.streetScene.crossings : []}
             focusRevision={localFocusRevision}
             onSelect={chooseLocal}
           />
@@ -384,6 +410,7 @@ export function MapScreen({
           onLeaveBuilding={onLeaveBuilding}
           onEnterVehicle={onEnterVehicle}
           onLeaveVehicle={onLeaveVehicle}
+          onStreetIncidentAction={onStreetIncidentAction}
         />
       ) : null}
 

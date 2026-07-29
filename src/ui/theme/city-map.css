@@ -216,3 +216,23 @@
   .district-sheet__places > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .district-sheet__places button:nth-child(n+3) { display: none; }
 }
+
+/* v0.38.0 — physical incident inspector */
+.map-selection-sheet--incident { display: grid; grid-template-columns: 118px minmax(0, 1fr); gap: 14px; border-color: rgba(255, 72, 96, .34); }
+.incident-sheet__signal { min-height: 124px; display: grid; place-content: center; justify-items: center; gap: 10px; border: 1px solid rgba(255, 70, 94, .3); background: radial-gradient(circle at 50% 40%, rgba(255, 53, 78, .22), transparent 62%), linear-gradient(180deg, #18090e, #09070b); clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px); }
+.incident-sheet__signal i { width: 58px; height: 58px; display: grid; place-items: center; border: 1px solid rgba(255, 100, 119, .66); border-radius: 50%; background: rgba(255, 42, 69, .16); color: #fff; font-style: normal; font-size: 34px; font-weight: 950; box-shadow: 0 0 34px rgba(255, 47, 74, .24); }
+.incident-sheet__signal span { color: #ff7185; font-size: 9px; font-weight: 850; letter-spacing: .13em; }
+.incident-sheet--1 { border-color: rgba(255, 191, 76, .28); }
+.incident-sheet--1 .incident-sheet__signal { border-color: rgba(255, 191, 76, .28); background: radial-gradient(circle at 50% 40%, rgba(255, 176, 47, .16), transparent 62%), #0e0b08; }
+.incident-sheet--1 .incident-sheet__signal i { border-color: rgba(255, 194, 82, .56); color: #ffd582; }
+.incident-sheet--3 { box-shadow: 0 28px 90px rgba(91, 0, 15, .48), inset 0 0 0 1px rgba(255, 255, 255, .018); }
+.map-action--danger { border-color: rgba(255, 74, 96, .54); background: rgba(128, 14, 31, .34); color: #ffccd3; }
+.map-action--danger:not(:disabled):hover { background: rgba(180, 22, 44, .44); }
+.incident-sheet__outcome { margin-top: 10px; padding: 9px 11px; border-left: 2px solid #45d38a; background: rgba(69, 211, 138, .08); color: #bff4d7; font-size: 11px; line-height: 16px; }
+
+@media (max-width: 620px) {
+  .map-selection-sheet--incident { grid-template-columns: 82px minmax(0, 1fr); gap: 10px; }
+  .incident-sheet__signal { min-height: 112px; }
+  .incident-sheet__signal i { width: 46px; height: 46px; font-size: 27px; }
+  .map-selection-sheet--incident .venue-sheet__metrics span:nth-child(n+3) { display: none; }
+}
