@@ -141,7 +141,7 @@ delete rawEnvelope.payload.life.food.carried;
 delete rawEnvelope.payload.life.food.carryingCapacityGrams;
 delete rawEnvelope.payload.jobs.courier.carriedCargo;
 const migrated = migrateEnvelope(rawEnvelope, "slot-1");
-assert(migrated?.schemaVersion === 31, "save was not migrated to schema 31");
+assert(migrated?.schemaVersion === 32, "save was not migrated to schema 32");
 assert(Array.isArray(migrated.payload.life.food.carried), "migration did not create carried food inventory");
 assert(migrated.payload.life.food.carryingCapacityGrams === 6_500, "migration did not create carrying capacity");
 assert(migrated.payload.jobs.courier.carriedCargo?.orderId === legacyOrder.id, "migration did not reconstruct carried courier cargo");

@@ -29,6 +29,7 @@ import type { VehicleCrimeState } from "../../simulation/crime/types";
 import type { StreetTopologyState } from "../../simulation/streets/types";
 import type { LocalMovementState } from "../../simulation/localMovement/types";
 import type { StreetSceneState } from "../../simulation/streetScene/types";
+import type { SocialState } from "../../simulation/social/types";
 
 export interface CityState {
   id: EntityId;
@@ -133,6 +134,7 @@ export interface GameSession {
   mobility: MetropolitanMobilityState;
   localScene: LocalSceneState;
   streetScene: StreetSceneState;
+  social: SocialState;
   buildingAccess: BuildingAccessState;
   vehicles: PhysicalVehiclesState;
   transit: TransitOperationsState;

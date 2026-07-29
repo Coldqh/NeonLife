@@ -16,6 +16,7 @@ import { getPerson, toKnownNpc } from "../people/network/humanNetwork";
 import type { TransitPhoneActivity } from "../simulation/transit/types";
 import type { LocalMovementTargetState } from "../simulation/localMovement/types";
 import { applyLocalLifeAction } from "./actions/localLifeActions";
+import { beginConversation, continueConversation, endConversation } from "../gameplay/social/socialCommands";
 import {
   actOnStreetIncident,
   alightTransitVehicle,
@@ -60,7 +61,6 @@ export default function App() {
   const save = useWorldSave();
   const versionGuard = useVersionGuard();
   const { session, setSession } = save;
-
   useEffect(() => writeLocal(UI_SETTINGS_KEY, settings), [settings]);
   useEffect(() => {
     if (!session?.localMovement) return;
@@ -69,7 +69,6 @@ export default function App() {
   useEffect(() => () => {
     if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
   }, []);
-
   function notify(text: string, tone: NoticeTone = "neutral"): void {
     setNotice({ text, tone });
     if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
@@ -213,8 +212,8 @@ export default function App() {
             onLeaveVehicle={() => setSession((current) => leavePhysicalVehicle(current))}
             onRouteTo={routeToLocation}
             onLifeAction={(action) => setSession((current) => applyLocalLifeAction(current, action))}
-            onAdvance={advance}
-            notify={notify}
+            onStartConversation={(personId) => setSession((current) => beginConversation(current, personId))} onConversationAction={(action) => setSession((current) => continueConversation(current, action))}
+            onEndConversation={() => setSession((current) => endConversation(current))} onAdvance={advance} notify={notify}
           />
         ) : null}
       </GameShell>

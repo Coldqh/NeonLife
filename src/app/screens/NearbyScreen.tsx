@@ -9,6 +9,9 @@ import type { LocalMovementTargetState } from "../../simulation/localMovement/ty
 import type { LocalLifeAction } from "../actions/localLifeActions";
 import { LocalActionsPanel } from "./LocalActionsPanel";
 import { localMovementTargetForActor, localMovementTargetForBuilding, localMovementTargetForVehicle } from "../../simulation/localMovement/localMovementSystem";
+import { ConversationPanel } from "../social/ConversationPanel";
+import type { ConversationAction } from "../../simulation/social/types";
+import { getConversationAvailability } from "../../gameplay/social/socialCommands";
 
 interface SelectedEntity {
   type: "person" | "building" | "vehicle";
@@ -40,6 +43,9 @@ export function NearbyScreen({
   onLeaveVehicle,
   onRouteTo,
   onLifeAction,
+  onStartConversation,
+  onConversationAction,
+  onEndConversation,
   onAdvance,
   notify
 }: {
@@ -52,6 +58,9 @@ export function NearbyScreen({
   onLeaveVehicle: () => void;
   onRouteTo: (locationId: string) => void;
   onLifeAction: (action: LocalLifeAction) => void;
+  onStartConversation: (personId: string) => void;
+  onConversationAction: (action: ConversationAction) => void;
+  onEndConversation: () => void;
   onAdvance: (minutes: number, source: string) => void;
   notify: (text: string, tone?: NoticeTone) => void;
 }) {
@@ -99,6 +108,8 @@ export function NearbyScreen({
   const actorTarget = selectedActor ? localMovementTargetForActor(session, selectedActor.id) : null;
   const buildingTarget = selectedBuilding ? localMovementTargetForBuilding(session, selectedBuilding.buildingId) : null;
   const vehicleTarget = selectedVehicle ? localMovementTargetForVehicle(session, selectedVehicle.id) : null;
+  const selectedPersonId = selectedActor?.activePersonId;
+  const conversationAvailability = selectedPersonId ? getConversationAvailability(session, selectedPersonId) : null;
 
   function changeMode(next: NearbyMode): void {
     setMode(next);
@@ -215,6 +226,7 @@ export function NearbyScreen({
                 </dl>
                 <div className="entity-actions">
                   {actorTarget ? <button type="button" onClick={() => onWalkTo(actorTarget)}>Идти к человеку</button> : null}
+                  {selectedPersonId ? <button type="button" disabled={!conversationAvailability?.allowed} title={conversationAvailability?.reason} onClick={() => onStartConversation(selectedPersonId)}>{conversationAvailability?.allowed ? "Заговорить" : conversationAvailability?.reason ?? "Недоступен"}</button> : null}
                   <button type="button" onClick={() => { onAdvance(2, `Наблюдение: ${selectedActor.name}`); notify(`Наблюдение заняло 2 минуты`); }}>Наблюдать · 2 мин.</button>
                   {selectedActor.destinationLocationId ? <button type="button" onClick={() => onRouteTo(selectedActor.destinationLocationId!)}>Показать цель на карте</button> : null}
                 </div>
@@ -253,6 +265,7 @@ export function NearbyScreen({
           </aside>
         ) : null}
       </div>
+      {session.social.activeConversation ? <ConversationPanel session={session} onAction={onConversationAction} onClose={onEndConversation} /> : null}
     </section>
   );
 }

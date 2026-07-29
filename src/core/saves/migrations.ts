@@ -31,6 +31,7 @@ import { normalizePhysicalVehiclesState, refreshPhysicalVehicleSpatialPresentati
 import { normalizeTransitOperationsState } from "../../simulation/transit/transitOperationsSystem";
 import { normalizeVehicleCrimeState } from "../../simulation/crime/vehicleCrimeSystem";
 import { normalizeStreetSceneState } from "../../simulation/streetScene/streetSceneSystem";
+import { normalizeSocialState } from "../../simulation/social/socialSystem";
 import { alignUrbanFabricToStreetTopology, normalizeStreetTopologyState, snapPhysicalVehicleParkingToStreetTopology, snapTransitStopsToStreetTopology } from "../../simulation/streets/streetTopologySystem";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
@@ -701,6 +702,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     localScene,
     vehicles
   });
+  const social = normalizeSocialState(payload.social, seed, timestamp, people, locations);
   const vehicleCrime = normalizeVehicleCrimeState(payload.vehicleCrime, timestamp);
   const kernel = advanceSimulationKernel(baseKernel, {
     timestamp,
@@ -746,6 +748,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     mobility,
     localScene,
     streetScene,
+    social,
     buildingAccess,
     vehicles,
     transit,

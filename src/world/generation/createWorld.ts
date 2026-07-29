@@ -28,6 +28,7 @@ import { createPhysicalVehiclesState, refreshPhysicalVehicleSpatialPresentation 
 import { createTransitOperationsState } from "../../simulation/transit/transitOperationsSystem";
 import { createVehicleCrimeState } from "../../simulation/crime/vehicleCrimeSystem";
 import { createStreetSceneState } from "../../simulation/streetScene/streetSceneSystem";
+import { createSocialState } from "../../simulation/social/socialSystem";
 import { alignUrbanFabricToStreetTopology, createStreetTopologyState, snapPhysicalVehicleParkingToStreetTopology, snapTransitStopsToStreetTopology } from "../../simulation/streets/streetTopologySystem";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
@@ -409,6 +410,8 @@ export function createWorldSession(seed: string): GameSession {
     vehicles
   });
 
+  const social = createSocialState(seed, INITIAL_GAME_TIMESTAMP, people, locations);
+
   const syncedKernel = advanceSimulationKernel(kernel, {
     timestamp: INITIAL_GAME_TIMESTAMP,
     seed,
@@ -452,6 +455,7 @@ export function createWorldSession(seed: string): GameSession {
     mobility,
     localScene,
     streetScene,
+    social,
     buildingAccess,
     vehicles,
     transit: transitOperations,

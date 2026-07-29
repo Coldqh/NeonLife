@@ -48,6 +48,7 @@ import { advanceStreetTopologyState, alignUrbanFabricToStreetTopology, snapPhysi
 import { advanceLocalMovementRoute, localMovementCurrentStreet, localMovementTargetForStop, planLocalMovement, refreshLocalMovementRoute, WALKING_SPEED_M_PER_MINUTE } from "../../simulation/localMovement/localMovementSystem";
 import type { LocalMovementTargetState } from "../../simulation/localMovement/types";
 import { advanceStreetSceneState, applyStreetIncidentAction } from "../../simulation/streetScene/streetSceneSystem";
+import { advanceSocialState } from "../../simulation/social/socialSystem";
 import type { StreetIncidentAction } from "../../simulation/streetScene/types";
 import {
   advanceVehicleCrimeState,
@@ -482,6 +483,15 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     localScene: localSceneState,
     vehicles: crimeVehiclesState
   });
+  const socialAdvance = advanceSocialState(session.social, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    people: peopleState,
+    locations: session.world.locations,
+    localScene: localSceneState,
+    streetScene: streetAdvance.state
+  });
+  peopleState = socialAdvance.people;
 
   const generated: WorldEvent[] = [];
   if (options.title && options.category) {
@@ -540,6 +550,9 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   for (const notice of streetAdvance.notices) {
     generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
   }
+  for (const notice of socialAdvance.notices) {
+    generated.push(createEvent(session, nextTimestamp, "contact", notice.title, notice.detail, notice.importance));
+  }
 
   // Needs must not depend on whether time advanced in one large action or
   // many small actions. Player condition supports fractional accumulation.
@@ -556,7 +569,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   );
   const selectedPerson = getPerson(peopleState, session.world.primaryContactId)
     ?? getPerson(peopleState, peopleState.selectedPersonId);
-  const worldEventCount = options.worldEvents ?? (queued.events.length + pulse.events.length + network.notices.length + economyAdvance.notices.length + populationAdvance.notices.length + infrastructureAdvance.notices.length + productionAdvance.notices.length + organizationAdvance.notices.length + governmentAdvance.notices.length + healthAdvance.notices.length + dataAdvance.notices.length + pressureAdvance.notices.length + crimeAdvance.newlyReported.length + streetAdvance.notices.length);
+  const worldEventCount = options.worldEvents ?? (queued.events.length + pulse.events.length + network.notices.length + economyAdvance.notices.length + populationAdvance.notices.length + infrastructureAdvance.notices.length + productionAdvance.notices.length + organizationAdvance.notices.length + governmentAdvance.notices.length + healthAdvance.notices.length + dataAdvance.notices.length + pressureAdvance.notices.length + crimeAdvance.newlyReported.length + streetAdvance.notices.length + socialAdvance.notices.length);
   const pressure = trackPressureMetrics(pressureAdvance.state, {
     balanceDelta: options.trackBalance === false ? 0 : options.balanceDelta,
     deliveries: options.deliveryCompleted ? 1 : 0,
@@ -668,6 +681,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     mobility: mobilityState,
     localScene: localSceneState,
     streetScene: streetAdvance.state,
+    social: socialAdvance.state,
     buildingAccess: buildingAccessState,
     vehicles: crimeVehiclesState,
     transit: transitState,

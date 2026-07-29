@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.39.0 — Living People
+
+- added deterministic NPC personalities and distinct speech behavior;
+- added physical proximity and visibility requirements for conversations;
+- added an interactive conversation panel backed by domain commands;
+- added source, confidence, secrecy and expiry to NPC knowledge;
+- connected physical street witnesses to incident knowledge;
+- added rumor propagation through actual relationships with distortion;
+- added autonomous arguments, help, loans, reconciliation and gossip;
+- made threats, lies and gifts persistent social facts;
+- migrated saves to schema 32 and added social regression tests.
+
 ## 0.38.0 — Living Street
 
 - Добавлена физическая симуляция пешеходов, транспорта, переходов и уличных происшествий.
