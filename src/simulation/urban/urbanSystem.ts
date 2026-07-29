@@ -371,11 +371,14 @@ function unitUseForBuilding(building: BuildingState): UnitUse {
 
 function buildUnit(seed: string, timestamp: number, building: BuildingState, unitOrdinal: number, household?: HouseholdState): BuildingUnitState {
   const rng = new SeededRandom(`${seed}:unit:${building.id}:${unitOrdinal}`);
-  const floor = building.floors <= 1 ? 1 : 1 + (unitOrdinal % building.floors);
+  const isCommercialUnit = !household && building.commercialUnits > 0 && unitOrdinal < building.commercialUnits;
+  const floor = isCommercialUnit ? 1 : building.floors <= 1 ? 1 : 1 + (unitOrdinal % building.floors);
   const unitsPerFloor = Math.max(1, Math.ceil(Math.max(1, building.residentialUnits + building.commercialUnits) / building.floors));
   const door = unitOrdinal % unitsPerFloor + 1;
   const unitNumber = `${floor.toString().padStart(2, "0")}-${door.toString().padStart(2, "0")}`;
-  const use = household ? (household.kind === "dormitory" ? "dorm-room" : "apartment") : unitUseForBuilding(building);
+  const use = household
+    ? (household.kind === "dormitory" ? "dorm-room" : "apartment")
+    : isCommercialUnit && building.use === "mixed" ? "shop" : unitUseForBuilding(building);
   const areaM2 = use === "apartment" ? rng.integer(32, building.scale === "megastructure" ? 92 : 125) : use === "dorm-room" ? rng.integer(18, 38) : use === "warehouse" ? rng.integer(600, 2_800) : rng.integer(40, 320);
   const roomCount = use === "apartment" ? clamp(Math.round(areaM2 / 24), 1, 6) : use === "dorm-room" ? 1 : clamp(Math.round(areaM2 / 55), 1, 12);
   const owner = building.ownerEntityId;

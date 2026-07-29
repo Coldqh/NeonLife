@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.37.0 — Living Buildings
+
+- added a third physical map level for buildings, floors, units and rooms;
+- added interactive corridors, floor rail, elevators, stairs and unit access;
+- added room plans backed by materialized interiors and real room commands;
+- restricted NPC visibility by building, floor, unit and room boundaries;
+- added physical venue service points for food, clinics and courier operations;
+- exposed home actions from the player's real housing unit;
+- materialized commercial units on the first floor of mixed buildings;
+- added UI and domain regression tests for the complete building loop.
+
 ## 0.36.0 — Immersive City Map Rebuild
 
 - removed fake district clip masks and rebuilt district geometry from real sectors;

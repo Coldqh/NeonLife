@@ -5,7 +5,7 @@ import type { LocalActorState } from "../../simulation/localScene/types";
 import type { PhysicalVehicleEntityState } from "../../simulation/vehicles/types";
 import type { TransitStopState } from "../../simulation/transit/types";
 
-export type MapMode = "global" | "local";
+export type MapMode = "global" | "local" | "interior";
 export type GlobalLayerId = "districts" | "transport" | "work" | "risk" | "services";
 export type LocalLayerId = "all" | "markets" | "food" | "clinic" | "transport" | "work" | "people" | "cars";
 

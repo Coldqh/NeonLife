@@ -1151,6 +1151,7 @@ function buildingInteriorPosition(session: GameSession, buildingId: string, floo
     unitId,
     roomId,
     floor,
+    interiorZone: roomId ? "room" : unitId ? "unit" : floor === 1 ? "lobby" : "corridor",
     state: "inside",
     updatedAt: timestamp
   };
@@ -1229,8 +1230,9 @@ export function enterLocalBuilding(session: GameSession, buildingId: string, ent
 }
 
 export function leaveLocalBuilding(session: GameSession): GameSession {
-  const buildingId = session.localScene.playerPosition.buildingId;
-  if (!buildingId || session.localScene.playerPosition.state !== "inside") return session;
+  const positionState = session.localScene.playerPosition;
+  const buildingId = positionState.buildingId;
+  if (!buildingId || positionState.state !== "inside" || positionState.unitId || positionState.roomId) return session;
   const building = session.urban.buildings.find((item) => item.id === buildingId);
   const position = buildingStreetPosition(session, buildingId, session.timestamp);
   if (!building || !position) return session;
@@ -1245,9 +1247,10 @@ export function leaveLocalBuilding(session: GameSession): GameSession {
 }
 
 export function moveInsideBuilding(session: GameSession, floor: number, method: "stairs" | "elevator"): GameSession {
-  const buildingId = session.localScene.playerPosition.buildingId;
+  const playerPosition = session.localScene.playerPosition;
+  const buildingId = playerPosition.buildingId;
   const building = buildingId ? session.urban.buildings.find((item) => item.id === buildingId) : undefined;
-  if (!building || session.localScene.playerPosition.state !== "inside") return session;
+  if (!building || playerPosition.state !== "inside" || playerPosition.unitId || playerPosition.roomId) return session;
   const minimumFloor = building.basementLevels > 0 ? -building.basementLevels : 1;
   if (floor === 0 || floor < minimumFloor || floor > building.floors) return session;
   if (method === "elevator" && (building.elevatorCount <= 0 || building.utilityService < 25)) return session;

@@ -7,6 +7,7 @@ import type { UrbanFabricState } from "../urban/types";
 import type { LocationState } from "../../world/state/types";
 
 export type SpatialPresenceState = "outside" | "inside" | "in-transit" | "vehicle";
+export type InteriorPresenceZone = "entrance" | "lobby" | "corridor" | "unit" | "room" | "stairs" | "elevator";
 export type LocalActorActivity = "home" | "work" | "commute" | "errand" | "rest" | "idle" | "school" | "medical";
 
 export interface SpatialPositionState {
@@ -18,6 +19,7 @@ export interface SpatialPositionState {
   unitId?: EntityId;
   roomId?: EntityId;
   floor?: number;
+  interiorZone?: InteriorPresenceZone;
   transitRouteId?: EntityId;
   vehicleId?: EntityId;
   state: SpatialPresenceState;

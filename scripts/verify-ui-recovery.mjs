@@ -22,6 +22,8 @@ const mapSheet = read("src/app/map/MapSelectionSheet.tsx");
 const mapProfile = read("src/app/map/MapProfileOverlay.tsx");
 const globalMap = read("src/app/map/GlobalCityMap.tsx");
 const localMap = read("src/app/map/LocalSectorMap.tsx");
+const interiorMap = read("src/app/map/BuildingInteriorMap.tsx");
+const servicePanel = read("src/app/map/BuildingServicePanel.tsx");
 const transit = read("src/app/screens/TransitJourneyScreen.tsx");
 const transitSystem = read("src/simulation/transit/transitOperationsSystem.ts");
 const life = read("src/gameplay/life/lifeSimulation.ts");
@@ -49,13 +51,15 @@ check("food has carried and home storage presentation", localActions.includes("�
 check("courier loop exposes pickup and delivery", localActions.includes("Забрать груз") && localActions.includes("Передать груз"));
 check("clinic actions are physical", localActions.includes("Стабилизация") && localActions.includes("clinic-care"));
 check("nearby inspector is not a fixed overlay", !nearbyCss.includes("position: fixed"));
-check("map has city and sector modes", map.includes('useState<MapMode>("local")') && map.includes('<GlobalCityMap') && map.includes('<LocalSectorMap') && mapTopBar.includes('mode === "global"'));
+check("map has city street and building modes", map.includes("insideBuilding ? \"interior\" : \"local\"") && map.includes("<GlobalCityMap") && map.includes("<LocalSectorMap") && map.includes("<BuildingInteriorMap") && mapTopBar.includes("onMode(\"interior\")"));
 check("global map supports pan pinch wheel and inertia", globalMap.includes("pointers.current.size >= 2") && globalMap.includes("PinchState") && globalMap.includes("runInertia") && globalMap.includes("onWheel"));
 check("local map supports pan pinch wheel and point selection", localMap.includes("pointers.current.size >= 2") && localMap.includes("PinchState") && localMap.includes("onWheel") && localMap.includes('kind: "point"'));
 check("global transit layer uses real routes", globalMap.includes("session.transit.routes") && globalMap.includes("route.stopIds"));
 check("local map shows real stops", localMap.includes("session.transit.stops") && localMap.includes("local-map__stop"));
 check("selection sheet has real route and entry actions", mapSheet.includes("onBuildRoute") && mapSheet.includes("onStartRoute") && mapSheet.includes("onEnterBuilding") && mapSheet.includes("onEnterVehicle"));
 check("profiles expose floors and physical actions", mapProfile.includes("FloorGrid") && mapProfile.includes("onMoveFloor") && mapProfile.includes("onEnterBuilding") && mapProfile.includes("onLeaveBuilding"));
+check("interior map exposes floors units rooms and exits", interiorMap.includes("FloorRail") && interiorMap.includes("floor-unit-grid") && interiorMap.includes("unit-plan") && interiorMap.includes("onEnterUnit") && interiorMap.includes("onEnterRoom") && interiorMap.includes("onLeaveBuilding"));
+check("building services dispatch real life actions", servicePanel.includes("buy-food") && servicePanel.includes("clinic-care") && servicePanel.includes("accept-courier") && servicePanel.includes("pickup-courier") && servicePanel.includes("deliver-courier"));
 check("transit has walking scene", transit.includes('journey.phase === "walking"') && transit.includes("Дойти до остановки"));
 check("transit has explicit waiting scene", transit.includes("waitingMinutesRemaining") && transit.includes("Дождаться рейса"));
 check("transit lists every stop", transit.includes("segment.stopIds.map"));
@@ -68,12 +72,12 @@ check("building exit is wired", app.includes("leaveLocalBuilding") && nearby.inc
 check("vehicle exit is wired", app.includes("leavePhysicalVehicle") && nearby.includes("onLeaveVehicle") && nearby.includes("Выйти из машины"));
 check("map uses time-aware opening hours", mapProfile.includes("isLocationOpen(location, session.timestamp)") && mapSheet.includes("isLocationOpen(selection.location, session.timestamp)"));
 
-for (const file of ["src/ui/theme/app-shell.css", "src/ui/theme/screens.css", "src/ui/theme/map.css", "src/ui/theme/city-map.css", "src/ui/theme/city-map-render.css", "src/ui/theme/city-profiles.css", "src/ui/theme/nearby.css", "src/ui/theme/transit.css"]) {
+for (const file of ["src/ui/theme/app-shell.css", "src/ui/theme/screens.css", "src/ui/theme/map.css", "src/ui/theme/city-map.css", "src/ui/theme/city-map-render.css", "src/ui/theme/city-profiles.css", "src/ui/theme/building-interiors.css", "src/ui/theme/nearby.css", "src/ui/theme/transit.css"]) {
   const text = read(file);
   check(`${file} braces balanced`, (text.match(/\{/g) ?? []).length === (text.match(/\}/g) ?? []).length);
 }
 
-for (const file of ["src/app/App.tsx", "src/app/screens/ProfileScreen.tsx", "src/app/screens/NearbyScreen.tsx", "src/app/screens/TransitJourneyScreen.tsx", "src/app/screens/MapScreen.tsx", "src/app/map/LocalSectorMap.tsx", "src/app/map/GlobalCityMap.tsx", "src/app/map/MapProfileOverlay.tsx", "src/app/map/MapSelectionSheet.tsx"]) {
+for (const file of ["src/app/App.tsx", "src/app/screens/ProfileScreen.tsx", "src/app/screens/NearbyScreen.tsx", "src/app/screens/TransitJourneyScreen.tsx", "src/app/screens/MapScreen.tsx", "src/app/map/LocalSectorMap.tsx", "src/app/map/GlobalCityMap.tsx", "src/app/map/MapProfileOverlay.tsx", "src/app/map/MapSelectionSheet.tsx", "src/app/map/BuildingInteriorMap.tsx", "src/app/map/BuildingServicePanel.tsx"]) {
   const lines = read(file).split(/\r?\n/).length;
   check(`${file} remains bounded`, lines <= 600);
 }

@@ -31,6 +31,13 @@ function center(bounds: MetricBounds): { xM: number; yM: number } {
   return { xM: bounds.xM + bounds.widthM / 2, yM: bounds.yM + bounds.heightM / 2 };
 }
 
+function sameInteriorView(player: SpatialPositionState, actor: SpatialPositionState): boolean {
+  if (!player.buildingId || actor.buildingId !== player.buildingId) return false;
+  if (player.roomId) return actor.roomId === player.roomId;
+  if (player.unitId) return actor.unitId === player.unitId && !actor.roomId;
+  return (actor.floor ?? 1) === (player.floor ?? 1) && !actor.unitId;
+}
+
 function placementForLocation(input: LocalSceneInput, locationId: string | null | undefined): LocationSpatialState | undefined {
   if (!locationId) return undefined;
   return input.metropolitan.locations.find((item) => item.locationId === locationId);
@@ -92,6 +99,7 @@ function positionAtLocation(
     buildingId: building?.id,
     unitId: unit?.id,
     floor: unit?.floor ?? (building ? 1 : undefined),
+    interiorZone: unit ? "unit" : building ? "lobby" : undefined,
     state: building ? "inside" : "outside",
     updatedAt: input.timestamp
   };
@@ -286,6 +294,7 @@ function buildPlayerPosition(input: LocalSceneInput): SpatialPositionState {
     locationId,
     buildingId: building?.id,
     floor: building ? 1 : undefined,
+    interiorZone: building ? "lobby" : undefined,
     state: building ? "inside" : "outside",
     updatedAt: input.timestamp
   };
@@ -341,6 +350,36 @@ function syntheticPosition(
   const nearPlayer = isFocus && slot < 8;
   let building = nearPlayer && playerBuilding ? playerBuilding : sectorBuildings.length && rng.chance(activity === "commute" ? 0.15 : 0.72) ? rng.pick(sectorBuildings) : undefined;
 
+  if (nearPlayer && playerPosition.state === "inside" && playerBuilding) {
+    const buildingUnits = input.urban.units.filter((unit) => unit.buildingId === playerBuilding.id);
+    const currentFloor = playerPosition.floor ?? 1;
+    const sameFloorUnits = buildingUnits.filter((unit) => unit.floor === currentFloor);
+    const otherFloors = Array.from({ length: Math.max(1, playerBuilding.floors) }, (_, index) => index + 1).filter((floor) => floor !== currentFloor);
+    const actorFloor = slot <= 4 ? currentFloor : otherFloors.length ? otherFloors[slot % otherFloors.length] : currentFloor;
+    const candidateUnits = buildingUnits.filter((unit) => unit.floor === actorFloor);
+    const actorUnit = slot === 0 && playerPosition.unitId
+      ? buildingUnits.find((unit) => unit.id === playerPosition.unitId)
+      : slot >= 2 && slot <= 4 && sameFloorUnits.length ? sameFloorUnits[slot % sameFloorUnits.length]
+      : slot > 5 && candidateUnits.length && rng.chance(0.72) ? candidateUnits[slot % candidateUnits.length]
+      : undefined;
+    const actorRoomId = slot === 0 && playerPosition.roomId ? playerPosition.roomId : undefined;
+    const radius = slot === 0 ? 1.5 : 3 + slot * 1.7;
+    const angle = rng.next() * Math.PI * 2;
+    return {
+      sectorId: sector.id,
+      xM: Math.round((playerPosition.xM + Math.cos(angle) * radius) * 10) / 10,
+      yM: Math.round((playerPosition.yM + Math.sin(angle) * radius) * 10) / 10,
+      locationId: playerBuilding.anchorLocationId ?? playerPosition.locationId,
+      buildingId: playerBuilding.id,
+      unitId: actorUnit?.id,
+      roomId: actorRoomId,
+      floor: actorFloor,
+      interiorZone: actorRoomId ? "room" : actorUnit ? "unit" : actorFloor === 1 ? "lobby" : "corridor",
+      state: "inside",
+      updatedAt: input.timestamp
+    };
+  }
+
   if (nearPlayer) {
     const radius = slot === 0 ? 2.5 : 18 + slot * 11;
     const angle = rng.next() * Math.PI * 2;
@@ -353,11 +392,7 @@ function syntheticPosition(
       xM: point.xM,
       yM: point.yM,
       locationId: building?.anchorLocationId ?? playerPosition.locationId,
-      buildingId: playerPosition.state === "inside" ? playerPosition.buildingId : undefined,
-      unitId: playerPosition.state === "inside" ? playerPosition.unitId : undefined,
-      roomId: playerPosition.state === "inside" ? playerPosition.roomId : undefined,
-      floor: playerPosition.state === "inside" ? playerPosition.floor : undefined,
-      state: playerPosition.state === "inside" ? "inside" : activity === "commute" ? "in-transit" : "outside",
+      state: activity === "commute" ? "in-transit" : "outside",
       updatedAt: input.timestamp
     };
   }
@@ -371,6 +406,7 @@ function syntheticPosition(
       locationId: building.anchorLocationId,
       buildingId: building.id,
       floor: 1,
+      interiorZone: "lobby",
       state: activity === "commute" ? "in-transit" : "inside",
       updatedAt: input.timestamp
     };
@@ -398,10 +434,7 @@ function createSyntheticActor(
   const activity = syntheticActivity(sector, rng, input.timestamp);
   const position = syntheticPosition(input, sector, slot, activity, playerPosition);
   const actorDistance = distance(playerPosition, position);
-  const sameBuilding = playerPosition.buildingId && position.buildingId === playerPosition.buildingId;
-  const sameUnit = !playerPosition.unitId || position.unitId === playerPosition.unitId;
-  const sameFloor = playerPosition.floor === undefined || (position.floor ?? 1) === playerPosition.floor;
-  const spatiallyVisible = playerPosition.state === "inside" ? Boolean(sameBuilding && sameUnit && sameFloor) : position.state !== "inside";
+  const spatiallyVisible = playerPosition.state === "inside" ? sameInteriorView(playerPosition, position) : position.state !== "inside";
   const visible = position.sectorId === playerPosition.sectorId && spatiallyVisible && actorDistance <= VISIBLE_DISTANCE_M;
   const nearby = visible && actorDistance <= NEARBY_DISTANCE_M;
   const location = position.locationId ? input.locations.find((item) => item.id === position.locationId) : undefined;
@@ -438,10 +471,7 @@ function materializeActors(input: LocalSceneInput, playerPosition: SpatialPositi
     if (!placement || !activeSectorIds.has(placement.position.sectorId)) continue;
     const known = knownPersonFor(input, resident);
     const actorDistance = distance(playerPosition, placement.position);
-    const sameBuilding = playerPosition.buildingId && placement.position.buildingId === playerPosition.buildingId;
-    const sameUnit = !playerPosition.unitId || placement.position.unitId === playerPosition.unitId;
-    const sameFloor = playerPosition.floor === undefined || (placement.position.floor ?? 1) === playerPosition.floor;
-    const spatiallyVisible = playerPosition.state === "inside" ? Boolean(sameBuilding && sameUnit && sameFloor) : placement.position.state !== "inside";
+    const spatiallyVisible = playerPosition.state === "inside" ? sameInteriorView(playerPosition, placement.position) : placement.position.state !== "inside";
     const visible = placement.position.sectorId === playerPosition.sectorId && spatiallyVisible && actorDistance <= VISIBLE_DISTANCE_M;
     const nearby = visible && actorDistance <= NEARBY_DISTANCE_M;
     const location = placement.position.locationId ? input.locations.find((item) => item.id === placement.position.locationId) : undefined;

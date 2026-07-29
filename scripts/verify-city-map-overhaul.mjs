@@ -15,7 +15,9 @@ const topBar = read("src/app/map/MapTopBar.tsx");
 const sheet = read("src/app/map/MapSelectionSheet.tsx");
 const profile = read("src/app/map/MapProfileOverlay.tsx");
 const ui = read("src/app/map/mapUi.ts");
-const css = ["src/ui/theme/city-map.css", "src/ui/theme/city-map-render.css", "src/ui/theme/city-profiles.css"].map(read).join("\n");
+const interiorMap = read("src/app/map/BuildingInteriorMap.tsx");
+const servicePanel = read("src/app/map/BuildingServicePanel.tsx");
+const css = ["src/ui/theme/city-map.css", "src/ui/theme/city-map-render.css", "src/ui/theme/city-profiles.css", "src/ui/theme/building-interiors.css"].map(read).join("\n");
 
 check("fake district clip masks are gone", !map.includes("DISTRICT_CLIPS") && !globalMap.includes("DISTRICT_CLIPS"));
 check("global map derives boundaries from real sectors", globalMap.includes("drawDistrictBoundary") && globalMap.includes("session.metropolitan.sectors") && globalMap.includes("byCoordinate"));
@@ -32,9 +34,12 @@ check("district sheet opens real key locations", sheet.includes("session.metropo
 check("venue profile uses live business and visible occupants", profile.includes("session.economy.businesses") && profile.includes("actor.position.buildingId === targetBuilding.id") && profile.includes("isLocationOpen"));
 check("building profile has floor rail apartment grid and real movement", profile.includes("building-profile__floor-rail") && profile.includes("building-profile__unit-grid") && profile.includes("onMoveFloor(selectedFloor, \"stairs\")") && profile.includes("onMoveFloor(selectedFloor, \"elevator\")"));
 check("every map action is connected to a real callback", map.includes("onWalk(target)") && map.includes("onTravel(selectedLocation.id)") && map.includes("onEnterBuilding={onEnterBuilding}") && map.includes("onEnterVehicle={onEnterVehicle}"));
+check("interior map is active inside buildings", map.includes("mode === \"interior\" && insideBuilding") && map.includes("<BuildingInteriorMap") && topBar.includes("Здание"));
+check("interior map uses physical hierarchy", interiorMap.includes("session.buildingAccess.floors") && interiorMap.includes("session.buildingAccess.units") && interiorMap.includes("session.buildingAccess.rooms") && interiorMap.includes("position.roomId"));
+check("venue service points use real domain actions", servicePanel.includes("LocalLifeAction") && servicePanel.includes("buy-food") && servicePanel.includes("clinic-care") && servicePanel.includes("accept-courier"));
 check("favorites and share are implemented", map.includes("map-favorites/v2") && map.includes("localStorage.setItem") && map.includes("navigator.share") && map.includes("navigator.clipboard"));
 check("map uses its own immersive shell", shell.includes('screen === "map" ? null : <GameHeader') && css.includes(".map-screen--immersive") && css.includes(".map-profile-overlay"));
-check("map code is split into bounded components", [map, globalMap, localMap, topBar, sheet, profile, ui].every((source) => source.split(/\r?\n/).length <= 600));
+check("map code is split into bounded components", [map, globalMap, localMap, topBar, sheet, profile, interiorMap, servicePanel, ui].every((source) => source.split(/\r?\n/).length <= 600));
 check("all map styles are balanced", (css.match(/\{/g) ?? []).length === (css.match(/\}/g) ?? []).length);
 check("vehicle domain commands remain wired in App", app.includes("enterPhysicalVehicle") && app.includes("leavePhysicalVehicle"));
 

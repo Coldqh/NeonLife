@@ -47,10 +47,11 @@
 .map-hud__identity { min-width: 0; display: grid; gap: 2px; }
 .map-hud__identity strong { font-size: 22px; line-height: 28px; font-weight: 850; letter-spacing: .06em; }
 .map-hud__identity span { color: var(--nl-muted); font-size: 11px; line-height: 15px; letter-spacing: .08em; text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.map-hud__tabs { display: grid; grid-template-columns: repeat(2, minmax(106px, 1fr)); border: 1px solid rgba(137, 154, 181, .16); background: rgba(8, 14, 22, .88); clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+.map-hud__tabs { display: grid; grid-template-columns: repeat(3, minmax(96px, 1fr)); border: 1px solid rgba(137, 154, 181, .16); background: rgba(8, 14, 22, .88); clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
 .map-hud__tabs button { min-height: 46px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 16px; color: var(--nl-muted); background: transparent; border-right: 1px solid rgba(137, 154, 181, .13); font-size: 12px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
 .map-hud__tabs button:last-child { border-right: 0; }
 .map-hud__tabs button i { color: currentColor; font-style: normal; font-size: 17px; }
+.map-hud__tabs button:disabled { opacity: .32; cursor: not-allowed; }
 .map-hud__tabs button.is-active { color: #ff4a61; background: linear-gradient(180deg, rgba(255, 48, 77, .15), rgba(255, 48, 77, .05)); box-shadow: inset 0 -2px 0 var(--nl-accent); }
 .map-hud__status { display: flex; align-items: center; justify-content: flex-end; gap: 10px; color: var(--nl-muted); font-size: 12px; white-space: nowrap; }
 .map-hud__status strong { color: var(--nl-text); font-size: 14px; }

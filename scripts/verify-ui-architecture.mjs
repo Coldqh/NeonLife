@@ -45,7 +45,7 @@ check("Local map uses real road graph", localMap.includes("session.streets") && 
 check("Local map has no decorative fallback blocks", !localMap.includes("fallback") && !localMap.includes("STREET_NAMES"));
 check("Route planning lives on map", map.includes("planLocalMovement") && localMap.includes("local-map__route") && map.includes("getTravelOptions") && map.includes("buildRoute"));
 check("Legacy styles are not imported", !/components\.css|responsive\.css|mobile-experience\.css/.test(main));
-check("Split styles are imported", ["app-shell.css", "screens.css", "map.css", "city-map.css", "city-map-render.css", "city-profiles.css", "nearby.css", "transit.css", "overlays.css"].every((file) => main.includes(file)));
+check("Split styles are imported", ["app-shell.css", "screens.css", "map.css", "city-map.css", "city-map-render.css", "city-profiles.css", "building-interiors.css", "nearby.css", "transit.css", "overlays.css"].every((file) => main.includes(file)));
 
 const sourceFiles = [];
 function collect(directory) {

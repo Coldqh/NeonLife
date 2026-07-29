@@ -14,7 +14,7 @@ const mapProfile = read("src/app/map/MapProfileOverlay.tsx");
 const globalMap = read("src/app/map/GlobalCityMap.tsx");
 const localMap = read("src/app/map/LocalSectorMap.tsx");
 const mapUi = read("src/app/map/mapUi.ts");
-const mapCss = ["src/ui/theme/map.css", "src/ui/theme/city-map.css", "src/ui/theme/city-map-render.css", "src/ui/theme/city-profiles.css"].map(read).join("\n");
+const mapCss = ["src/ui/theme/map.css", "src/ui/theme/city-map.css", "src/ui/theme/city-map-render.css", "src/ui/theme/city-profiles.css", "src/ui/theme/building-interiors.css"].map(read).join("\n");
 const screenCss = read("src/ui/theme/screens.css");
 const app = read("src/app/App.tsx");
 const shell = read("src/app/shell/GameShell.tsx");
@@ -26,7 +26,7 @@ check("profile removes spatial exit actions", !profile.includes("onLeaveBuilding
 check("profile uses only real session data", !profile.includes("Псевдо") && !profile.includes("fake") && profile.includes("session.jobs.courier.completedDeliveries"));
 check("profile stays passive while map and Nearby own physical actions", app.includes("<ProfileScreen session={session} />") && app.includes("onLeaveBuilding={()") && app.includes("onLeaveVehicle={()"));
 check("map is an immersive full stage", mapScreen.includes("map-screen--immersive") && mapScreen.includes("map-viewport") && shell.includes('screen === "map" ? null : <GameHeader') && mapCss.includes(".map-screen--immersive"));
-check("map uses functional city and sector hierarchy", mapScreen.includes("<MapTopBar") && mapScreen.includes("<GlobalCityMap") && mapScreen.includes("<LocalSectorMap") && mapTopBar.includes("onMode") && mapTopBar.includes("Город") && mapTopBar.includes("Сектор"));
+check("map uses functional city street and building hierarchy", mapScreen.includes("<MapTopBar") && mapScreen.includes("<GlobalCityMap") && mapScreen.includes("<LocalSectorMap") && mapScreen.includes("<BuildingInteriorMap") && mapTopBar.includes("onMode") && mapTopBar.includes("Город") && mapTopBar.includes("Улица") && mapTopBar.includes("Здание"));
 check("map inspector and full profiles are separate components", mapScreen.includes("<MapSelectionSheet") && mapScreen.includes("<MapProfileOverlay") && mapSheet.includes("map-selection-sheet--venue") && mapProfile.includes("map-profile--building"));
 check("map layers are functional filters", mapUi.includes("GLOBAL_LAYERS") && mapUi.includes("LOCAL_LAYERS") && mapScreen.includes("setGlobalLayer") && mapScreen.includes("setLocalLayer") && mapScreen.includes("locationMatchesLayer"));
 check("global map uses real sector geometry", globalMap.includes("drawDistrictBoundary") && globalMap.includes("session.metropolitan.sectors") && !globalMap.includes("DISTRICT_CLIPS"));

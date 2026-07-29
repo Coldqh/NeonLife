@@ -9,6 +9,7 @@ import "./ui/theme/map.css";
 import "./ui/theme/city-map.css";
 import "./ui/theme/city-map-render.css";
 import "./ui/theme/city-profiles.css";
+import "./ui/theme/building-interiors.css";
 import "./ui/theme/local-movement.css";
 import "./ui/theme/nearby.css";
 import "./ui/theme/transit.css";

@@ -8,6 +8,8 @@ import { LocalSectorMap, type LocalMapSelection } from "../map/LocalSectorMap";
 import { MapTopBar } from "../map/MapTopBar";
 import { MapSelectionSheet } from "../map/MapSelectionSheet";
 import { MapProfileOverlay } from "../map/MapProfileOverlay";
+import { BuildingInteriorMap } from "../map/BuildingInteriorMap";
+import type { LocalLifeAction } from "../actions/localLifeActions";
 import type { CityMapSelection, GlobalLayerId, LocalLayerId, MapMode } from "../map/mapUi";
 import {
   locationMatchesLayer,
@@ -86,6 +88,11 @@ export function MapScreen({
   onEnterBuilding,
   onLeaveBuilding,
   onMoveBuildingFloor,
+  onEnterBuildingUnit,
+  onLeaveBuildingUnit,
+  onEnterInteriorRoom,
+  onLeaveInteriorRoom,
+  onLifeAction,
   onEnterVehicle,
   onLeaveVehicle
 }: {
@@ -98,12 +105,19 @@ export function MapScreen({
   onEnterBuilding: (buildingId: string) => void;
   onLeaveBuilding: () => void;
   onMoveBuildingFloor: (floor: number, method: "stairs" | "elevator") => void;
+  onEnterBuildingUnit: (unitId: string) => void;
+  onLeaveBuildingUnit: () => void;
+  onEnterInteriorRoom: (roomId: string) => void;
+  onLeaveInteriorRoom: () => void;
+  onLifeAction: (action: LocalLifeAction) => void;
   onEnterVehicle: (vehicleId: string) => void;
   onLeaveVehicle: () => void;
 }) {
   const focusSector = session.metropolitan.sectors.find((sector) => sector.id === session.metropolitan.streaming.focusSectorId) ?? session.metropolitan.sectors[0];
   const playerSector = session.metropolitan.sectors.find((sector) => sector.id === session.localScene.playerPosition.sectorId) ?? focusSector;
-  const [mode, setMode] = useState<MapMode>("local");
+  const insideBuilding = session.localScene.playerPosition.state === "inside" && Boolean(session.localScene.playerPosition.buildingId);
+  const currentBuilding = insideBuilding ? session.urban.buildings.find((item) => item.id === session.localScene.playerPosition.buildingId) : undefined;
+  const [mode, setMode] = useState<MapMode>(insideBuilding ? "interior" : "local");
   const [globalLayer, setGlobalLayer] = useState<GlobalLayerId>("districts");
   const [localLayer, setLocalLayer] = useState<LocalLayerId>("all");
   const [selectedSectorId, setSelectedSectorId] = useState(playerSector.id);
@@ -152,6 +166,12 @@ export function MapScreen({
       return Boolean(playerStreetId && streetId === playerStreetId && vehicle.distanceToPlayerM <= 150);
     }).sort((left, right) => left.distanceToPlayerM - right.distanceToPlayerM).slice(0, 16);
   }, [localNodes, localTopology.segments, playerStreetId, selectedSector.id, session.localScene.playerPosition, session.vehicles.vehicles]);
+
+
+  useEffect(() => {
+    if (insideBuilding) { setMode("interior"); setSelection(null); setProfileOpen(false); }
+    else if (mode === "interior") setMode("local");
+  }, [insideBuilding, currentBuilding?.id]);
 
   useEffect(() => {
     if (!requestedLocationId) return;
@@ -237,9 +257,9 @@ export function MapScreen({
 
   function showPlayer(): void {
     setSelectedSectorId(playerSector.id);
-    setMode("local");
+    setMode(insideBuilding ? "interior" : "local");
     setSelection(null);
-    setLocalFocusRevision((value) => value + 1);
+    if (!insideBuilding) setLocalFocusRevision((value) => value + 1);
   }
 
   function buildRoute(): void {
@@ -279,7 +299,9 @@ export function MapScreen({
         localLayer={localLayer}
         districtName={selectedDistrict?.name ?? session.world.city.name}
         sectorCode={selectedSector.code}
-        onMode={(next) => { setMode(next); setSelection(next === "global" ? { kind: "district", district: selectedDistrict } : null); if (next === "global") setGlobalFocusRevision((value) => value + 1); }}
+        buildingName={currentBuilding?.addressCode}
+        insideBuilding={insideBuilding}
+        onMode={(next) => { if (next === "interior" && !insideBuilding) return; setMode(next); setSelection(next === "global" ? { kind: "district", district: selectedDistrict } : null); if (next === "global") setGlobalFocusRevision((value) => value + 1); }}
         onGlobalLayer={setGlobalLayer}
         onLocalLayer={setLocalLayer}
         onSettings={onSettings}
@@ -306,6 +328,18 @@ export function MapScreen({
               {session.metropolitan.mapDistricts.slice(0, 8).map((district, index) => <button type="button" key={district.id} className={selection?.kind === "district" && selection.district.id === district.id ? "is-active" : ""} onClick={() => chooseDistrict(district)}><i data-index={index % 8} /><span>{district.name}</span></button>)}
             </aside>
           </>
+        ) : mode === "interior" && insideBuilding ? (
+          <BuildingInteriorMap
+            session={session}
+            onMoveFloor={onMoveBuildingFloor}
+            onEnterUnit={onEnterBuildingUnit}
+            onLeaveUnit={onLeaveBuildingUnit}
+            onEnterRoom={onEnterInteriorRoom}
+            onLeaveRoom={onLeaveInteriorRoom}
+            onLeaveBuilding={onLeaveBuilding}
+            onLifeAction={onLifeAction}
+            onNotice={setFlash}
+          />
         ) : (
           <LocalSectorMap
             session={session}
@@ -322,7 +356,7 @@ export function MapScreen({
         )}
       </div>
 
-      {selection ? (
+      {selection && mode !== "interior" ? (
         <MapSelectionSheet
           session={session}
           selection={selection}

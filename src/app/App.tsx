@@ -23,8 +23,12 @@ import {
   cancelTransitJourney,
   drivePhysicalVehicleToLocation,
   finishLocalMovement,
+  enterBuildingUnit,
+  enterInteriorRoom,
   enterLocalBuilding,
   enterPhysicalVehicle,
+  leaveBuildingUnit,
+  leaveInteriorRoom,
   leaveLocalBuilding,
   leavePhysicalVehicle,
   moveInsideBuilding,
@@ -185,15 +189,15 @@ export default function App() {
         {screen === "profile" ? <ProfileScreen session={session} /> : null}
         {screen === "map" ? (
           <MapScreen
-            session={session}
-            requestedLocationId={requestedLocationId}
-            onRequestedLocationHandled={() => setRequestedLocationId(undefined)}
-            onSettings={() => setSettingsOpen(true)}
-            onTravel={travel}
-            onWalk={walkTo}
+            session={session} requestedLocationId={requestedLocationId}
+            onRequestedLocationHandled={() => setRequestedLocationId(undefined)} onSettings={() => setSettingsOpen(true)}
+            onTravel={travel} onWalk={walkTo}
             onEnterBuilding={(buildingId) => setSession((current) => enterLocalBuilding(current, buildingId))}
             onLeaveBuilding={() => setSession((current) => leaveLocalBuilding(current))}
             onMoveBuildingFloor={(floor, method) => setSession((current) => moveInsideBuilding(current, floor, method))}
+            onEnterBuildingUnit={(unitId) => setSession((current) => enterBuildingUnit(current, unitId))} onLeaveBuildingUnit={() => setSession((current) => leaveBuildingUnit(current))}
+            onEnterInteriorRoom={(roomId) => setSession((current) => enterInteriorRoom(current, roomId))} onLeaveInteriorRoom={() => setSession((current) => leaveInteriorRoom(current))}
+            onLifeAction={(action) => setSession((current) => applyLocalLifeAction(current, action))}
             onEnterVehicle={(vehicleId) => setSession((current) => enterPhysicalVehicle(current, vehicleId))}
             onLeaveVehicle={() => setSession((current) => leavePhysicalVehicle(current))}
           />
