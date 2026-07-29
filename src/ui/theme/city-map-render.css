@@ -277,3 +277,35 @@
   .map-viewport .map-controls { top: 150px; right: 9px; }
   .map-viewport .map-controls button { width: 35px; height: 35px; }
 }
+
+/* v0.39.2 — city fabric, reliable hit testing and real venues */
+.local-map svg { cursor: grab; }
+.local-map svg:active { cursor: grabbing; }
+.local-map__building-wrap,
+.local-map__street,
+.local-map__stop,
+.local-map__poi,
+.local-map__venue,
+.local-map__actor,
+.local-map__vehicle,
+.local-map__incident { pointer-events: none; }
+.local-map__venue { filter: drop-shadow(0 0 .8px rgba(255, 80, 103, .42)); }
+.local-map__venue-halo { fill: rgba(5, 10, 17, .88); stroke: rgba(255, 255, 255, .12); stroke-width: .18; }
+.local-map__venue > path { fill: rgba(7, 13, 21, .96); stroke: #ff506b; stroke-width: .42; }
+.local-map__venue > text { fill: #fff; font-size: 2.05px; font-weight: 900; pointer-events: none; }
+.local-map__venue--convenience > path,
+.local-map__venue--market > path { stroke: #51df91; }
+.local-map__venue--food > path,
+.local-map__venue--bar > path { stroke: #ffb64d; }
+.local-map__venue--pharmacy > path,
+.local-map__venue--clinic > path,
+.local-map__venue--cyberware > path { stroke: #b276ff; }
+.local-map__venue--repair > path { stroke: #42d1dc; }
+.local-map__venue--clothing > path,
+.local-map__venue--entertainment > path { stroke: #f06fc5; }
+.local-map__venue--hotel > path,
+.local-map__venue--office-service > path { stroke: #6b9cff; }
+.local-map__venue.is-selected .local-map__venue-halo { fill: rgba(255, 48, 77, .18); stroke: #fff; stroke-width: .42; }
+.local-map__venue.is-selected > path { stroke: #fff; stroke-width: .62; }
+.local-map__venue-label rect { fill: rgba(3, 8, 14, .96); stroke: rgba(255, 78, 103, .48); stroke-width: .18; }
+.local-map__venue-label text { fill: #f4f7fb; font-size: 1.12px; font-weight: 800; letter-spacing: .02em; }

@@ -23,7 +23,9 @@ import type {
   UrbanFabricInput,
   UrbanFabricState,
   UrbanFabricTotalsState,
-  UrbanMemoryState
+  UrbanMemoryState,
+  VenueCategory,
+  VenueState
 } from "./types";
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -213,24 +215,76 @@ function anchorBuilding(seed: string, timestamp: number, placement: LocationSpat
   };
 }
 
+interface UrbanLot extends MetricBounds { frontage: "north" | "east" | "south" | "west" }
+
+function urbanStreetOffsets(landUse: SectorLandUse, sizeM: number): number[] {
+  const raw = landUse === "mixed" || landUse === "commercial"
+    ? [0, 125, 250, 375, 500, 625, 750, 875, 1_000]
+    : landUse === "vacant"
+      ? [0, 500, 1_000]
+      : [0, 250, 500, 750, 1_000];
+  return raw.map((value) => Math.round(value / 1_000 * sizeM));
+}
+
+function lotsForSector(sector: MetropolitanSectorState): UrbanLot[] {
+  const xLines = urbanStreetOffsets(sector.landUse, sector.bounds.widthM);
+  const yLines = urbanStreetOffsets(sector.landUse, sector.bounds.heightM);
+  const result: UrbanLot[] = [];
+  for (let row = 0; row < yLines.length - 1; row += 1) {
+    for (let column = 0; column < xLines.length - 1; column += 1) {
+      const cellX = sector.bounds.xM + xLines[column];
+      const cellY = sector.bounds.yM + yLines[row];
+      const cellWidth = xLines[column + 1] - xLines[column];
+      const cellHeight = yLines[row + 1] - yLines[row];
+      const splitX = cellWidth >= 210 ? 2 : 1;
+      const splitY = cellHeight >= 210 ? 2 : 1;
+      const roadSetback = 15;
+      const gap = 9;
+      const lotWidth = (cellWidth - roadSetback * 2 - gap * (splitX - 1)) / splitX;
+      const lotHeight = (cellHeight - roadSetback * 2 - gap * (splitY - 1)) / splitY;
+      for (let localRow = 0; localRow < splitY; localRow += 1) {
+        for (let localColumn = 0; localColumn < splitX; localColumn += 1) {
+          const edgeDistances = [localRow, splitY - 1 - localRow, localColumn, splitX - 1 - localColumn];
+          const edge = edgeDistances.indexOf(Math.min(...edgeDistances));
+          result.push({
+            xM: cellX + roadSetback + localColumn * (lotWidth + gap),
+            yM: cellY + roadSetback + localRow * (lotHeight + gap),
+            widthM: Math.max(24, lotWidth),
+            heightM: Math.max(24, lotHeight),
+            frontage: (["north", "south", "west", "east"] as const)[edge]
+          });
+        }
+      }
+    }
+  }
+  return result;
+}
+
+function fitBuildingToLot(footprint: { widthM: number; heightM: number }, lot: UrbanLot, rng: SeededRandom): MetricBounds {
+  const maxWidth = Math.max(18, lot.widthM - 4);
+  const maxHeight = Math.max(18, lot.heightM - 4);
+  const widthM = Math.min(maxWidth, Math.max(18, footprint.widthM));
+  const heightM = Math.min(maxHeight, Math.max(18, footprint.heightM));
+  const sideJitter = Math.min(5, Math.max(0, Math.floor((lot.widthM - widthM) / 3)));
+  const verticalJitter = Math.min(5, Math.max(0, Math.floor((lot.heightM - heightM) / 3)));
+  const xM = lot.frontage === "west"
+    ? lot.xM + 2
+    : lot.frontage === "east"
+      ? lot.xM + lot.widthM - widthM - 2
+      : lot.xM + (lot.widthM - widthM) / 2 + rng.integer(-sideJitter, sideJitter);
+  const yM = lot.frontage === "north"
+    ? lot.yM + 2
+    : lot.frontage === "south"
+      ? lot.yM + lot.heightM - heightM - 2
+      : lot.yM + (lot.heightM - heightM) / 2 + rng.integer(-verticalJitter, verticalJitter);
+  return { xM: Math.round(xM), yM: Math.round(yM), widthM: Math.round(widthM), heightM: Math.round(heightM) };
+}
+
 function buildingBounds(sector: MetropolitanSectorState, index: number, scale: BuildingScale, rng: SeededRandom, blockSizeM: number): MetricBounds {
-  const blocksPerAxis = Math.max(1, Math.floor(sector.bounds.widthM / blockSizeM));
-  const blockIndex = index % (blocksPerAxis * blocksPerAxis);
-  const blockX = blockIndex % blocksPerAxis;
-  const blockY = Math.floor(blockIndex / blocksPerAxis);
+  const lots = lotsForSector(sector);
+  const lot = lots[index % Math.max(1, lots.length)] ?? { ...sector.bounds, frontage: "north" as const };
   const footprint = footprintForScale(scale, blockSizeM, rng);
-  const maxWidth = Math.max(12, blockSizeM - 12);
-  const maxHeight = Math.max(12, blockSizeM - 12);
-  const widthM = Math.min(footprint.widthM, scale === "megablock" || scale === "megastructure" ? sector.bounds.widthM - 32 : maxWidth);
-  const heightM = Math.min(footprint.heightM, scale === "megablock" || scale === "megastructure" ? sector.bounds.heightM - 32 : maxHeight);
-  const baseX = sector.bounds.xM + blockX * blockSizeM;
-  const baseY = sector.bounds.yM + blockY * blockSizeM;
-  return {
-    xM: Math.min(sector.bounds.xM + sector.bounds.widthM - widthM - 8, baseX + rng.integer(6, Math.max(6, blockSizeM - Math.min(widthM, blockSizeM) - 6))),
-    yM: Math.min(sector.bounds.yM + sector.bounds.heightM - heightM - 8, baseY + rng.integer(6, Math.max(6, blockSizeM - Math.min(heightM, blockSizeM) - 6))),
-    widthM,
-    heightM
-  };
+  return fitBuildingToLot(footprint, lot, rng);
 }
 
 function generatedBuilding(seed: string, timestamp: number, sector: MetropolitanSectorState, catalog: SectorBuildingCatalogState, index: number, organizations: OrganizationState[], blockSizeM: number): BuildingState {
@@ -293,29 +347,14 @@ function resolveBuildingPlacement(
   sector: MetropolitanSectorState,
   seed: string
 ): BuildingState | null {
-  if (!occupied.some((candidate) => buildingBoundsOverlap(building.bounds, candidate.bounds))) return building;
-  const margin = 8;
-  const maxX = sector.bounds.xM + sector.bounds.widthM - building.bounds.widthM - margin;
-  const maxY = sector.bounds.yM + sector.bounds.heightM - building.bounds.heightM - margin;
-  if (maxX < sector.bounds.xM + margin || maxY < sector.bounds.yM + margin) return null;
-  const rng = new SeededRandom(`${seed}:relocate-building:${building.id}:v1`);
-  const xSlots = Math.max(1, Math.floor((maxX - sector.bounds.xM - margin) / 25) + 1);
-  const ySlots = Math.max(1, Math.floor((maxY - sector.bounds.yM - margin) / 25) + 1);
-  const start = rng.integer(0, Math.max(0, xSlots * ySlots - 1));
-  const attempts = Math.min(xSlots * ySlots, 320);
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const slot = (start + attempt * 17) % (xSlots * ySlots);
-    const xSlot = slot % xSlots;
-    const ySlot = Math.floor(slot / xSlots);
-    const bounds: MetricBounds = {
-      xM: Math.min(maxX, sector.bounds.xM + margin + xSlot * 25),
-      yM: Math.min(maxY, sector.bounds.yM + margin + ySlot * 25),
-      widthM: building.bounds.widthM,
-      heightM: building.bounds.heightM
-    };
-    if (!occupied.some((candidate) => buildingBoundsOverlap(bounds, candidate.bounds))) {
-      return { ...building, bounds };
-    }
+  if (!occupied.some((candidate) => buildingBoundsOverlap(building.bounds, candidate.bounds, 5))) return building;
+  const lots = lotsForSector(sector);
+  const rng = new SeededRandom(`${seed}:relocate-building:${building.id}:v2`);
+  const start = rng.integer(0, Math.max(0, lots.length - 1));
+  for (let attempt = 0; attempt < lots.length; attempt += 1) {
+    const lot = lots[(start + attempt * 7) % lots.length];
+    const bounds = fitBuildingToLot({ widthM: building.bounds.widthM, heightM: building.bounds.heightM }, lot, rng);
+    if (!occupied.some((candidate) => buildingBoundsOverlap(bounds, candidate.bounds, 5))) return { ...building, bounds };
   }
   return null;
 }
@@ -335,7 +374,8 @@ function materializeSectorBuildings(input: UrbanFabricInput, catalogs: SectorBui
     if (!sector || !catalog) continue;
     const sectorAnchors = anchors.filter((building) => building.sectorId === sectorId);
     const anchorCount = sectorAnchors.length;
-    const target = Math.max(0, Math.min(catalog.buildingCount - anchorCount, 96));
+    const lotCapacity = lotsForSector(sector).length;
+    const target = Math.max(0, Math.min(catalog.buildingCount - anchorCount, lotCapacity, 96));
     let accepted = 0;
     for (let index = 0; index < Math.max(target, target * 3) && accepted < target; index += 1) {
       const candidate = generatedBuilding(input.seed, input.timestamp, sector, catalog, index, input.organizations, input.metropolitan.config.blockSizeM);
@@ -404,6 +444,218 @@ function buildUnit(seed: string, timestamp: number, building: BuildingState, uni
     lastMaterializedAt: timestamp,
     permanent: Boolean(household)
   };
+}
+
+
+const VENUE_PREFIXES: Record<VenueCategory, readonly string[]> = {
+  convenience: ["24/7", "QUICK", "CORNER", "BYTE", "NEON"],
+  food: ["NIGHT", "STEAM", "NOODLE", "GRILL", "KITCHEN"],
+  bar: ["LOWLIGHT", "AFTERSHIFT", "STATIC", "REDLINE", "BASEMENT"],
+  pharmacy: ["MED", "CIVIC", "PULSE", "VITA", "CARE"],
+  clinic: ["CMU", "PULSE", "NERVE", "TRAUMA", "RESTORE"],
+  repair: ["VECTRA", "TORQUE", "PATCH", "MOTOR", "FIX"],
+  cyberware: ["SYNAPSE", "CHROME", "NEURAL", "REFIT", "AUGMENT"],
+  clothing: ["VOID", "THREAD", "BLACK", "SIGNAL", "CUT"],
+  entertainment: ["ARCADE", "HOLO", "RUSH", "PIXEL", "ARENA"],
+  hotel: ["SLEEP", "CAPSULE", "REST", "NEST", "STACK"],
+  "office-service": ["DATA", "LEGAL", "CREDIT", "CIVIC", "LOGISTICS"],
+  market: ["MARKET", "BAZAAR", "SUPPLY", "UNDERLINE", "DEPOT"]
+};
+
+const VENUE_SUFFIXES: Record<VenueCategory, readonly string[]> = {
+  convenience: ["MART", "STOP", "SHOP", "POINT"],
+  food: ["KITCHEN", "GRILL", "CANTEEN", "NOODLES"],
+  bar: ["BAR", "ROOM", "CLUB", "TAP"],
+  pharmacy: ["PHARMA", "MEDS", "APOTHECARY", "DRUGSTORE"],
+  clinic: ["CLINIC", "CARE", "SURGERY", "LAB"],
+  repair: ["SERVICE", "GARAGE", "WORKS", "REPAIR"],
+  cyberware: ["CYBERNETICS", "CHROME", "LAB", "CLINIC"],
+  clothing: ["WEAR", "APPAREL", "OUTFIT", "STUDIO"],
+  entertainment: ["ARCADE", "LOUNGE", "HALL", "ZONE"],
+  hotel: ["HOTEL", "CAPSULES", "ROOMS", "LODGE"],
+  "office-service": ["BUREAU", "OFFICE", "SERVICES", "DESK"],
+  market: ["MARKET", "GOODS", "SUPPLY", "TRADING"]
+};
+
+function categoryForLocation(location: LocationState): VenueCategory {
+  if (location.type === "food") return "food";
+  if (location.type === "market") return "market";
+  if (location.type === "clinic") return location.name.includes("SURGERY") ? "cyberware" : "clinic";
+  if (location.type === "workshop") return "repair";
+  if (location.type === "housing") return "hotel";
+  return "office-service";
+}
+
+function categoriesForBuilding(building: BuildingState): VenueCategory[] {
+  if (building.use === "retail") return ["convenience", "food", "clothing", "market", "pharmacy", "bar"];
+  if (building.use === "mixed") return ["convenience", "food", "pharmacy", "clothing", "bar", "office-service"];
+  if (building.use === "medical") return ["clinic", "pharmacy", "cyberware"];
+  if (building.use === "industrial" || building.use === "warehouse") return ["repair", "market", "office-service"];
+  if (building.use === "office" || building.use === "civic" || building.use === "education") return ["office-service", "food", "convenience"];
+  if (building.use === "hotel") return ["hotel", "food", "bar"];
+  if (building.use === "entertainment") return ["entertainment", "bar", "food"];
+  if (building.use === "transport") return ["convenience", "food", "office-service"];
+  return [];
+}
+
+function venueTags(category: VenueCategory): string[] {
+  const tags: Record<VenueCategory, string[]> = {
+    convenience: ["продукты", "24/7", "бытовое"],
+    food: ["еда", "напитки", "быстро"],
+    bar: ["бар", "музыка", "ночь"],
+    pharmacy: ["лекарства", "первая помощь", "рецепты"],
+    clinic: ["диагностика", "лечение", "страховка"],
+    repair: ["ремонт", "детали", "техника"],
+    cyberware: ["импланты", "настройка", "хирургия"],
+    clothing: ["одежда", "экипировка", "стиль"],
+    entertainment: ["игры", "шоу", "ночь"],
+    hotel: ["жильё", "капсулы", "ночлег"],
+    "office-service": ["услуги", "документы", "работа"],
+    market: ["товары", "продукты", "рынок"]
+  };
+  return tags[category];
+}
+
+function venueHours(category: VenueCategory, rng: SeededRandom): { openHour: number; closeHour: number } {
+  if (category === "convenience" || category === "hotel") return { openHour: 0, closeHour: 24 };
+  if (category === "bar" || category === "entertainment") return { openHour: rng.integer(17, 20), closeHour: rng.integer(3, 6) };
+  if (category === "food") return { openHour: rng.integer(6, 11), closeHour: rng.integer(22, 24) };
+  if (category === "clinic" || category === "pharmacy") return { openHour: rng.integer(6, 9), closeHour: rng.integer(20, 24) };
+  return { openHour: rng.integer(7, 10), closeHour: rng.integer(18, 23) };
+}
+
+function generatedVenueName(seed: string, category: VenueCategory, building: BuildingState, ordinal: number): string {
+  const rng = new SeededRandom(`${seed}:venue-name:${building.id}:${ordinal}`);
+  const prefix = rng.pick(VENUE_PREFIXES[category]);
+  const suffix = rng.pick(VENUE_SUFFIXES[category]);
+  const number = rng.chance(.42) ? ` ${rng.integer(2, 99)}` : "";
+  return `${prefix} ${suffix}${number}`;
+}
+
+function venueCountForBuilding(building: BuildingState): number {
+  if (building.use === "vacant" || building.use === "residential" && building.commercialUnits <= 0) return 0;
+  if (building.use === "retail" || building.use === "entertainment") return Math.min(4, Math.max(2, building.commercialUnits || 2));
+  if (building.use === "mixed") return Math.min(3, Math.max(1, building.commercialUnits));
+  if (["medical", "hotel", "transport"].includes(building.use)) return Math.min(2, Math.max(1, building.commercialUnits || 1));
+  return building.commercialUnits > 0 || ["office", "industrial", "warehouse", "civic", "education"].includes(building.use) ? 1 : 0;
+}
+
+function buildVenue(
+  input: UrbanFabricInput,
+  building: BuildingState,
+  ordinal: number,
+  anchorLocation?: LocationState
+): VenueState {
+  const rng = new SeededRandom(`${input.seed}:venue:${building.id}:${anchorLocation?.id ?? ordinal}:v1`);
+  const categories = categoriesForBuilding(building);
+  const category = anchorLocation ? categoryForLocation(anchorLocation) : categories[ordinal % Math.max(1, categories.length)] ?? "office-service";
+  const id = createStableEntityId("venue", anchorLocation ? `anchor:${anchorLocation.id}` : `${building.id}:${ordinal}`);
+  const unitId = createStableEntityId("building-unit", `${building.id}:venue:${id}`);
+  const hours = anchorLocation
+    ? { openHour: anchorLocation.openHour ?? 0, closeHour: anchorLocation.closeHour ?? 24 }
+    : venueHours(category, rng);
+  const floor = building.floors > 1 && category === "office-service" && rng.chance(.35) ? rng.integer(2, Math.min(building.floors, 6)) : 1;
+  const unitNumber = `${floor.toString().padStart(2, "0")}-V${(ordinal + 1).toString().padStart(2, "0")}`;
+  return {
+    id,
+    sectorId: building.sectorId,
+    districtId: building.districtId,
+    buildingId: building.id,
+    unitId,
+    anchorLocationId: anchorLocation?.id,
+    organizationId: anchorLocation?.organizationId ?? building.controllerEntityId,
+    name: anchorLocation?.name ?? generatedVenueName(input.seed, category, building, ordinal),
+    code: anchorLocation?.code ?? `VEN/${building.addressCode.replace(/[^A-Z0-9]/gi, "").slice(-8)}/${ordinal + 1}`,
+    category,
+    floor,
+    unitNumber,
+    openHour: hours.openHour,
+    closeHour: hours.closeHour,
+    priceTier: clamp(rng.integer(1, 4), 1, 4) as 1 | 2 | 3 | 4,
+    quality: clamp(Math.round((building.condition + building.security) / 2) + rng.integer(-18, 16)),
+    demand: clamp(28 + rng.integer(0, 62)),
+    staffing: clamp(42 + rng.integer(0, 56)),
+    stock: clamp(35 + rng.integer(0, 65)),
+    security: anchorLocation?.security ?? clamp(building.security + rng.integer(-9, 12)),
+    popularity: clamp(20 + rng.integer(0, 78)),
+    tags: venueTags(category),
+    mapPriority: anchorLocation ? 100 : category === "clinic" || category === "market" ? 78 : category === "food" || category === "pharmacy" ? 68 : 48 + rng.integer(0, 18),
+    active: anchorLocation?.open ?? !rng.chance(.06),
+    permanent: Boolean(anchorLocation),
+    lastUpdatedAt: input.timestamp
+  };
+}
+
+function materializeVenues(input: UrbanFabricInput, buildings: BuildingState[], previous: VenueState[]): VenueState[] {
+  const previousById = new Map(previous.map((venue) => [venue.id, venue]));
+  const result: VenueState[] = [];
+  for (const building of buildings) {
+    if (building.detailLevel === "cold" && !building.permanent) continue;
+    const anchorLocation = building.anchorLocationId ? input.locations.find((location) => location.id === building.anchorLocationId) : undefined;
+    if (anchorLocation && anchorLocation.type !== "housing") {
+      const venue = buildVenue(input, building, 0, anchorLocation);
+      result.push({ ...venue, ...previousById.get(venue.id), buildingId: building.id, unitId: venue.unitId, sectorId: building.sectorId, lastUpdatedAt: input.timestamp, permanent: true });
+    }
+    const count = venueCountForBuilding(building);
+    for (let ordinal = 0; ordinal < count; ordinal += 1) {
+      const venue = buildVenue(input, building, ordinal + (anchorLocation && anchorLocation.type !== "housing" ? 1 : 0));
+      result.push({ ...venue, ...previousById.get(venue.id), buildingId: building.id, unitId: venue.unitId, sectorId: building.sectorId, lastUpdatedAt: input.timestamp });
+    }
+  }
+  return result
+    .sort((left, right) => Number(right.permanent) - Number(left.permanent) || right.mapPriority - left.mapPriority)
+    .slice(0, 900);
+}
+
+function unitUseForVenue(category: VenueCategory): UnitUse {
+  if (category === "clinic" || category === "pharmacy" || category === "cyberware") return "clinic";
+  if (category === "repair") return "workshop";
+  if (category === "hotel") return "hotel-room";
+  if (category === "office-service") return "office";
+  return "shop";
+}
+
+function venueUnit(input: UrbanFabricInput, venue: VenueState, building: BuildingState): BuildingUnitState {
+  const rng = new SeededRandom(`${input.seed}:venue-unit:${venue.id}`);
+  const use = unitUseForVenue(venue.category);
+  const areaM2 = use === "clinic" ? rng.integer(70, 260) : use === "workshop" ? rng.integer(100, 380) : use === "office" ? rng.integer(45, 210) : rng.integer(35, 180);
+  return {
+    id: venue.unitId,
+    buildingId: venue.buildingId,
+    sectorId: venue.sectorId,
+    floor: venue.floor,
+    unitNumber: venue.unitNumber,
+    use,
+    areaM2,
+    roomCount: clamp(Math.round(areaM2 / 50), 2, 8),
+    capacity: Math.max(3, Math.round(areaM2 / 9)),
+    occupied: venue.active,
+    residentIds: [],
+    tenantEntityId: venue.organizationId ?? venue.id,
+    ownerEntityId: building.ownerEntityId,
+    monthlyRent: Math.round(areaM2 * (2.4 + venue.priceTier * .55)),
+    condition: clamp(building.condition + rng.integer(-7, 9)),
+    security: venue.security,
+    interiorSeed: `${input.seed}:interior:venue:${venue.id}:v1`,
+    lastMaterializedAt: input.timestamp,
+    permanent: venue.permanent,
+    venueId: venue.id
+  };
+}
+
+function mergeVenueUnits(input: UrbanFabricInput, buildings: BuildingState[], householdUnits: BuildingUnitState[], venues: VenueState[], previousUnits: BuildingUnitState[]): BuildingUnitState[] {
+  const previousById = new Map(previousUnits.map((unit) => [unit.id, unit]));
+  const byId = new Map(householdUnits.map((unit) => [unit.id, unit]));
+  for (const venue of venues) {
+    const building = buildings.find((item) => item.id === venue.buildingId);
+    if (!building) continue;
+    const generated = venueUnit(input, venue, building);
+    const previous = previousById.get(generated.id);
+    byId.set(generated.id, previous ? { ...generated, ...previous, venueId: venue.id, buildingId: venue.buildingId, lastMaterializedAt: input.timestamp } : generated);
+  }
+  return [...byId.values()]
+    .sort((left, right) => Number(right.permanent) - Number(left.permanent) || Number(Boolean(right.venueId)) - Number(Boolean(left.venueId)) || right.lastMaterializedAt - left.lastMaterializedAt)
+    .slice(0, MAX_UNIT_CACHE);
 }
 
 function buildingForHousehold(household: HouseholdState, buildings: BuildingState[], input: UrbanFabricInput): BuildingState | undefined {
@@ -701,8 +953,8 @@ function sampleLinks(timestamp: number, population: PopulationState, metropolita
   });
 }
 
-function memoryState(previous: UrbanMemoryState | undefined, buildings: BuildingState[], units: BuildingUnitState[], interiors: InteriorState[], timestamp: number): UrbanMemoryState {
-  const estimatedMemoryMb = Math.round((buildings.length * 18 + units.length * 6.5 + interiors.reduce((sum, item) => sum + item.estimatedMemoryKb, 0) + 1_800) / 1024 * 100) / 100;
+function memoryState(previous: UrbanMemoryState | undefined, buildings: BuildingState[], units: BuildingUnitState[], venues: VenueState[], interiors: InteriorState[], timestamp: number): UrbanMemoryState {
+  const estimatedMemoryMb = Math.round((buildings.length * 18 + units.length * 6.5 + venues.length * 2.4 + interiors.reduce((sum, item) => sum + item.estimatedMemoryKb, 0) + 1_800) / 1024 * 100) / 100;
   return {
     buildingCacheLimit: MAX_BUILDING_CACHE,
     unitCacheLimit: MAX_UNIT_CACHE,
@@ -719,13 +971,14 @@ function memoryState(previous: UrbanMemoryState | undefined, buildings: Building
   };
 }
 
-function urbanTotals(catalogs: SectorBuildingCatalogState[], buildings: BuildingState[], units: BuildingUnitState[], addresses: HouseholdAddressState[], interiors: InteriorState[]): UrbanFabricTotalsState {
+function urbanTotals(catalogs: SectorBuildingCatalogState[], buildings: BuildingState[], units: BuildingUnitState[], venues: VenueState[], addresses: HouseholdAddressState[], interiors: InteriorState[]): UrbanFabricTotalsState {
   return {
     indexedBuildings: catalogs.reduce((sum, item) => sum + item.buildingCount, 0),
     indexedResidentialUnits: catalogs.reduce((sum, item) => sum + item.residentialUnits, 0),
     indexedResidentCapacity: catalogs.reduce((sum, item) => sum + item.residentCapacity, 0),
     materializedBuildings: buildings.length,
     materializedUnits: units.length,
+    materializedVenues: venues.length,
     detailedHouseholdAddresses: addresses.length,
     materializedInteriors: interiors.length
   };
@@ -753,19 +1006,21 @@ export function createUrbanFabricState(input: UrbanFabricInput): UrbanFabricStat
   });
   const buildings = materializeSectorBuildings(input, catalogs, anchors);
   const assigned = assignDetailedHouseholds(input, buildings, [], []);
-  const units = assigned.units.slice(0, MAX_UNIT_CACHE);
+  const venues = materializeVenues(input, buildings, []);
+  const units = mergeVenueUnits(input, buildings, assigned.units, venues, []);
   const interiors = updateInteriorCache(input, buildings, units, []);
   const cohorts = input.metropolitan.sectors.map((sector) => {
     const district = input.districts.find((item) => item.id === sector.districtId) ?? input.districts[0];
     return cohortForSector(input.timestamp, sector, district);
   });
   const totals = demographyTotals(cohorts);
-  const memory = memoryState(undefined, buildings, units, interiors, input.timestamp);
+  const memory = memoryState(undefined, buildings, units, venues, interiors, input.timestamp);
   const state: UrbanFabricState = {
-    version: 1,
+    version: 2,
     catalogs: updatedCatalogs(input.timestamp, catalogs, cohorts, buildings),
     buildings,
     units,
+    venues,
     householdAddresses: assigned.addresses,
     interiors,
     interiorDeltas: [],
@@ -778,7 +1033,7 @@ export function createUrbanFabricState(input: UrbanFabricInput): UrbanFabricStat
     },
     sampleLinks: sampleLinks(input.timestamp, input.population, input.metropolitan),
     memory,
-    totals: urbanTotals(catalogs, buildings, units, assigned.addresses, interiors),
+    totals: urbanTotals(catalogs, buildings, units, venues, assigned.addresses, interiors),
     lastUpdatedAt: input.timestamp
   };
   return state;
@@ -818,12 +1073,13 @@ export function advanceUrbanFabricState(state: UrbanFabricState, input: UrbanFab
     : input.metropolitan.sectors.map((sector) => catalogForSector(input.seed, input.timestamp, sector));
   const buildings = materializeSectorBuildings(input, catalogs, state.buildings);
   const assigned = assignDetailedHouseholds(input, buildings, state.householdAddresses, state.units);
+  const venues = materializeVenues(input, buildings, state.venues);
   const permanentUnitIds = new Set(assigned.units.map((unit) => unit.id));
   const activeSectors = new Set(input.metropolitan.streaming.activeSectorIds);
   const cachedUnits = state.units
-    .filter((unit) => !permanentUnitIds.has(unit.id) && (unit.permanent || activeSectors.has(unit.sectorId)))
+    .filter((unit) => !unit.venueId && !permanentUnitIds.has(unit.id) && (unit.permanent || activeSectors.has(unit.sectorId)))
     .sort((left, right) => Number(right.permanent) - Number(left.permanent) || right.lastMaterializedAt - left.lastMaterializedAt);
-  const units = [...assigned.units, ...cachedUnits].slice(0, MAX_UNIT_CACHE);
+  const units = mergeVenueUnits(input, buildings, [...assigned.units, ...cachedUnits], venues, state.units);
   const interiors = updateInteriorCache(input, buildings, units, state.interiors);
   catalogs = updatedCatalogs(input.timestamp, catalogs, demography.cohorts, buildings);
   const previousBuildingIds = new Set(buildings.map((item) => item.id));
@@ -832,7 +1088,7 @@ export function advanceUrbanFabricState(state: UrbanFabricState, input: UrbanFab
   const evictedBuildings = state.buildings.filter((item) => !previousBuildingIds.has(item.id)).length;
   const evictedUnits = state.units.filter((item) => !previousUnitIds.has(item.id)).length;
   const evictedInteriors = state.interiors.filter((item) => !previousInteriorIds.has(item.id)).length;
-  const baseMemory = memoryState(state.memory, buildings, units, interiors, input.timestamp);
+  const baseMemory = memoryState(state.memory, buildings, units, venues, interiors, input.timestamp);
   const memory = {
     ...baseMemory,
     buildingsEvicted: state.memory.buildingsEvicted + evictedBuildings,
@@ -844,12 +1100,13 @@ export function advanceUrbanFabricState(state: UrbanFabricState, input: UrbanFab
     catalogs,
     buildings,
     units,
+    venues,
     householdAddresses: assigned.addresses,
     interiors,
     demography,
     sampleLinks: sampleLinks(input.timestamp, input.population, input.metropolitan),
     memory,
-    totals: urbanTotals(catalogs, buildings, units, assigned.addresses, interiors),
+    totals: urbanTotals(catalogs, buildings, units, venues, assigned.addresses, interiors),
     lastUpdatedAt: input.timestamp
   };
   return {
@@ -868,17 +1125,18 @@ function populationByDistrict(cohorts: MassDemographyCohortState[]): Record<stri
 export function normalizeUrbanFabricState(value: unknown, input: UrbanFabricInput): UrbanFabricState {
   if (!value || typeof value !== "object") return createUrbanFabricState(input);
   const raw = value as Partial<UrbanFabricState>;
-  if (raw.version !== 1 || !Array.isArray(raw.catalogs) || !Array.isArray(raw.buildings) || !raw.demography || !raw.memory) {
+  if (raw.version !== 2 || !Array.isArray(raw.catalogs) || !Array.isArray(raw.buildings) || !Array.isArray(raw.venues) || !raw.demography || !raw.memory) {
     return createUrbanFabricState(input);
   }
   const fresh = createUrbanFabricState(input);
   const normalized: UrbanFabricState = {
     ...fresh,
     ...raw,
-    version: 1,
+    version: 2,
     catalogs: raw.catalogs.length === input.metropolitan.sectors.length ? raw.catalogs : fresh.catalogs,
     buildings: Array.isArray(raw.buildings) ? raw.buildings : fresh.buildings,
     units: Array.isArray(raw.units) ? raw.units : fresh.units,
+    venues: Array.isArray(raw.venues) ? raw.venues : fresh.venues,
     householdAddresses: Array.isArray(raw.householdAddresses) ? raw.householdAddresses : fresh.householdAddresses,
     interiors: Array.isArray(raw.interiors) ? raw.interiors : [],
     interiorDeltas: Array.isArray(raw.interiorDeltas) ? raw.interiorDeltas as InteriorPersistentDeltaState[] : [],
@@ -972,8 +1230,8 @@ function withAccessDetail(
     ...state,
     units: limitedUnits,
     interiors: limitedInteriors,
-    memory: memoryState(state.memory, state.buildings, limitedUnits, limitedInteriors, timestamp),
-    totals: urbanTotals(state.catalogs, state.buildings, limitedUnits, state.householdAddresses, limitedInteriors),
+    memory: memoryState(state.memory, state.buildings, limitedUnits, state.venues, limitedInteriors, timestamp),
+    totals: urbanTotals(state.catalogs, state.buildings, limitedUnits, state.venues, state.householdAddresses, limitedInteriors),
     lastUpdatedAt: Math.max(state.lastUpdatedAt, timestamp)
   };
 }

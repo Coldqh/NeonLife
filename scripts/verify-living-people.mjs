@@ -20,7 +20,7 @@ check("social domain is separate", fs.existsSync(path.join(root, "src/simulation
 check("session stores social state", read("src/world/state/types.ts").includes("social: SocialState"));
 check("world generation creates social state", read("src/world/generation/createWorld.ts").includes("createSocialState"));
 check("time pipeline advances social state", life.includes("advanceSocialState") && life.includes("socialAdvance.people") && life.includes("social: socialAdvance.state"));
-check("save migration normalizes social state", migration.includes("normalizeSocialState(payload.social") && read("src/core/saves/types.ts").includes("SAVE_SCHEMA_VERSION = 32"));
+check("save migration normalizes social state", migration.includes("normalizeSocialState(payload.social") && read("src/core/saves/types.ts").includes("SAVE_SCHEMA_VERSION = 33"));
 check("physical availability gates conversation", commands.includes("actor.visible") && commands.includes("actor.interactable") && commands.includes("distanceToPlayerM > 3.5") && commands.includes("participantActorIds.includes"));
 check("nearby exposes real conversation action", nearby.includes("getConversationAvailability") && nearby.includes("onStartConversation") && nearby.includes("Заговорить"));
 check("conversation panel is interactive", panel.includes('onAction("ask-incident")') && panel.includes('onAction("offer-money")') && panel.includes('onAction("threaten")') && panel.includes("Закончить разговор"));

@@ -196,7 +196,7 @@ export interface MetropolitanTotals {
 }
 
 export interface MetropolitanState {
-  version: 2;
+  version: 3;
   config: MetropolitanConfig;
   districts: DistrictSpatialState[];
   mapDistricts: MapDistrictState[];

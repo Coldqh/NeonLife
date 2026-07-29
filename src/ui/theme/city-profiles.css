@@ -242,3 +242,19 @@
   .building-profile__floor-layout { min-height: 320px; }
   .building-profile__unit-grid { grid-template-columns: repeat(3, minmax(34px, 1fr)); }
 }
+
+/* v0.39.2 — generated venue profiles */
+.generated-venue__tags { display: flex; flex-wrap: wrap; gap: 7px; margin: 2px 0 8px; }
+.generated-venue__tags span { padding: 5px 8px; border: 1px solid rgba(255, 77, 101, .22); border-radius: 5px; background: rgba(255, 48, 77, .06); color: var(--nl-muted); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.generated-venue-hero em { position: absolute; right: 22px; bottom: 20px; padding: 6px 9px; border: 1px solid rgba(255,255,255,.2); background: rgba(2,6,11,.76); color: #fff; font-style: normal; font-size: 11px; font-weight: 800; }
+.generated-venue__address { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border: 1px solid rgba(130,149,178,.14); }
+.generated-venue__address > div { min-height: 64px; padding: 12px; border-right: 1px solid rgba(130,149,178,.1); border-bottom: 1px solid rgba(130,149,178,.1); }
+.generated-venue__address span { display: block; margin-bottom: 6px; color: var(--nl-muted); font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
+.generated-venue__address strong { color: var(--nl-text); font-size: 12px; }
+.building-profile__venues { padding: 14px; border: 1px solid rgba(128,147,177,.14); background: rgba(5,10,17,.56); }
+.building-profile__venues > header { display: flex; justify-content: space-between; margin-bottom: 10px; color: #ff5069; font-size: 10px; font-weight: 800; letter-spacing: .08em; }
+.building-profile__venues > div { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 7px; }
+.building-profile__venues article { padding: 10px; border: 1px solid rgba(130,149,178,.14); background: rgba(8,15,24,.82); }
+.building-profile__venues article strong { display: block; color: #f4f7fb; font-size: 11px; }
+.building-profile__venues article small { color: var(--nl-muted); font-size: 9px; }
+@media (max-width: 640px) { .generated-venue__address, .building-profile__venues > div { grid-template-columns: 1fr; } }

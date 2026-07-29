@@ -6,6 +6,8 @@ export type BuildingScale = "house" | "lowrise" | "midrise" | "highrise" | "mega
 export type UnitUse = "apartment" | "dorm-room" | "shop" | "office" | "clinic" | "workshop" | "warehouse" | "hotel-room" | "service" | "utility";
 export type InteriorRoomKind = "entry" | "living" | "kitchen" | "bedroom" | "bathroom" | "storage" | "workroom" | "office" | "retail-floor" | "clinic-room" | "corridor" | "service-room";
 export type InteriorDeltaKind = "door" | "damage" | "inventory" | "occupancy" | "evidence" | "ownership" | "access";
+export type VenueCategory = "convenience" | "food" | "bar" | "pharmacy" | "clinic" | "repair" | "cyberware" | "clothing" | "entertainment" | "hotel" | "office-service" | "market";
+export type VenuePriceTier = 1 | 2 | 3 | 4;
 
 export interface SectorBuildingCatalogState {
   sectorId: EntityId;
@@ -86,6 +88,36 @@ export interface BuildingUnitState {
   interiorSeed: string;
   lastMaterializedAt: number;
   permanent: boolean;
+  venueId?: EntityId;
+}
+
+export interface VenueState {
+  id: EntityId;
+  sectorId: EntityId;
+  districtId: EntityId;
+  buildingId: EntityId;
+  unitId: EntityId;
+  anchorLocationId?: EntityId;
+  organizationId?: EntityId;
+  name: string;
+  code: string;
+  category: VenueCategory;
+  floor: number;
+  unitNumber: string;
+  openHour: number;
+  closeHour: number;
+  priceTier: VenuePriceTier;
+  quality: number;
+  demand: number;
+  staffing: number;
+  stock: number;
+  security: number;
+  popularity: number;
+  tags: string[];
+  mapPriority: number;
+  active: boolean;
+  permanent: boolean;
+  lastUpdatedAt: number;
 }
 
 export interface HouseholdAddressState {
@@ -214,15 +246,17 @@ export interface UrbanFabricTotalsState {
   indexedResidentCapacity: number;
   materializedBuildings: number;
   materializedUnits: number;
+  materializedVenues: number;
   detailedHouseholdAddresses: number;
   materializedInteriors: number;
 }
 
 export interface UrbanFabricState {
-  version: 1;
+  version: 2;
   catalogs: SectorBuildingCatalogState[];
   buildings: BuildingState[];
   units: BuildingUnitState[];
+  venues: VenueState[];
   householdAddresses: HouseholdAddressState[];
   interiors: InteriorState[];
   interiorDeltas: InteriorPersistentDeltaState[];

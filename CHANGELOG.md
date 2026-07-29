@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.39.2 — City Fabric & Venues
+
+- replaced fragile per-building SVG clicks with one screen-space hit-test and object priority;
+- rebuilt procedural building placement around deterministic street-facing lots;
+- reduced oversized anchor footprints and clustered named locations inside their districts;
+- added real venue entities linked to physical buildings and units;
+- generated a bounded, deterministic city-wide catalog of shops, cafes, clinics, pharmacies, repair points, markets and services;
+- added map markers, filters, compact sheets and full profiles for generated venues;
+- connected venue profiles to physical routes, building entry and unit entry;
+- regenerated old metropolitan and urban geometry and migrated saves to schema 33;
+- added executable city-fabric, venue-linkage and physical-entry regression tests.
+
 ## 0.39.1 — Map Visual Recovery
 
 - rebuilt global district silhouettes from real sector boundaries instead of visible grid cells;

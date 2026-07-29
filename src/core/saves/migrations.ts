@@ -645,7 +645,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
       representedPopulationByDistrict: Object.fromEntries(mobilitySynchronizedMetropolitan.districts.map((district) => [district.districtId, district.representedPopulation]))
     }
   };
-  const localScene = normalizeLocalSceneState(payload.localScene, {
+  const localScene = normalizeLocalSceneState(schemaVersion < 33 ? undefined : payload.localScene, {
     timestamp,
     seed,
     activeLocationId: existingLocationId ?? housingLocation?.id ?? locations[0]?.id ?? "location-missing",

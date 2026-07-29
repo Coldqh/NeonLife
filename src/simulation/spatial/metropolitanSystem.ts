@@ -458,42 +458,127 @@ function preferredLandUses(location: LocationState): SectorLandUse[] {
   return ["commercial", "mixed", "residential"];
 }
 
+function fabricOffsets(landUse: SectorLandUse, sizeM: number): number[] {
+  const raw = landUse === "mixed" || landUse === "commercial"
+    ? [0, 125, 250, 375, 500, 625, 750, 875, 1_000]
+    : landUse === "vacant"
+      ? [0, 500, 1_000]
+      : [0, 250, 500, 750, 1_000];
+  return raw.map((value) => Math.round(value / 1_000 * sizeM));
+}
+
+interface PlacementLot extends MetricBounds { frontage: "north" | "east" | "south" | "west" }
+
+function placementLots(sector: MetropolitanSectorState): PlacementLot[] {
+  const xLines = fabricOffsets(sector.landUse, sector.bounds.widthM);
+  const yLines = fabricOffsets(sector.landUse, sector.bounds.heightM);
+  const lots: PlacementLot[] = [];
+  for (let yIndex = 0; yIndex < yLines.length - 1; yIndex += 1) {
+    for (let xIndex = 0; xIndex < xLines.length - 1; xIndex += 1) {
+      const cellX = sector.bounds.xM + xLines[xIndex];
+      const cellY = sector.bounds.yM + yLines[yIndex];
+      const cellWidth = xLines[xIndex + 1] - xLines[xIndex];
+      const cellHeight = yLines[yIndex + 1] - yLines[yIndex];
+      const splitX = cellWidth >= 210 ? 2 : 1;
+      const splitY = cellHeight >= 210 ? 2 : 1;
+      const gutter = 13;
+      const gap = 8;
+      const lotWidth = (cellWidth - gutter * 2 - gap * (splitX - 1)) / splitX;
+      const lotHeight = (cellHeight - gutter * 2 - gap * (splitY - 1)) / splitY;
+      for (let row = 0; row < splitY; row += 1) {
+        for (let column = 0; column < splitX; column += 1) {
+          const edgeDistance = [row, splitY - 1 - row, column, splitX - 1 - column];
+          const edgeIndex = edgeDistance.indexOf(Math.min(...edgeDistance));
+          const frontage = (["north", "south", "west", "east"] as const)[edgeIndex];
+          lots.push({
+            xM: cellX + gutter + column * (lotWidth + gap),
+            yM: cellY + gutter + row * (lotHeight + gap),
+            widthM: Math.max(24, lotWidth),
+            heightM: Math.max(24, lotHeight),
+            frontage
+          });
+        }
+      }
+    }
+  }
+  return lots;
+}
+
+function locationDimensions(location: LocationState, footprint: LocationFootprintKind, rng: SeededRandom): { widthM: number; heightM: number } {
+  if (location.type === "food" || location.type === "market") return { widthM: rng.integer(42, 78), heightM: rng.integer(36, 68) };
+  if (location.type === "clinic") return { widthM: rng.integer(64, 112), heightM: rng.integer(56, 104) };
+  if (location.type === "workshop") return { widthM: rng.integer(88, 150), heightM: rng.integer(72, 132) };
+  if (location.type === "transport") return { widthM: rng.integer(92, 168), heightM: rng.integer(68, 128) };
+  if (location.type === "education" || location.type === "government") return { widthM: rng.integer(90, 168), heightM: rng.integer(78, 148) };
+  if (footprint === "tower") return { widthM: rng.integer(72, 118), heightM: rng.integer(68, 112) };
+  if (footprint === "megablock") return { widthM: rng.integer(108, 176), heightM: rng.integer(96, 164) };
+  if (footprint === "campus") return { widthM: rng.integer(96, 176), heightM: rng.integer(84, 158) };
+  if (footprint === "warehouse") return { widthM: rng.integer(90, 168), heightM: rng.integer(76, 148) };
+  return { widthM: rng.integer(56, 104), heightM: rng.integer(48, 96) };
+}
+
+function fitLocationToLot(dimensions: { widthM: number; heightM: number }, lot: PlacementLot): MetricBounds {
+  const widthM = Math.min(dimensions.widthM, Math.max(24, lot.widthM - 4));
+  const heightM = Math.min(dimensions.heightM, Math.max(24, lot.heightM - 4));
+  const inset = 2;
+  const xM = lot.frontage === "east"
+    ? lot.xM + lot.widthM - widthM - inset
+    : lot.frontage === "west"
+      ? lot.xM + inset
+      : lot.xM + (lot.widthM - widthM) / 2;
+  const yM = lot.frontage === "south"
+    ? lot.yM + lot.heightM - heightM - inset
+    : lot.frontage === "north"
+      ? lot.yM + inset
+      : lot.yM + (lot.heightM - heightM) / 2;
+  return { xM: Math.round(xM), yM: Math.round(yM), widthM: Math.round(widthM), heightM: Math.round(heightM) };
+}
+
 function placeLocations(seed: string, sectors: MetropolitanSectorState[], locations: LocationState[]): LocationSpatialState[] {
-  const used = new Set<string>();
+  const occupancy = new Map<string, number>();
+  const districtHub = new Map<string, MetropolitanSectorState>();
   return locations.map((location, index) => {
     const preferred = preferredLandUses(location);
     const candidates = sectors.filter((sector) => sector.districtId === location.districtId && preferred.includes(sector.landUse));
     const fallback = sectors.filter((sector) => sector.districtId === location.districtId);
     const pool = candidates.length ? candidates : fallback;
-    const rng = new SeededRandom(`${seed}:location-placement:${location.id}`);
-    let sector = pool[rng.integer(0, Math.max(0, pool.length - 1))] ?? sectors[index % Math.max(1, sectors.length)];
-    let guard = 0;
-    while (sector && used.has(sector.id) && guard < pool.length) {
-      sector = pool[(pool.indexOf(sector) + 1) % pool.length];
-      guard += 1;
-    }
-    used.add(sector.id);
+    const rng = new SeededRandom(`${seed}:location-placement:v2:${location.id}`);
+    const hub = districtHub.get(location.districtId);
+    const ranked = [...pool].sort((left, right) => {
+      const leftLoad = occupancy.get(left.id) ?? 0;
+      const rightLoad = occupancy.get(right.id) ?? 0;
+      const leftDistance = hub ? Math.abs(left.xIndex - hub.xIndex) + Math.abs(left.yIndex - hub.yIndex) : 0;
+      const rightDistance = hub ? Math.abs(right.xIndex - hub.xIndex) + Math.abs(right.yIndex - hub.yIndex) : 0;
+      const leftNoise = new SeededRandom(`${seed}:location-rank:${location.id}:${left.id}`).next();
+      const rightNoise = new SeededRandom(`${seed}:location-rank:${location.id}:${right.id}`).next();
+      return leftLoad * 5 + leftDistance + leftNoise - (rightLoad * 5 + rightDistance + rightNoise);
+    });
+    const sector = ranked[0] ?? sectors[index % Math.max(1, sectors.length)];
+    if (!sector) throw new Error("Metropolitan location placement requires at least one sector");
+    if (!hub) districtHub.set(location.districtId, sector);
+    const slot = occupancy.get(sector.id) ?? 0;
+    occupancy.set(sector.id, slot + 1);
+    const lots = placementLots(sector);
+    const lot = lots[(rng.integer(0, Math.max(0, lots.length - 1)) + slot * 11) % Math.max(1, lots.length)]
+      ?? { ...sector.bounds, frontage: "north" as const };
     const footprint = footprintFor(location);
-    const width = footprint === "tower" ? rng.integer(110, 220) : footprint === "megablock" ? rng.integer(240, 460) : footprint === "campus" ? rng.integer(280, 620) : footprint === "warehouse" ? rng.integer(180, 520) : rng.integer(70, 230);
-    const height = footprint === "tower" ? rng.integer(110, 220) : footprint === "megablock" ? rng.integer(220, 440) : footprint === "campus" ? rng.integer(240, 580) : footprint === "warehouse" ? rng.integer(160, 480) : rng.integer(60, 210);
-    const xM = sector.bounds.xM + rng.integer(40, Math.max(41, sector.bounds.widthM - width - 40));
-    const yM = sector.bounds.yM + rng.integer(40, Math.max(41, sector.bounds.heightM - height - 40));
+    const bounds = fitLocationToLot(locationDimensions(location, footprint, rng), lot);
     const floors = floorsFor(location, footprint, rng);
-    const area = width * height * floors;
-    const verticalPopulationCapacity = location.type === "housing" ? Math.round(area / (footprint === "megablock" ? 22 : 42)) : footprint === "tower" ? Math.round(area / 38) : Math.round(area / 85);
+    const area = bounds.widthM * bounds.heightM * floors;
+    const verticalPopulationCapacity = location.type === "housing" ? Math.round(area / (footprint === "megablock" ? 28 : 46)) : footprint === "tower" ? Math.round(area / 42) : Math.round(area / 92);
     return {
       locationId: location.id,
       sectorId: sector.id,
       districtId: location.districtId,
       addressCode: `${sector.code}/${(index + 1).toString().padStart(3, "0")}`,
-      bounds: { xM, yM, widthM: width, heightM: height },
+      bounds,
       floors,
-      basementLevels: footprint === "tower" ? rng.integer(4, 10) : footprint === "megablock" ? rng.integer(2, 5) : rng.integer(0, 3),
+      basementLevels: footprint === "tower" ? rng.integer(3, 8) : footprint === "megablock" ? rng.integer(1, 4) : rng.integer(0, 2),
       footprintKind: footprint,
-      entranceCount: footprint === "megablock" || footprint === "campus" ? rng.integer(3, 10) : rng.integer(1, 4),
-      serviceEntranceCount: footprint === "tower" || footprint === "campus" || footprint === "warehouse" ? rng.integer(1, 5) : rng.integer(0, 2),
+      entranceCount: footprint === "megablock" || footprint === "campus" ? rng.integer(2, 6) : rng.integer(1, 3),
+      serviceEntranceCount: footprint === "tower" || footprint === "campus" || footprint === "warehouse" ? rng.integer(1, 3) : rng.integer(0, 1),
       verticalPopulationCapacity,
-      persistentInteriorSeed: `${seed}:interior:${location.id}:v1`
+      persistentInteriorSeed: `${seed}:interior:${location.id}:v2`
     };
   });
 }
@@ -795,7 +880,7 @@ export function createMetropolitanState(input: MetropolitanAdvanceInput): Metrop
     materializedInteriorCount: streaming.activeSectorIds.includes(sector.id) ? 2 : 0
   }));
   const base = {
-    version: 2 as const,
+    version: 3 as const,
     config: cfg,
     districts: districtSpatialStates(input.districts, nextSectors),
     mapDistricts: refreshMapDistricts(mapped.mapDistricts, nextSectors, input.districts),
@@ -956,7 +1041,7 @@ export function advanceMetropolitanState(state: MetropolitanState, input: Metrop
 export function normalizeMetropolitanState(value: unknown, input: MetropolitanAdvanceInput): MetropolitanState {
   if (!value || typeof value !== "object") return createMetropolitanState(input);
   const raw = value as Partial<MetropolitanState> & { version?: number };
-  if (![1, 2].includes(raw.version ?? 0) || !Array.isArray(raw.sectors) || !Array.isArray(raw.locations) || !raw.config || !raw.streaming) {
+  if (![1, 2, 3].includes(raw.version ?? 0) || !Array.isArray(raw.sectors) || !Array.isArray(raw.locations) || !raw.config || !raw.streaming) {
     return createMetropolitanState(input);
   }
   const requiredSectors = raw.config.sectorsWide * raw.config.sectorsHigh;
@@ -993,12 +1078,12 @@ export function normalizeMetropolitanState(value: unknown, input: MetropolitanAd
     : createTransit(input.seed, mapped.sectors, mapped.mapDistricts);
 
   const normalized: MetropolitanState = {
-    version: 2,
+    version: 3,
     config: { ...config(), ...raw.config, seedVersion: 1 },
     districts: districtSpatialStates(input.districts, mapped.sectors),
     mapDistricts: refreshMapDistricts(mapped.mapDistricts, mapped.sectors, input.districts),
     sectors: mapped.sectors,
-    locations: raw.locations,
+    locations: raw.version === 3 ? raw.locations : placeLocations(input.seed, mapped.sectors, input.locations),
     roadNodes: roads.nodes,
     roadLinks: roads.links,
     transitStations: transit.stations,

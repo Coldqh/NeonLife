@@ -14,6 +14,7 @@ import type { StreetIncidentAction } from "../../simulation/streetScene/types";
 import type { CityMapSelection, GlobalLayerId, LocalLayerId, MapMode } from "../map/mapUi";
 import {
   locationMatchesLayer,
+  venueMatchesLayer,
   mapDistrictForSector,
   selectionKey,
   selectionTitle,
@@ -55,6 +56,7 @@ function nearestStreetId(x: number, y: number, segments: StreetSegmentState[], n
 
 function localSelectionToCity(selection: LocalMapSelection, sector: GameSession["metropolitan"]["sectors"][number]): CityMapSelection {
   if (selection.kind === "location") return { kind: "location", location: selection.location };
+  if (selection.kind === "venue") return { kind: "venue", venue: selection.venue };
   if (selection.kind === "building") return { kind: "building", building: selection.building };
   if (selection.kind === "actor") return { kind: "actor", actor: selection.actor };
   if (selection.kind === "vehicle") return { kind: "vehicle", vehicle: selection.vehicle };
@@ -72,6 +74,7 @@ function localSelectionToCity(selection: LocalMapSelection, sector: GameSession[
 function citySelectionToLocal(selection: CityMapSelection | null): LocalMapSelection | null {
   if (!selection) return null;
   if (selection.kind === "location") return { kind: "location", location: selection.location };
+  if (selection.kind === "venue") return { kind: "venue", venue: selection.venue };
   if (selection.kind === "building") return { kind: "building", building: selection.building };
   if (selection.kind === "actor") return { kind: "actor", actor: selection.actor };
   if (selection.kind === "vehicle") return { kind: "vehicle", vehicle: selection.vehicle };
@@ -220,6 +223,7 @@ export function MapScreen({
   const target = useMemo<LocalMovementTargetState | null>(() => {
     if (!selection) return null;
     if (selection.kind === "location") return localMovementTargetForLocation(session, selection.location.id);
+    if (selection.kind === "venue") return localMovementTargetForBuilding(session, selection.venue.buildingId);
     if (selection.kind === "building") return localMovementTargetForBuilding(session, selection.building.id);
     if (selection.kind === "actor") {
       const pedestrian = session.streetScene.pedestrians.find((item) => item.actorId === selection.actor.id);
@@ -241,6 +245,7 @@ export function MapScreen({
   const favoriteKey = selectionKey(selection);
   const favorite = Boolean(favoriteKey && favorites.includes(favoriteKey));
   const profileLocation = profileOpen && selection?.kind === "location" ? selection.location : undefined;
+  const profileVenue = profileOpen && selection?.kind === "venue" ? selection.venue : undefined;
   const profileBuilding = profileOpen && selection?.kind === "building" ? selection.building : undefined;
   const streetSceneVisible = session.streetScene.focusSectorId === selectedSector.id;
 
@@ -381,6 +386,7 @@ export function MapScreen({
             route={activeRoute}
             locationFilter={(location) => locationMatchesLayer(location, localLayer)}
             showStops={localLayer === "all" || localLayer === "transport"}
+            venues={session.urban.venues.filter((venue) => venue.sectorId === selectedSector.id && venueMatchesLayer(venue, localLayer))}
             actors={localLayer === "all" || localLayer === "people" ? nearbyActors : []}
             vehicles={localLayer === "all" || localLayer === "cars" ? nearbyVehicles : []}
             pedestrians={streetSceneVisible && (localLayer === "all" || localLayer === "people") ? nearbyPedestrians : []}
@@ -402,7 +408,7 @@ export function MapScreen({
           travel={travel}
           favorite={favorite}
           onClose={() => setSelection(null)}
-          onDetails={() => selection.kind === "location" || selection.kind === "building" ? setProfileOpen(true) : setFlash("Подробный профиль появится после системы контактов")}
+          onDetails={() => selection.kind === "location" || selection.kind === "venue" || selection.kind === "building" ? setProfileOpen(true) : setFlash("Подробный профиль появится после системы контактов")}
           onFavorite={toggleFavorite}
           onShare={() => { void shareSelection(); }}
           onBuildRoute={buildRoute}
@@ -425,10 +431,11 @@ export function MapScreen({
         />
       ) : null}
 
-      {profileOpen && (profileLocation || profileBuilding) ? (
+      {profileOpen && (profileLocation || profileVenue || profileBuilding) ? (
         <MapProfileOverlay
           session={session}
           location={profileLocation}
+          venue={profileVenue}
           building={profileBuilding}
           favorite={favorite}
           routeCaption={routeCaption}
@@ -439,6 +446,8 @@ export function MapScreen({
           onStartRoute={startRoute}
           onEnterBuilding={onEnterBuilding}
           onLeaveBuilding={onLeaveBuilding}
+          onEnterUnit={onEnterBuildingUnit}
+          onLeaveUnit={onLeaveBuildingUnit}
           onMoveFloor={onMoveBuildingFloor}
           onNotice={setFlash}
         />

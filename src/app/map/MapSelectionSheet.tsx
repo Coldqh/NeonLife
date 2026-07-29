@@ -5,7 +5,7 @@ import { isLocationOpen } from "../../gameplay/travel/travelSystem";
 import { PLACE_ICONS, personPortrait, vehicleStateLabel } from "../shared/presentation";
 import type { CityMapSelection } from "./mapUi";
 import type { StreetIncidentAction } from "../../simulation/streetScene/types";
-import { activityLabel, buildingUseLabel, landUseLabel, locationTypeLabel, riskLabel, selectionTitle } from "./mapUi";
+import { activityLabel, buildingUseLabel, landUseLabel, locationTypeLabel, riskLabel, selectionTitle, venueCategoryLabel, venueIsOpen } from "./mapUi";
 
 function routeCaption(preview: LocalMovementState | null, travel?: TravelOption): string {
   if (preview) return `${preview.estimatedMinutes} мин · ${Math.round(preview.totalDistanceM)} м`;
@@ -91,6 +91,28 @@ export function MapSelectionSheet({
         <div className="map-selection-sheet__handle" />
         <header><div><span>СЕКТОР</span><h2>{selection.sector.code}</h2><p>{landUseLabel(selection.sector.landUse)} · {selection.sector.representedPopulation.toLocaleString("ru-RU")} жителей</p></div><button type="button" className="icon-button" onClick={onClose}>×</button></header>
         <button type="button" className="map-action map-action--primary" onClick={onOpenDistrict}>Открыть сектор</button>
+      </aside>
+    );
+  }
+
+  if (selection.kind === "venue") {
+    const venue = selection.venue;
+    const building = session.urban.buildings.find((item) => item.id === venue.buildingId);
+    const open = venueIsOpen(venue, session.timestamp);
+    const inside = building && session.localScene.playerPosition.buildingId === building.id;
+    const access = building ? session.buildingAccess.buildingEntries.find((item) => item.buildingId === building.id) : undefined;
+    const occupants = session.localScene.actors.filter((actor) => actor.visible && actor.position.buildingId === venue.buildingId && (!actor.position.unitId || actor.position.unitId === venue.unitId)).length;
+    return (
+      <aside className="map-selection-sheet map-selection-sheet--venue map-selection-sheet--generated-venue" data-no-swipe>
+        <div className={`map-selection-sheet__thumb venue-thumb venue-thumb--${venue.category}`}><i>{venue.category === "food" ? "♨" : venue.category === "clinic" || venue.category === "pharmacy" ? "+" : venue.category === "repair" ? "⚒" : "▤"}</i><span>{venue.code}</span></div>
+        <div className="map-selection-sheet__body">
+          <header><div><span>{venueCategoryLabel(venue.category)} · {building?.addressCode ?? venue.unitNumber}</span><h2>{venue.name}</h2><p className={open ? "status-good" : "status-bad"}>{open ? "ОТКРЫТО" : "ЗАКРЫТО"} · {String(venue.openHour).padStart(2, "0")}:00—{venue.closeHour === 24 ? "24:00" : `${String(venue.closeHour).padStart(2, "0")}:00`}</p></div><div className="sheet-icon-row"><button type="button" className={favorite ? "is-active" : ""} onClick={onFavorite} aria-label="Избранное">♡</button><button type="button" onClick={onShare} aria-label="Поделиться">↗</button><button type="button" onClick={onClose} aria-label="Закрыть">×</button></div></header>
+          <div className="venue-sheet__metrics"><span>Качество <strong>{venue.quality}%</strong></span><span>Спрос <strong>{venue.demand}%</strong></span><span>Сейчас внутри <strong>{occupants}</strong></span><span>Цена <strong>{"₵".repeat(venue.priceTier)}</strong></span></div>
+          <div className="generated-venue__tags">{venue.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
+          <p className="map-selection-sheet__route">{routeCaption(preview, travel)}</p>
+          <div className="map-selection-sheet__actions"><button type="button" className="map-action map-action--primary" disabled={!target} onClick={onBuildRoute}>Проложить маршрут</button><button type="button" className="map-action" onClick={onDetails}>Профиль</button>{inside ? <button type="button" className="map-action" onClick={onLeaveBuilding}>Выйти</button> : building && access && access.distanceToPlayerM <= 12 ? <button type="button" className="map-action" onClick={() => onEnterBuilding(building.id)}>Войти</button> : null}</div>
+          {preview ? <button type="button" className="map-route-start" onClick={onStartRoute}>Начать · {routeCaption(preview)}</button> : null}
+        </div>
       </aside>
     );
   }

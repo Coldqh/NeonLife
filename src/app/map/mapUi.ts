@@ -1,6 +1,6 @@
 import type { GameSession, LocationState } from "../../world/state/types";
 import type { MapDistrictState, MetropolitanSectorState } from "../../simulation/spatial/types";
-import type { BuildingState } from "../../simulation/urban/types";
+import type { BuildingState, VenueCategory, VenueState } from "../../simulation/urban/types";
 import type { LocalActorState } from "../../simulation/localScene/types";
 import type { PhysicalVehicleEntityState } from "../../simulation/vehicles/types";
 import type { TransitStopState } from "../../simulation/transit/types";
@@ -14,6 +14,7 @@ export type CityMapSelection =
   | { kind: "district"; district: MapDistrictState }
   | { kind: "sector"; sector: MetropolitanSectorState }
   | { kind: "location"; location: LocationState }
+  | { kind: "venue"; venue: VenueState }
   | { kind: "building"; building: BuildingState }
   | { kind: "actor"; actor: LocalActorState }
   | { kind: "vehicle"; vehicle: PhysicalVehicleEntityState }
@@ -125,6 +126,7 @@ export function selectionKey(selection: CityMapSelection | null): string | null 
   if (selection.kind === "district") return `district:${selection.district.id}`;
   if (selection.kind === "sector") return `sector:${selection.sector.id}`;
   if (selection.kind === "location") return `location:${selection.location.id}`;
+  if (selection.kind === "venue") return `venue:${selection.venue.id}`;
   if (selection.kind === "building") return `building:${selection.building.id}`;
   if (selection.kind === "actor") return `actor:${selection.actor.id}`;
   if (selection.kind === "vehicle") return `vehicle:${selection.vehicle.id}`;
@@ -154,10 +156,47 @@ export function selectionTitle(selection: CityMapSelection): string {
   if (selection.kind === "district") return selection.district.name;
   if (selection.kind === "sector") return selection.sector.code;
   if (selection.kind === "location") return selection.location.name;
+  if (selection.kind === "venue") return selection.venue.name;
   if (selection.kind === "building") return selection.building.addressCode;
   if (selection.kind === "actor") return selection.actor.name;
   if (selection.kind === "vehicle") return selection.vehicle.modelName;
   if (selection.kind === "stop") return selection.stop.name;
   if (selection.kind === "incident") return selection.incident.title;
   return "Точка на карте";
+}
+
+export function venueCategoryLabel(value: VenueCategory): string {
+  const labels: Record<VenueCategory, string> = {
+    convenience: "Магазин у дома",
+    food: "Кафе и еда",
+    bar: "Бар",
+    pharmacy: "Аптека",
+    clinic: "Клиника",
+    repair: "Техносервис",
+    cyberware: "Киберимпланты",
+    clothing: "Одежда",
+    entertainment: "Развлечения",
+    hotel: "Отель и капсулы",
+    "office-service": "Деловые услуги",
+    market: "Магазин"
+  };
+  return labels[value];
+}
+
+export function venueMatchesLayer(venue: VenueState, layer: LocalLayerId): boolean {
+  if (layer === "all") return true;
+  if (layer === "markets") return ["convenience", "market", "clothing", "pharmacy"].includes(venue.category);
+  if (layer === "food") return ["food", "bar"].includes(venue.category);
+  if (layer === "clinic") return ["clinic", "pharmacy", "cyberware"].includes(venue.category);
+  if (layer === "work") return ["repair", "office-service", "hotel"].includes(venue.category);
+  return false;
+}
+
+export function venueIsOpen(venue: VenueState, timestamp: number): boolean {
+  if (!venue.active) return false;
+  if (venue.openHour === 0 && venue.closeHour === 24) return true;
+  const hour = new Date(timestamp).getUTCHours();
+  return venue.openHour < venue.closeHour
+    ? hour >= venue.openHour && hour < venue.closeHour
+    : hour >= venue.openHour || hour < venue.closeHour;
 }

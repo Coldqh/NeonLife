@@ -31,9 +31,9 @@ check("map uses functional city street and building hierarchy", mapScreen.includ
 check("map inspector and full profiles are separate components", mapScreen.includes("<MapSelectionSheet") && mapScreen.includes("<MapProfileOverlay") && mapSheet.includes("map-selection-sheet--venue") && mapProfile.includes("map-profile--building"));
 check("map layers are functional filters", mapUi.includes("GLOBAL_LAYERS") && mapUi.includes("LOCAL_LAYERS") && mapScreen.includes("setGlobalLayer") && mapScreen.includes("setLocalLayer") && mapScreen.includes("locationMatchesLayer"));
 check("global map uses real sector geometry", globalMap.includes("boundaryLoops(session.metropolitan.sectors") && globalMap.includes("roundedLoopPath") && globalGeometry.includes("export function boundaryLoops") && globalGeometry.includes("sector.xIndex") && !globalMap.includes("DISTRICT_CLIPS"));
-check("local map selects buildings", localMap.includes('kind: "building"') && localMap.includes("onSelect({ kind: \"building\", building })"));
-check("local map selects stops", localMap.includes('kind: "stop"') && localMap.includes("onSelect({ kind: \"stop\", stop })"));
-check("local map selects streets", localMap.includes('kind: "street"') && localMap.includes("onSelect({ kind: \"street\", segment })"));
+check("local map selects buildings through central hit testing", localMap.includes('kind: "building"') && localMap.includes("function hitTest") && localMap.includes("return { kind: \"building\", building: buildingHits[0].building }"));
+check("local map selects stops through central hit testing", localMap.includes('kind: "stop"') && localMap.includes("return { kind: \"stop\", stop: stopHits[0].stop }"));
+check("local map selects streets through central hit testing", localMap.includes('kind: "street"') && localMap.includes("return { kind: \"street\", segment: streetHits[0].segment }"));
 check("local map selects arbitrary points", localMap.includes('kind: "point"') && localMap.includes("localCoordinates"));
 check("local map labels main streets", localMap.includes("local-map__street-label") && mapCss.includes(".local-map__street-label"));
 check("route presentation is functional and honest", mapScreen.includes("buildRoute") && mapScreen.includes("routeReady") && mapScreen.includes("preview") && mapScreen.includes("travel") && mapScreen.includes("Маршрут к этой точке сейчас недоступен"));

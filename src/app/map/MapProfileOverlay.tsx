@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import type { GameSession, LocationState } from "../../world/state/types";
-import type { BuildingState } from "../../simulation/urban/types";
+import type { BuildingState, VenueState } from "../../simulation/urban/types";
 import { isLocationOpen } from "../../gameplay/travel/travelSystem";
 import { PLACE_ICONS, personPortrait } from "../shared/presentation";
-import { buildingUseLabel, formatHours, locationTypeLabel } from "./mapUi";
+import { buildingUseLabel, formatHours, locationTypeLabel, venueCategoryLabel, venueIsOpen } from "./mapUi";
 
 function bars(value: number): JSX.Element[] {
   const filled = Math.round(Math.max(0, Math.min(100, value)) / 20);
@@ -72,6 +72,7 @@ function FloorGrid({ building, session, selectedFloor, onSelectFloor, onMoveFloo
 export function MapProfileOverlay({
   session,
   location,
+  venue,
   building,
   favorite,
   routeCaption,
@@ -82,11 +83,14 @@ export function MapProfileOverlay({
   onStartRoute,
   onEnterBuilding,
   onLeaveBuilding,
+  onEnterUnit,
+  onLeaveUnit,
   onMoveFloor,
   onNotice
 }: {
   session: GameSession;
   location?: LocationState;
+  venue?: VenueState;
   building?: BuildingState;
   favorite: boolean;
   routeCaption: string;
@@ -97,11 +101,55 @@ export function MapProfileOverlay({
   onStartRoute: () => void;
   onEnterBuilding: (buildingId: string) => void;
   onLeaveBuilding: () => void;
+  onEnterUnit: (unitId: string) => void;
+  onLeaveUnit: () => void;
   onMoveFloor: (floor: number, method: "stairs" | "elevator") => void;
   onNotice: (message: string) => void;
 }) {
-  const targetBuilding = building ?? (location ? session.urban.buildings.find((item) => item.anchorLocationId === location.id) : undefined);
+  const targetBuilding = building ?? (venue ? session.urban.buildings.find((item) => item.id === venue.buildingId) : location ? session.urban.buildings.find((item) => item.anchorLocationId === location.id) : undefined);
   const [selectedFloor, setSelectedFloor] = useState(() => Math.max(1, session.localScene.playerPosition.buildingId === targetBuilding?.id ? session.localScene.playerPosition.floor ?? 1 : 1));
+
+  if (venue && targetBuilding) {
+    const open = venueIsOpen(venue, session.timestamp);
+    const access = session.buildingAccess.buildingEntries.find((item) => item.buildingId === targetBuilding.id);
+    const unit = session.urban.units.find((item) => item.id === venue.unitId);
+    const insideBuilding = session.localScene.playerPosition.buildingId === targetBuilding.id;
+    const insideVenue = insideBuilding && session.localScene.playerPosition.unitId === venue.unitId;
+    const actors = session.localScene.actors.filter((actor) => actor.visible && actor.position.buildingId === targetBuilding.id && (!actor.position.unitId || actor.position.unitId === venue.unitId));
+    return (
+      <div className="map-profile-overlay" data-no-swipe>
+        <article className={`map-profile map-profile--venue map-profile--generated-venue map-profile--${venue.category}`}>
+          <header className={`map-profile__hero map-profile__hero--venue-${venue.category}`}>
+            <div className="map-profile__hero-city generated-venue-hero" aria-hidden="true"><i/><i/><i/><i/><b>{venue.code}</b><em>{venue.unitNumber}</em></div>
+            <div className="map-profile__hero-actions"><button type="button" onClick={onClose}>‹</button><span className={open ? "is-open" : "is-closed"}>{open ? "● ОТКРЫТО" : "● ЗАКРЫТО"}</span><button type="button" className={favorite ? "is-active" : ""} onClick={onFavorite}>♡</button><button type="button" onClick={onShare}>↗</button></div>
+            <div className="map-profile__hero-copy"><span>{venueCategoryLabel(venue.category)}</span><h2>{venue.name}</h2><p>{targetBuilding.addressCode} · {venue.floor} этаж · {String(venue.openHour).padStart(2, "0")}:00—{venue.closeHour === 24 ? "24:00" : `${String(venue.closeHour).padStart(2, "0")}:00`}</p></div>
+          </header>
+          <div className="map-profile__content">
+            <section className="profile-stat-grid">
+              <div><span>Качество</span><strong>{venue.quality}%</strong><em>{bars(venue.quality)}</em></div>
+              <div><span>Безопасность</span><strong>{venue.security}%</strong><em>{bars(venue.security)}</em></div>
+              <div><span>Спрос</span><strong>{venue.demand}%</strong><em>{bars(venue.demand)}</em></div>
+              <div><span>Персонал</span><strong>{venue.staffing}%</strong><em>{bars(venue.staffing)}</em></div>
+              <div><span>Запасы</span><strong>{venue.stock}%</strong><em>{bars(venue.stock)}</em></div>
+              <div><span>Цена</span><strong>{"₵".repeat(venue.priceTier)}</strong></div>
+            </section>
+            <section className="map-profile__description"><span>ЗАВЕДЕНИЕ</span><p>{venue.tags.join(" · ")}. Реальное помещение {unit?.unitNumber ?? venue.unitNumber} внутри здания {targetBuilding.addressCode}.</p></section>
+            <section className="generated-venue__address"><div><span>Адрес</span><strong>{targetBuilding.streetName ?? targetBuilding.addressCode} {targetBuilding.streetNumber ?? ""}</strong></div><div><span>Помещение</span><strong>{venue.floor}F · {venue.unitNumber}</strong></div><div><span>Популярность</span><strong>{venue.popularity}%</strong></div><div><span>Сейчас внутри</span><strong>{actors.length}</strong></div></section>
+            <section className="map-profile__inside"><header><span>СЕЙЧАС ВНУТРИ</span><strong>{actors.length}</strong></header><div>{actors.slice(0, 6).map((actor) => <div key={actor.id}><img src={personPortrait(actor.id)} alt=""/><span>{actor.name}</span><small>{actor.activityLabel}</small></div>)}{!actors.length ? <p>Видимых посетителей нет.</p> : null}</div></section>
+            <section className="map-profile__route"><div><span>МАРШРУТ</span><strong>{routeCaption}</strong></div><button type="button" onClick={onBuildRoute}>Построить</button></section>
+          </div>
+          <footer className="map-profile__footer">
+            <button type="button" className="map-profile__primary" onClick={onStartRoute}>Пойти ко входу</button>
+            {!insideBuilding && access && access.distanceToPlayerM <= 12 ? <button type="button" onClick={() => onEnterBuilding(targetBuilding.id)}>Войти в здание</button> : null}
+            {insideBuilding && !insideVenue && session.localScene.playerPosition.floor === venue.floor ? <button type="button" disabled={!open} onClick={() => onEnterUnit(venue.unitId)}>Войти в заведение</button> : null}
+            {insideBuilding && !insideVenue && session.localScene.playerPosition.floor !== venue.floor ? <button type="button" onClick={() => onNotice(`Заведение находится на ${venue.floor} этаже`)}>Этаж {venue.floor}</button> : null}
+            {insideVenue ? <button type="button" onClick={onLeaveUnit}>Выйти в коридор</button> : null}
+            {!insideBuilding && (!access || access.distanceToPlayerM > 12) ? <button type="button" onClick={() => onNotice("Сначала подойди ко входу")}>Войти</button> : null}
+          </footer>
+        </article>
+      </div>
+    );
+  }
 
   if (location) {
     const open = isLocationOpen(location, session.timestamp);
@@ -152,6 +200,7 @@ export function MapProfileOverlay({
     const access = session.buildingAccess.buildingEntries.find((item) => item.buildingId === targetBuilding.id);
     const inside = session.localScene.playerPosition.buildingId === targetBuilding.id;
     const residents = session.localScene.actors.filter((actor) => actor.visible && actor.position.buildingId === targetBuilding.id);
+    const buildingVenues = session.urban.venues.filter((venue) => venue.buildingId === targetBuilding.id && venue.active).sort((left, right) => left.floor - right.floor || right.mapPriority - left.mapPriority);
     return (
       <div className="map-profile-overlay" data-no-swipe>
         <article className="map-profile map-profile--building">
@@ -172,6 +221,8 @@ export function MapProfileOverlay({
             </section>
 
             <FloorGrid building={targetBuilding} session={session} selectedFloor={selectedFloor} onSelectFloor={setSelectedFloor} onMoveFloor={onMoveFloor} />
+
+            {buildingVenues.length ? <section className="building-profile__venues"><header><span>ЗАВЕДЕНИЯ ВНУТРИ</span><strong>{buildingVenues.length}</strong></header><div>{buildingVenues.slice(0, 8).map((venue) => <article key={venue.id}><strong>{venue.name}</strong><small>{venueCategoryLabel(venue.category)} · {venue.floor}F · {venue.unitNumber}</small></article>)}</div></section> : null}
 
             <section className="map-profile__inside"><header><span>РЯДОМ СЕЙЧАС</span><strong>{residents.length}</strong></header><div>{residents.slice(0, 7).map((actor) => <div key={actor.id}><img src={personPortrait(actor.id)} alt="" /><span>{actor.name}</span><small>{actor.position.floor ? `${actor.position.floor} этаж` : actor.activityLabel}</small></div>)}{!residents.length ? <p>Видимых жильцов нет.</p> : null}</div></section>
           </div>
