@@ -12,6 +12,7 @@ const mapTopBar = read("src/app/map/MapTopBar.tsx");
 const mapSheet = read("src/app/map/MapSelectionSheet.tsx");
 const mapProfile = read("src/app/map/MapProfileOverlay.tsx");
 const globalMap = read("src/app/map/GlobalCityMap.tsx");
+const globalGeometry = read("src/app/map/globalMapGeometry.ts");
 const localMap = read("src/app/map/LocalSectorMap.tsx");
 const mapUi = read("src/app/map/mapUi.ts");
 const mapCss = ["src/ui/theme/map.css", "src/ui/theme/city-map.css", "src/ui/theme/city-map-render.css", "src/ui/theme/city-profiles.css", "src/ui/theme/building-interiors.css"].map(read).join("\n");
@@ -29,7 +30,7 @@ check("map is an immersive full stage", mapScreen.includes("map-screen--immersiv
 check("map uses functional city street and building hierarchy", mapScreen.includes("<MapTopBar") && mapScreen.includes("<GlobalCityMap") && mapScreen.includes("<LocalSectorMap") && mapScreen.includes("<BuildingInteriorMap") && mapTopBar.includes("onMode") && mapTopBar.includes("Город") && mapTopBar.includes("Улица") && mapTopBar.includes("Здание"));
 check("map inspector and full profiles are separate components", mapScreen.includes("<MapSelectionSheet") && mapScreen.includes("<MapProfileOverlay") && mapSheet.includes("map-selection-sheet--venue") && mapProfile.includes("map-profile--building"));
 check("map layers are functional filters", mapUi.includes("GLOBAL_LAYERS") && mapUi.includes("LOCAL_LAYERS") && mapScreen.includes("setGlobalLayer") && mapScreen.includes("setLocalLayer") && mapScreen.includes("locationMatchesLayer"));
-check("global map uses real sector geometry", globalMap.includes("drawDistrictBoundary") && globalMap.includes("session.metropolitan.sectors") && !globalMap.includes("DISTRICT_CLIPS"));
+check("global map uses real sector geometry", globalMap.includes("boundaryLoops(session.metropolitan.sectors") && globalMap.includes("roundedLoopPath") && globalGeometry.includes("export function boundaryLoops") && globalGeometry.includes("sector.xIndex") && !globalMap.includes("DISTRICT_CLIPS"));
 check("local map selects buildings", localMap.includes('kind: "building"') && localMap.includes("onSelect({ kind: \"building\", building })"));
 check("local map selects stops", localMap.includes('kind: "stop"') && localMap.includes("onSelect({ kind: \"stop\", stop })"));
 check("local map selects streets", localMap.includes('kind: "street"') && localMap.includes("onSelect({ kind: \"street\", segment })"));

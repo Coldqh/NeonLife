@@ -180,3 +180,100 @@
 .reduce-motion .local-map__vehicle { transition: none; }
 .reduce-motion .local-map__incident-pulse,
 .reduce-motion .local-map__vehicle--responding rect { animation: none; }
+
+/* v0.39.1 — readable city and street hierarchy */
+.map-viewport .map-scale,
+.map-viewport .local-map__scale {
+  top: 146px;
+  left: 14px;
+  border-color: rgba(124, 158, 190, .13);
+  background: rgba(3, 8, 14, .72);
+  color: rgba(203, 217, 234, .68);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .24);
+}
+.map-viewport .map-controls { top: 146px; right: 14px; }
+.map-viewport .map-controls button { width: 38px; height: 38px; border-radius: 10px; clip-path: none; background: rgba(4, 9, 16, .82); }
+.global-map--city canvas { background: #02060a; }
+.local-map--city svg { background: #03080d; }
+
+.local-map__block {
+  fill: rgba(11, 20, 30, .76);
+  stroke: rgba(102, 132, 161, .1);
+  stroke-width: .11;
+}
+.local-map__block--residential { fill: rgba(13, 25, 37, .82); }
+.local-map__block--mixed, .local-map__block--commercial { fill: rgba(20, 22, 35, .84); }
+.local-map__block--industrial, .local-map__block--transport, .local-map__block--utility { fill: rgba(27, 23, 30, .84); }
+.local-map__block--corporate, .local-map__block--civic { fill: rgba(12, 28, 42, .86); }
+.local-map__parcel { stroke: rgba(126, 151, 181, .1); stroke-width: .09; stroke-dasharray: .46 .42; }
+.local-map__parking { fill: rgba(245, 181, 75, .055); stroke: rgba(245, 181, 75, .18); stroke-width: .1; }
+
+.local-map__street line { vector-effect: non-scaling-stroke; }
+.local-map__road-shadow { stroke: rgba(0, 0, 0, .7); }
+.local-map__sidewalk { stroke: rgba(102, 130, 155, .31); }
+.local-map__road { stroke: #182a3a; }
+.local-map__lane-divider { fill: none; stroke: rgba(219, 230, 241, .28); stroke-width: .18; stroke-dasharray: .7 .72; }
+.local-map__street--lane .local-map__road-shadow { stroke-width: 1.25; }
+.local-map__street--lane .local-map__sidewalk { stroke-width: .86; }
+.local-map__street--lane .local-map__road { stroke-width: .54; }
+.local-map__street--local .local-map__road-shadow { stroke-width: 1.65; }
+.local-map__street--local .local-map__sidewalk { stroke-width: 1.22; }
+.local-map__street--local .local-map__road { stroke-width: .78; }
+.local-map__street--collector .local-map__road-shadow { stroke-width: 2.35; }
+.local-map__street--collector .local-map__sidewalk { stroke: rgba(91, 139, 175, .42); stroke-width: 1.82; }
+.local-map__street--collector .local-map__road { stroke: #29445b; stroke-width: 1.2; }
+.local-map__street--arterial .local-map__road-shadow { stroke-width: 3.05; }
+.local-map__street--arterial .local-map__sidewalk { stroke: rgba(74, 147, 196, .48); stroke-width: 2.42; }
+.local-map__street--arterial .local-map__road { stroke: #355d78; stroke-width: 1.66; }
+.local-map__street:hover .local-map__road,
+.local-map__street.is-selected .local-map__road { stroke: #ff4a63; }
+.local-map__street.is-selected .local-map__sidewalk { stroke: rgba(255, 73, 98, .42); }
+.local-map__street-label { font-size: 1.25px; fill: rgba(222, 231, 242, .58); stroke-width: .62px; letter-spacing: .08em; }
+
+.local-map__building-shadow { fill: rgba(0, 0, 0, .82); }
+.local-map__building { fill: #111d2b; stroke: rgba(151, 173, 200, .22); stroke-width: .18; }
+.local-map__building--residential { fill: #152333; }
+.local-map__building--mixed { fill: #1d2131; }
+.local-map__building--retail, .local-map__building--entertainment { fill: #251824; stroke: rgba(255, 85, 111, .3); }
+.local-map__building--office { fill: #10283a; stroke: rgba(74, 155, 214, .28); }
+.local-map__building--industrial, .local-map__building--warehouse { fill: #282127; stroke: rgba(237, 146, 80, .22); }
+.local-map__building--medical { fill: #201932; stroke: rgba(187, 112, 255, .38); }
+.local-map__building--transport { fill: #102d34; stroke: rgba(67, 211, 219, .38); }
+.local-map__building--civic, .local-map__building--education { fill: #17283a; stroke: rgba(97, 143, 205, .28); }
+.local-map__roof-grid { opacity: .42; }
+.local-map__roof-details rect { fill: rgba(4, 8, 13, .55); stroke: rgba(196, 210, 228, .14); stroke-width: .1; }
+.local-map__building-selection { fill: none; stroke: #ff4b64; stroke-width: .48; filter: drop-shadow(0 0 1.4px rgba(255, 48, 77, .75)); pointer-events: none; }
+.local-map__building-wrap:hover .local-map__building,
+.local-map__building-wrap.is-selected .local-map__building { stroke: #ff4b64; stroke-width: .42; filter: drop-shadow(0 0 1px rgba(255, 48, 77, .55)); }
+.local-map__building-label { font-size: 1.15px; fill: rgba(244, 247, 252, .88); stroke-width: .5px; }
+
+.local-map__entrance line { stroke: rgba(230, 236, 246, .34); stroke-width: .16; stroke-dasharray: .45 .4; }
+.local-map__entrance circle { fill: #fff; stroke: #ff4b64; stroke-width: .22; filter: drop-shadow(0 0 .8px rgba(255, 48, 77, .6)); }
+.local-map__entrance--service circle { fill: #ffc35d; stroke: #101720; }
+.local-map__crossing rect { fill: rgba(3, 8, 13, .86); }
+.local-map__crossing path { stroke: rgba(235, 241, 248, .56); stroke-width: .18; }
+
+.local-map__poi path { fill: rgba(5, 11, 18, .96); stroke-width: .45; }
+.local-map__poi text { font-size: 2px; }
+.local-map__poi-label rect { fill: rgba(3, 8, 14, .94); stroke-width: .15; }
+.local-map__poi-label text { font-size: 1.06px; }
+.local-map__stop circle { fill: rgba(4, 11, 18, .96); stroke-width: .42; }
+.local-map__stop text { font-size: 1.8px; }
+
+.local-map__actor circle { stroke-width: .2; }
+.local-map__actor path { stroke-width: .28; }
+.local-map__actor text, .local-map__vehicle text { font-size: 1.05px; }
+.local-map__vehicle rect { stroke-width: .2; }
+.local-map__player-ring { fill: rgba(39, 150, 230, .15) !important; stroke: #57baff !important; stroke-width: .44 !important; }
+.local-map__player-core { fill: #f5fbff !important; stroke: #57baff !important; stroke-width: .22 !important; }
+.local-map__player path { fill: #75caff; stroke: #07131d; stroke-width: .15; }
+.local-map__point circle { fill: rgba(255, 48, 77, .14); }
+.local-map__route-base { stroke: rgba(255, 255, 255, .13); stroke-width: .92; }
+.local-map__route-remaining { stroke-width: .48; stroke-dasharray: 1.35 .72; }
+.local-map__route-target { stroke-width: .35; }
+
+@media (max-width: 760px) {
+  .map-viewport .map-scale, .map-viewport .local-map__scale { top: 150px; left: 9px; }
+  .map-viewport .map-controls { top: 150px; right: 9px; }
+  .map-viewport .map-controls button { width: 35px; height: 35px; }
+}

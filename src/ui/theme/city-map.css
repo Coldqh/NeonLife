@@ -236,3 +236,50 @@
   .incident-sheet__signal i { width: 46px; height: 46px; font-size: 27px; }
   .map-selection-sheet--incident .venue-sheet__metrics span:nth-child(n+3) { display: none; }
 }
+
+/* v0.39.1 — map visual recovery */
+.map-hud {
+  min-height: 62px;
+  grid-template-columns: minmax(160px, 1fr) auto minmax(160px, 1fr);
+  gap: 12px;
+  padding: max(8px, env(safe-area-inset-top)) 14px 8px;
+  background: linear-gradient(180deg, rgba(2, 5, 10, .985), rgba(3, 7, 13, .9));
+}
+.map-hud__identity strong { font-size: 19px; line-height: 23px; letter-spacing: .045em; }
+.map-hud__identity span { font-size: 9px; line-height: 13px; }
+.map-hud__tabs { grid-template-columns: repeat(3, minmax(82px, 1fr)); }
+.map-hud__tabs button { min-height: 40px; padding: 0 13px; font-size: 11px; }
+.map-hud__status { gap: 8px; }
+.map-hud__status button { width: 34px; height: 34px; }
+.map-layer-strip {
+  top: 68px;
+  left: 14px;
+  right: 14px;
+  width: auto;
+  max-width: 860px;
+  transform: none;
+  padding: 6px;
+  gap: 6px;
+  border-color: rgba(132, 149, 178, .11);
+  background: rgba(4, 9, 16, .76);
+}
+.map-layer-strip button { min-height: 34px; padding: 0 11px; font-size: 10px; }
+.global-district-legend { display: none !important; }
+.map-selection-sheet {
+  width: min(760px, calc(100% - 24px));
+  border-radius: 16px;
+  clip-path: none;
+}
+.map-selection-sheet--venue { grid-template-columns: 178px minmax(0, 1fr); }
+.map-selection-sheet__thumb { border-radius: 12px; clip-path: none; }
+.map-action, .map-route-start { border-radius: 9px; clip-path: none; }
+
+@media (max-width: 760px) {
+  .map-hud { min-height: 56px; grid-template-columns: minmax(0, 1fr) auto; padding: max(7px, env(safe-area-inset-top)) 8px 7px; }
+  .map-hud__identity strong { font-size: 16px; line-height: 20px; }
+  .map-hud__tabs { order: 3; grid-column: 1 / -1; }
+  .map-hud__tabs button { min-height: 34px; }
+  .map-layer-strip { top: 96px; left: 8px; right: 8px; padding: 5px; }
+  .map-layer-strip button { min-height: 31px; padding-inline: 9px; }
+  .map-selection-sheet--venue { grid-template-columns: 96px minmax(0, 1fr); }
+}

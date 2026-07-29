@@ -172,6 +172,23 @@ export function MapScreen({
     }).sort((left, right) => left.distanceToPlayerM - right.distanceToPlayerM).slice(0, 16);
   }, [localNodes, localTopology.segments, playerStreetId, selectedSector.id, session.localScene.playerPosition, session.vehicles.vehicles]);
 
+  const nearbyActorIds = useMemo(() => new Set(nearbyActors.map((actor) => actor.id)), [nearbyActors]);
+  const nearbyVehicleIds = useMemo(() => new Set(nearbyVehicles.map((vehicle) => vehicle.id)), [nearbyVehicles]);
+  const nearbyPedestrians = useMemo(() => session.streetScene.pedestrians.filter((pedestrian) => nearbyActorIds.has(pedestrian.actorId)), [nearbyActorIds, session.streetScene.pedestrians]);
+  const nearbyTraffic = useMemo(() => session.streetScene.traffic.filter((vehicle) => nearbyVehicleIds.has(vehicle.vehicleId)), [nearbyVehicleIds, session.streetScene.traffic]);
+  const nearbyCrossings = useMemo(() => {
+    const player = session.localScene.playerPosition;
+    if (player.state !== "outside" || player.sectorId !== selectedSector.id) return [];
+    return session.streetScene.crossings.filter((crossing) => Math.hypot(crossing.xM - player.xM, crossing.yM - player.yM) <= 150);
+  }, [selectedSector.id, session.localScene.playerPosition, session.streetScene.crossings]);
+  const visibleIncidents = useMemo(() => {
+    const player = session.localScene.playerPosition;
+    const sectorIncidents = session.streetScene.incidents.filter((incident) => incident.sectorId === selectedSector.id && incident.status !== "resolved");
+    if (localLayer === "incidents") return sectorIncidents;
+    if (player.state !== "outside" || player.sectorId !== selectedSector.id) return [];
+    return sectorIncidents.filter((incident) => Math.hypot(incident.xM - player.xM, incident.yM - player.yM) <= 260);
+  }, [localLayer, selectedSector.id, session.localScene.playerPosition, session.streetScene.incidents]);
+
 
   useEffect(() => {
     if (insideBuilding) { setMode("interior"); setSelection(null); setProfileOpen(false); }
@@ -332,24 +349,18 @@ export function MapScreen({
 
       <div className="map-viewport">
         {mode === "global" ? (
-          <>
-            <GlobalCityMap
-              session={session}
-              selectedSectorId={selection?.kind === "sector" ? selection.sector.id : undefined}
-              selectedDistrictId={selection?.kind === "district" ? selection.district.id : selectedDistrict?.id}
-              selectedPoint={null}
-              layers={globalLayers}
-              focusDistrictId={selection?.kind === "district" ? selection.district.id : selectedDistrict?.id}
-              focusSectorId={selection?.kind === "sector" ? selection.sector.id : undefined}
-              focusRevision={globalFocusRevision}
-              onSelectSector={chooseSector}
-              onSelectDistrict={chooseDistrict}
-            />
-            <aside className="global-district-legend" data-no-swipe>
-              <span>РАЙОНЫ</span>
-              {session.metropolitan.mapDistricts.slice(0, 8).map((district, index) => <button type="button" key={district.id} className={selection?.kind === "district" && selection.district.id === district.id ? "is-active" : ""} onClick={() => chooseDistrict(district)}><i data-index={index % 8} /><span>{district.name}</span></button>)}
-            </aside>
-          </>
+          <GlobalCityMap
+            session={session}
+            selectedSectorId={selection?.kind === "sector" ? selection.sector.id : undefined}
+            selectedDistrictId={selection?.kind === "district" ? selection.district.id : selectedDistrict?.id}
+            selectedPoint={null}
+            layers={globalLayers}
+            focusDistrictId={selection?.kind === "district" ? selection.district.id : selectedDistrict?.id}
+            focusSectorId={selection?.kind === "sector" ? selection.sector.id : undefined}
+            focusRevision={globalFocusRevision}
+            onSelectSector={chooseSector}
+            onSelectDistrict={chooseDistrict}
+          />
         ) : mode === "interior" && insideBuilding ? (
           <BuildingInteriorMap
             session={session}
@@ -372,10 +383,10 @@ export function MapScreen({
             showStops={localLayer === "all" || localLayer === "transport"}
             actors={localLayer === "all" || localLayer === "people" ? nearbyActors : []}
             vehicles={localLayer === "all" || localLayer === "cars" ? nearbyVehicles : []}
-            pedestrians={streetSceneVisible && (localLayer === "all" || localLayer === "people") ? session.streetScene.pedestrians : []}
-            traffic={streetSceneVisible && (localLayer === "all" || localLayer === "cars") ? session.streetScene.traffic : []}
-            incidents={streetSceneVisible && (localLayer === "all" || localLayer === "incidents") ? session.streetScene.incidents.filter((item) => item.sectorId === selectedSector.id) : []}
-            crossings={streetSceneVisible ? session.streetScene.crossings : []}
+            pedestrians={streetSceneVisible && (localLayer === "all" || localLayer === "people") ? nearbyPedestrians : []}
+            traffic={streetSceneVisible && (localLayer === "all" || localLayer === "cars") ? nearbyTraffic : []}
+            incidents={streetSceneVisible && (localLayer === "all" || localLayer === "incidents") ? visibleIncidents : []}
+            crossings={streetSceneVisible ? nearbyCrossings : []}
             focusRevision={localFocusRevision}
             onSelect={chooseLocal}
           />

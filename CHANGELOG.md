@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.39.1 — Map Visual Recovery
+
+- rebuilt global district silhouettes from real sector boundaries instead of visible grid cells;
+- removed the district sidebar that covered the map;
+- added visual hierarchy for coastline, district fill, roads, transit and selected areas;
+- added local-map levels of detail for roads, parcels, parking, entrances, labels and POIs;
+- restricted pedestrians, vehicles, crossings and ordinary incident display to the player’s physical vicinity;
+- reduced marker clutter and rebuilt building roofs, road lanes, route and player presentation;
+- updated map regression checks against the active renderer architecture.
+
 ## 0.39.0 — Living People
 
 - added deterministic NPC personalities and distinct speech behavior;
