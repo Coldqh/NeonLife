@@ -8,6 +8,7 @@ import { GameShell } from "./shell/GameShell";
 import { ProfileScreen } from "./screens/ProfileScreen";
 import { MapScreen } from "./screens/MapScreen";
 import { NearbyScreen } from "./screens/NearbyScreen";
+import { WorkScreen } from "./screens/WorkScreen";
 import { TransitJourneyScreen } from "./screens/TransitJourneyScreen";
 import { LocalMovementScreen } from "./screens/LocalMovementScreen";
 import { SettingsOverlay } from "./overlays/SettingsOverlay";
@@ -56,6 +57,7 @@ export default function App() {
   const [screen, setScreen] = useState<GameScreen>("map");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [requestedLocationId, setRequestedLocationId] = useState<string | undefined>();
+  const [requestedVenueId, setRequestedVenueId] = useState<string | undefined>();
   const [notice, setNotice] = useState<NoticeState | null>(null);
   const noticeTimer = useRef<number | null>(null);
   const save = useWorldSave();
@@ -94,6 +96,13 @@ export default function App() {
 
   function routeToLocation(locationId: string): void {
     setRequestedLocationId(locationId);
+    setRequestedVenueId(undefined);
+    setScreen("map");
+  }
+
+  function openVenueOnMap(venueId: string): void {
+    setRequestedVenueId(venueId);
+    setRequestedLocationId(undefined);
     setScreen("map");
   }
 
@@ -187,8 +196,8 @@ export default function App() {
         {screen === "profile" ? <ProfileScreen session={session} /> : null}
         {screen === "map" ? (
           <MapScreen
-            session={session} requestedLocationId={requestedLocationId}
-            onRequestedLocationHandled={() => setRequestedLocationId(undefined)} onSettings={() => setSettingsOpen(true)}
+            session={session} requestedLocationId={requestedLocationId} requestedVenueId={requestedVenueId}
+            onRequestedLocationHandled={() => setRequestedLocationId(undefined)} onRequestedVenueHandled={() => setRequestedVenueId(undefined)} onSettings={() => setSettingsOpen(true)}
             onTravel={travel} onWalk={walkTo}
             onEnterBuilding={(buildingId) => setSession((current) => enterLocalBuilding(current, buildingId))}
             onLeaveBuilding={() => setSession((current) => leaveLocalBuilding(current))}
@@ -201,6 +210,7 @@ export default function App() {
             onStreetIncidentAction={(incidentId, action) => setSession((current) => actOnStreetIncident(current, incidentId, action))}
           />
         ) : null}
+        {screen === "work" ? <WorkScreen session={session} onOpenVenue={openVenueOnMap} /> : null}
         {screen === "nearby" ? (
           <NearbyScreen
             session={session}

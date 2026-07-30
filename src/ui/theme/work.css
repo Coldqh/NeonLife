@@ -1,0 +1,105 @@
+.work-screen { display: grid; gap: 18px; }
+.work-heading { align-items: stretch; }
+.work-heading > div:first-child > span,
+.work-board > header span,
+.work-contract-card header span { color: var(--nl-accent); font-size: 10px; font-weight: 800; letter-spacing: .14em; }
+.work-heading h1 { margin: 4px 0 5px; font-size: clamp(28px, 6vw, 42px); }
+.work-heading p { margin: 0; color: var(--nl-muted); }
+.work-heading__income { min-width: 180px; display: grid; align-content: center; justify-items: end; padding: 14px 16px; border: 1px solid var(--nl-line); background: var(--nl-surface); }
+.work-heading__income span { color: var(--nl-muted); font-size: 9px; letter-spacing: .12em; }
+.work-heading__income strong { font-size: 24px; }
+.work-heading__income small { color: var(--nl-muted); }
+.work-skills { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.work-skills article { padding: 12px; border: 1px solid var(--nl-line); background: var(--nl-surface); }
+.work-skills span { display: block; color: var(--nl-muted); font-size: 10px; text-transform: uppercase; }
+.work-skills strong { display: block; margin: 4px 0 8px; font-size: 21px; }
+.work-skills i,
+.work-shift-progress i { display: block; height: 4px; overflow: hidden; background: rgba(255,255,255,.06); }
+.work-skills i b,
+.work-shift-progress i b { display: block; height: 100%; background: #42df8b; }
+.work-contract-card { padding: 18px; border: 1px solid rgba(66, 223, 139, .28); background: linear-gradient(145deg, rgba(14, 34, 28, .92), rgba(7, 13, 20, .96)); box-shadow: 0 18px 50px rgba(0,0,0,.24); }
+.work-contract-card > header { display: flex; justify-content: space-between; gap: 14px; }
+.work-contract-card h2 { margin: 4px 0; }
+.work-contract-card p { margin: 0; color: var(--nl-muted); }
+.work-contract-card > header > strong { height: fit-content; color: #42df8b; font-size: 10px; letter-spacing: .08em; }
+.work-contract-card > header > strong.is-warning { color: #ffb347; }
+.work-contract-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 16px 0; }
+.work-contract-grid div { padding: 10px; border: 1px solid rgba(255,255,255,.07); background: rgba(0,0,0,.18); }
+.work-contract-grid span { display: block; color: var(--nl-muted); font-size: 9px; text-transform: uppercase; }
+.work-contract-grid b { display: block; margin-top: 4px; font-size: 13px; }
+.work-shift-progress { display: grid; gap: 7px; margin-bottom: 14px; }
+.work-shift-progress small { color: var(--nl-muted); }
+.work-primary { width: 100%; min-height: 46px; display: flex; align-items: center; justify-content: center; gap: 8px; background: #237a50; color: white; }
+.work-empty-contract { display: flex; align-items: center; gap: 14px; padding: 18px; border: 1px dashed var(--nl-line-strong); color: var(--nl-muted); }
+.work-empty-contract strong,
+.work-empty-contract span { display: block; }
+.work-empty-contract strong { color: var(--nl-text); }
+.work-board { border: 1px solid var(--nl-line); background: var(--nl-surface); }
+.work-board > header { display: flex; align-items: end; justify-content: space-between; gap: 16px; padding: 16px; border-bottom: 1px solid var(--nl-line); }
+.work-board h2 { margin: 3px 0 0; }
+.work-board nav { display: flex; flex-wrap: wrap; gap: 5px; }
+.work-board nav button { padding: 7px 10px; border: 1px solid var(--nl-line); color: var(--nl-muted); }
+.work-board nav button.is-active { border-color: #42df8b; color: #7ff0ad; background: rgba(66,223,139,.08); }
+.work-vacancy-list { display: grid; }
+.work-vacancy-list article { display: grid; grid-template-columns: 48px minmax(0, 1fr) minmax(130px, auto); gap: 12px; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--nl-line); }
+.work-vacancy-list article.is-offered { background: rgba(66,223,139,.06); }
+.work-vacancy-icon { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid rgba(66,223,139,.24); color: #42df8b; background: rgba(66,223,139,.06); }
+.work-vacancy-main span,
+.work-vacancy-main strong,
+.work-vacancy-main small,
+.work-vacancy-main em { display: block; }
+.work-vacancy-main span { color: var(--nl-muted); font-size: 10px; text-transform: uppercase; }
+.work-vacancy-main strong { margin: 3px 0; }
+.work-vacancy-main small { color: var(--nl-muted); }
+.work-vacancy-main em { margin-top: 5px; color: #ffb347; font-style: normal; font-size: 11px; }
+.work-vacancy-main em.is-ready { color: #42df8b; }
+.work-vacancy-pay { display: grid; justify-items: end; gap: 4px; }
+.work-vacancy-pay span { color: var(--nl-muted); font-size: 10px; }
+.work-vacancy-pay button { padding: 8px 12px; border: 1px solid rgba(66,223,139,.3); color: #7ff0ad; }
+.work-vacancy-pay button:disabled { opacity: .35; }
+.work-board-empty { padding: 24px; color: var(--nl-muted); }
+
+.venue-work-panel { margin-top: 12px; padding: 14px; border: 1px solid rgba(66,223,139,.25); background: rgba(6, 22, 17, .72); }
+.venue-work-panel > header { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.venue-work-panel > header span { color: #42df8b; font-size: 9px; font-weight: 800; letter-spacing: .12em; }
+.venue-work-panel > header h3 { margin: 3px 0 0; }
+.venue-work-panel > header > strong { color: #42df8b; font-size: 10px; text-transform: uppercase; }
+.venue-work-panel > header > strong.is-warning { color: #ffb347; }
+.venue-work-offer,
+.venue-work-contract { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.venue-work-offer > div,
+.venue-work-contract > div { padding: 9px; border: 1px solid rgba(255,255,255,.07); background: rgba(0,0,0,.18); }
+.venue-work-offer span,
+.venue-work-contract span { display: block; color: var(--nl-muted); font-size: 9px; text-transform: uppercase; }
+.venue-work-offer b,
+.venue-work-contract b { display: block; margin-top: 3px; }
+.venue-work-offer > button,
+.venue-work-contract > button,
+.venue-work-finish { grid-column: 1 / -1; min-height: 42px; background: #237a50; color: #fff; }
+.venue-work-offer p { grid-column: 1 / -1; margin: 0; padding: 9px; }
+.venue-work-offer p.is-accepted { color: #7ff0ad; background: rgba(66,223,139,.08); }
+.venue-work-offer p.is-rejected { color: #ff8a9b; background: rgba(255,75,98,.08); }
+.venue-work-shift__summary { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 10px; margin-bottom: 8px; background: rgba(66,223,139,.08); }
+.venue-work-shift__summary span { color: #42df8b; font-size: 10px; font-weight: 800; }
+.venue-work-shift__summary strong { grid-row: span 2; align-self: center; font-size: 24px; }
+.venue-work-shift__summary small { color: var(--nl-muted); }
+.venue-work-task-list { display: grid; gap: 6px; }
+.venue-work-task-list article { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 10px; border: 1px solid rgba(255,255,255,.07); background: rgba(0,0,0,.18); }
+.venue-work-task-list article.is-completed { opacity: .62; }
+.venue-work-task-list strong,
+.venue-work-task-list span,
+.venue-work-task-list small { display: block; }
+.venue-work-task-list span,
+.venue-work-task-list small { color: var(--nl-muted); }
+.venue-work-task-list button { min-width: 88px; padding: 8px; border: 1px solid rgba(66,223,139,.28); color: #7ff0ad; }
+.venue-work-finish { width: 100%; margin-top: 8px; }
+
+@media (max-width: 720px) {
+  .work-heading { display: grid; }
+  .work-heading__income { justify-items: start; }
+  .work-skills { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .work-contract-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .work-board > header { align-items: stretch; flex-direction: column; }
+  .work-vacancy-list article { grid-template-columns: 42px minmax(0, 1fr); }
+  .work-vacancy-pay { grid-column: 2; justify-items: start; }
+}

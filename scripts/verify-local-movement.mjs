@@ -28,7 +28,7 @@ const css = ["src/ui/theme/map.css", "src/ui/theme/city-map.css", "src/ui/theme/
 const movementCss = read("src/ui/theme/local-movement.css");
 const pkg = JSON.parse(read("package.json"));
 
-assert(pkg.version === "0.39.3", "package version is not 0.39.3");
+assert(Number(pkg.version.split(".")[1]) >= 39, `package version ${pkg.version} predates the local-movement baseline`);
 assert(pkg.scripts["test:movement"], "movement verification script is not registered");
 assert(stateTypes.includes("localMovement?: LocalMovementState"), "saved session has no optional local movement state");
 assert(system.includes("function findPath"), "street graph pathfinder is missing");

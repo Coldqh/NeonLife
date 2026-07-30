@@ -1,5 +1,6 @@
 import { createWorldSession } from "../src/world/generation/createWorld";
 import { migrateEnvelope } from "../src/core/saves/migrations";
+import { SAVE_SCHEMA_VERSION } from "../src/core/saves/types";
 import {
   acceptCourierOrder,
   buyFoodAtCurrentLocation,
@@ -141,7 +142,7 @@ delete rawEnvelope.payload.life.food.carried;
 delete rawEnvelope.payload.life.food.carryingCapacityGrams;
 delete rawEnvelope.payload.jobs.courier.carriedCargo;
 const migrated = migrateEnvelope(rawEnvelope, "slot-1");
-assert(migrated?.schemaVersion === 34, "save was not migrated to schema 34");
+assert(migrated?.schemaVersion === SAVE_SCHEMA_VERSION, `save was not migrated to schema ${SAVE_SCHEMA_VERSION}`);
 assert(Array.isArray(migrated.payload.life.food.carried), "migration did not create carried food inventory");
 assert(migrated.payload.life.food.carryingCapacityGrams === 6_500, "migration did not create carrying capacity");
 assert(migrated.payload.jobs.courier.carriedCargo?.orderId === legacyOrder.id, "migration did not reconstruct carried courier cargo");

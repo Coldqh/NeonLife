@@ -8,6 +8,7 @@ import type { DistrictPulseState } from "../city/districtPulse";
 import type { FoodState } from "../../gameplay/food/foodSystem";
 import type { HousingState } from "../../gameplay/housing/housingSystem";
 import type { CourierState } from "../../gameplay/jobs/courier/courierSystem";
+import type { PlayerWorkState } from "../../gameplay/jobs/work/types";
 import type { PressureState } from "../../gameplay/pressure/types";
 import type { LocalEconomyState } from "../../gameplay/economy/types";
 import type { PopulationState } from "../../simulation/population/types";
@@ -146,5 +147,6 @@ export interface GameSession {
   life: LifeState;
   jobs: {
     courier: CourierState;
+    work: PlayerWorkState;
   };
 }

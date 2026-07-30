@@ -7,6 +7,7 @@ import { createInitialPlayer } from "../../gameplay/player/demoPlayer";
 import { createInitialFoodState } from "../../gameplay/food/foodSystem";
 import { createInitialHousing } from "../../gameplay/housing/housingSystem";
 import { createInitialCourierState } from "../../gameplay/jobs/courier/courierSystem";
+import { createPlayerWorkState } from "../../gameplay/jobs/work/workSystem";
 import { createLocalEconomy } from "../../gameplay/economy/localEconomy";
 import { createPressureState } from "../../gameplay/pressure/pressureSystem";
 import { createPrimaryContact } from "../../people/demoNpc";
@@ -477,7 +478,13 @@ export function createWorldSession(seed: string): GameSession {
       lastSleepAt: null
     },
     jobs: {
-      courier: createInitialCourierState(seed, INITIAL_GAME_TIMESTAMP, locations, people.people, economy.businesses)
+      courier: createInitialCourierState(seed, INITIAL_GAME_TIMESTAMP, locations, people.people, economy.businesses),
+      work: createPlayerWorkState({
+        seed,
+        timestamp: INITIAL_GAME_TIMESTAMP,
+        venues: urban.venueOperations.registry.map((entry) => entry.venue),
+        venueOperations: urban.venueOperations
+      })
     }
   };
 }

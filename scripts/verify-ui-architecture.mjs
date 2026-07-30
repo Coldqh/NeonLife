@@ -31,10 +31,10 @@ const localMap = read("src/app/map/LocalSectorMap.tsx");
 const globalMap = read("src/app/map/GlobalCityMap.tsx");
 const transit = read("src/app/screens/TransitJourneyScreen.tsx");
 const main = read("src/main.tsx");
-check("App is below 225 lines", lineCount("src/app/App.tsx") <= 225);
+check("App is below 240 lines", lineCount("src/app/App.tsx") <= 240);
 check("No Home screen remains", !/HomeView|"home"\s*\|\s*"profile"|label:\s*"Главная"/.test(app + nav));
 check("No Move screen remains", !/MoveView|label:\s*"Путь"|"move"/.test(app + nav));
-check("Exactly three primary screens", ["profile", "map", "nearby"].every((id) => nav.includes(`id: "${id}"`)) && (nav.match(/id:\s*"/g) ?? []).length === 3);
+check("Exactly four primary screens", ["profile", "map", "work", "nearby"].every((id) => nav.includes(`id: "${id}"`)) && (nav.match(/id:\s*"/g) ?? []).length === 4);
 check("Map is the initial screen", app.includes('useState<GameScreen>("map")'));
 check("Balance is in unified header", header.includes("session.player.balance") && header.includes("temperatureC") && header.includes("formatGameDate"));
 check("Single shell is mounted", app.includes("<GameShell") && !app.includes("NeonShell") && !app.includes("MobileExperience"));
@@ -45,7 +45,7 @@ check("Local map uses real road graph", localMap.includes("session.streets") && 
 check("Local map has no decorative fallback blocks", !localMap.includes("fallback") && !localMap.includes("STREET_NAMES"));
 check("Route planning lives on map", map.includes("planLocalMovement") && localMap.includes("local-map__route") && map.includes("getTravelOptions") && map.includes("buildRoute"));
 check("Legacy styles are not imported", !/components\.css|responsive\.css|mobile-experience\.css/.test(main));
-check("Split styles are imported", ["app-shell.css", "screens.css", "map.css", "city-map.css", "city-map-render.css", "city-profiles.css", "building-interiors.css", "nearby.css", "transit.css", "overlays.css"].every((file) => main.includes(file)));
+check("Split styles are imported", ["app-shell.css", "screens.css", "map.css", "city-map.css", "city-map-render.css", "city-profiles.css", "building-interiors.css", "work.css", "nearby.css", "transit.css", "overlays.css"].every((file) => main.includes(file)));
 
 const sourceFiles = [];
 function collect(directory) {

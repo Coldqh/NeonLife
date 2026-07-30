@@ -88,7 +88,9 @@ function citySelectionToLocal(selection: CityMapSelection | null): LocalMapSelec
 export function MapScreen({
   session,
   requestedLocationId,
+  requestedVenueId,
   onRequestedLocationHandled,
+  onRequestedVenueHandled,
   onSettings,
   onTravel,
   onWalk,
@@ -106,7 +108,9 @@ export function MapScreen({
 }: {
   session: GameSession;
   requestedLocationId?: string;
+  requestedVenueId?: string;
   onRequestedLocationHandled: () => void;
+  onRequestedVenueHandled: () => void;
   onSettings: () => void;
   onTravel: (locationId: string) => void;
   onWalk: (target: LocalMovementTargetState) => void;
@@ -213,6 +217,21 @@ export function MapScreen({
     }
     onRequestedLocationHandled();
   }, [onRequestedLocationHandled, requestedLocationId, session]);
+
+  useEffect(() => {
+    if (!requestedVenueId) return;
+    const venue = session.urban.venues.find((item) => item.id === requestedVenueId)
+      ?? session.urban.venueOperations.registry.find((entry) => entry.venue.id === requestedVenueId)?.venue;
+    const sector = venue ? session.metropolitan.sectors.find((item) => item.id === venue.sectorId) : undefined;
+    if (venue && sector) {
+      setSelectedSectorId(sector.id);
+      setSelection({ kind: "venue", venue });
+      setMode("local");
+      setLocalFocusRevision((value) => value + 1);
+      setRouteReady(false);
+    }
+    onRequestedVenueHandled();
+  }, [onRequestedVenueHandled, requestedVenueId, session.metropolitan.sectors, session.urban.venueOperations.registry, session.urban.venues]);
 
   useEffect(() => { try { localStorage.setItem("neon-life/map-favorites/v2", JSON.stringify(favorites)); } catch { /* optional */ } }, [favorites]);
   useEffect(() => { setRouteReady(false); setProfileOpen(false); }, [selectionKey(selection)]);

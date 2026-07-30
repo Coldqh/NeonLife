@@ -4,6 +4,7 @@ import type { GameSession, LocationState } from "../../world/state/types";
 import { createInitialFoodState } from "../../gameplay/food/foodSystem";
 import { createInitialHousing } from "../../gameplay/housing/housingSystem";
 import { createInitialCourierState, type CourierOrder, type CourierState } from "../../gameplay/jobs/courier/courierSystem";
+import { normalizePlayerWorkState } from "../../gameplay/jobs/work/workSystem";
 import { createHumanNetwork, getPerson, toKnownNpc } from "../../people/network/humanNetwork";
 import type { HumanNetworkState, PersonState } from "../../people/network/types";
 import { createPressureState } from "../../gameplay/pressure/pressureSystem";
@@ -702,6 +703,12 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     localScene,
     vehicles
   });
+  const work = normalizePlayerWorkState(existingJobs.work, {
+    seed,
+    timestamp,
+    venues: urban.venueOperations.registry.map((entry) => entry.venue),
+    venueOperations: urban.venueOperations
+  });
   const social = normalizeSocialState(payload.social, seed, timestamp, people, locations);
   const vehicleCrime = normalizeVehicleCrimeState(payload.vehicleCrime, timestamp);
   const kernel = advanceSimulationKernel(baseKernel, {
@@ -781,7 +788,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
       ),
       lastSleepAt: null
     },
-    jobs: { ...existingJobs, courier }
+    jobs: { ...existingJobs, courier, work }
   } as unknown as GameSession;
 
   return {

@@ -21,8 +21,8 @@ if (-not (Test-Path $Manifest)) {
 }
 
 $packageJson = Get-Content (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json
-if ($packageJson.version -ne "0.39.3") {
-  Write-Warning "Expected base version 0.39.3, found $($packageJson.version)."
+if ($packageJson.version -ne "0.39.4") {
+  Write-Warning "Expected base version 0.39.4, found $($packageJson.version)."
 }
 
 $files = Get-Content $Manifest | Where-Object {
@@ -44,17 +44,19 @@ foreach ($relativePath in $files) {
 }
 
 $updatedPackage = Get-Content (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json
-if ($updatedPackage.version -ne "0.39.4") {
-  throw "Patch copied, but package.json version is $($updatedPackage.version), expected 0.39.4"
+if ($updatedPackage.version -ne "0.40.0") {
+  throw "Patch copied, but package.json version is $($updatedPackage.version), expected 0.40.0"
 }
 
-Write-Host "NEON LIFE v0.39.4 VENUE INTEGRITY applied successfully." -ForegroundColor Green
+Write-Host "NEON LIFE v0.40.0 LIVING WORK applied successfully." -ForegroundColor Green
 
 if ($RunChecks) {
   Push-Location $ProjectRoot
   try {
     npm install
     npm run typecheck
+    npm run test:work-ui
+    npm run test:work
     npm run build
   }
   finally {

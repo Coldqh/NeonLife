@@ -81,6 +81,15 @@ import {
   getActiveCourierOrder,
   refreshCourierBoard
 } from "../jobs/courier/courierSystem";
+import {
+  advancePlayerWorkState,
+  completePlayerWorkTask,
+  finishPlayerWorkShift,
+  interviewPlayerForVacancy,
+  signPlayerWorkContract,
+  startPlayerWorkShift,
+  waitMinutesUntilShift
+} from "../jobs/work/workSystem";
 import { advanceDistrictPulse } from "../../world/city/districtPulse";
 import {
   acceptNpcRequest as acceptNpcRequestState,
@@ -183,6 +192,7 @@ interface ProgressOptions {
   worldEvents?: number;
   trackBalance?: boolean;
   balanceCounterpartyEntityId?: string;
+  balanceReason?: KernelTransactionReason;
 }
 
 export function progressLife(session: GameSession, minutes: number, options: ProgressOptions = {}): GameSession {
@@ -614,6 +624,13 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
       hunger: clamp(session.player.condition.hunger + baselineHunger + (options.hungerDelta ?? 0))
     }
   };
+  const workState = advancePlayerWorkState(session.jobs.work, {
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    timestamp: nextTimestamp,
+    venues: urbanState.venueOperations.registry.map((entry) => entry.venue),
+    venueOperations: urbanState.venueOperations
+  });
   const buildingAccessState = advanceBuildingAccessState(session.buildingAccess, {
     timestamp: nextTimestamp,
     seed: session.world.meta.seed,
@@ -650,7 +667,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
       creditEntityId: (options.balanceDelta ?? 0) < 0 ? counterpartyEntityId : session.player.id,
       resource: "credits",
       amount,
-      reason: "player-action",
+      reason: options.balanceReason ?? "player-action",
       description: options.title ?? options.activity ?? "Player balance action."
     });
   }
@@ -724,7 +741,8 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     },
     jobs: {
       ...session.jobs,
-      courier: courierState
+      courier: courierState,
+      work: workState
     },
     player: nextPlayer,
     events: [...generated, ...queued.events.reverse(), ...pulse.events.reverse(), ...session.events].slice(0, 100)
@@ -2326,6 +2344,168 @@ export function purchaseVenueOffer(session: GameSession, venueId: string, offerI
     ...progressed,
     life: { ...progressed.life, food },
     vehicles
+  };
+}
+
+
+function vacancyVenueAtPlayer(session: GameSession, vacancyId: string) {
+  const vacancy = session.jobs.work.vacancies.find((item) => item.id === vacancyId);
+  if (!vacancy) return null;
+  const venue = venueAtPlayer(session, vacancy.venueId);
+  return venue ? { vacancy, venue } : null;
+}
+
+export function interviewForPlayerWork(session: GameSession, vacancyId: string): GameSession {
+  const target = vacancyVenueAtPlayer(session, vacancyId);
+  const operation = target ? session.urban.venueOperations.operations.find((item) => item.venueId === target.venue.id) : undefined;
+  if (!target || operation?.status !== "operating") return session;
+  const work = interviewPlayerForVacancy(session.jobs.work, vacancyId, {
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    timestamp: session.timestamp,
+    venues: session.urban.venueOperations.registry.map((entry) => entry.venue),
+    venueOperations: session.urban.venueOperations,
+    playerHealth: session.player.condition.health,
+    playerFatigue: session.player.condition.fatigue,
+    playerStress: session.player.condition.stress
+  });
+  if (work === session.jobs.work) return session;
+  const application = work.applications.find((item) => item.vacancyId === vacancyId);
+  return progressLife({ ...session, jobs: { ...session.jobs, work } }, 20, {
+    category: "work",
+    title: application?.status === "accepted" ? `Собеседование пройдено: ${target.venue.name}.` : `Отказ на собеседовании: ${target.venue.name}.`,
+    detail: application?.decisionText,
+    importance: application?.status === "accepted" ? 2 : 1,
+    stressDelta: application?.status === "accepted" ? -1 : 2,
+    activity: `Собеседование: ${target.venue.name}`,
+    suppressTimeEvent: true
+  });
+}
+
+export function signPlayerEmploymentContract(session: GameSession, vacancyId: string): GameSession {
+  const target = vacancyVenueAtPlayer(session, vacancyId);
+  const operation = target ? session.urban.venueOperations.operations.find((item) => item.venueId === target.venue.id) : undefined;
+  if (!target || operation?.status !== "operating") return session;
+  const work = signPlayerWorkContract(session.jobs.work, vacancyId, session.timestamp);
+  if (work === session.jobs.work) return session;
+  const contract = work.contracts.find((item) => item.id === work.activeContractId);
+  const progressed = progressLife({
+    ...session,
+    jobs: { ...session.jobs, work },
+    urban: {
+      ...session.urban,
+      buildings: session.urban.buildings.map((building) => building.id === target.venue.buildingId ? { ...building, permanent: true } : building),
+      venues: session.urban.venues.map((venue) => venue.id === target.venue.id ? { ...venue, permanent: true } : venue),
+      venueOperations: {
+        ...session.urban.venueOperations,
+        registry: session.urban.venueOperations.registry.map((entry) => entry.venue.id === target.venue.id ? { ...entry, venue: { ...entry.venue, permanent: true } } : entry)
+      }
+    },
+    player: { ...session.player, occupation: contract?.title.toUpperCase() ?? session.player.occupation }
+  }, 8, {
+    category: "work",
+    title: `Контракт подписан: ${target.venue.name}.`,
+    detail: `${contract?.title ?? target.vacancy.title} · ₵ ${contract?.wagePerHour ?? target.vacancy.wagePerHour}/ч · следующая смена ${contract ? new Date(contract.nextShiftAt).toISOString().slice(5, 16).replace("T", " · ") : "назначается"}.`,
+    importance: 2,
+    activity: `Оформление: ${target.venue.name}`,
+    suppressTimeEvent: true
+  });
+  return { ...progressed, player: { ...progressed.player, occupation: contract?.title.toUpperCase() ?? progressed.player.occupation } };
+}
+
+export function waitForPlayerWorkShift(session: GameSession, contractId: string): GameSession {
+  const contract = session.jobs.work.contracts.find((item) => item.id === contractId);
+  if (!contract || !venueAtPlayer(session, contract.venueId)) return session;
+  const minutes = waitMinutesUntilShift(session.jobs.work, contractId, session.timestamp);
+  if (minutes === null || minutes <= 0 || minutes > 18 * 60) return session;
+  return progressLife(session, minutes, {
+    category: "work",
+    title: `Начало смены: ${contract.title}.`,
+    detail: `Ожидание на рабочем месте · ${minutes} мин.`,
+    importance: 1,
+    fatigueDelta: Math.max(0, minutes / 240),
+    activity: `Ожидание смены: ${contract.title}`,
+    suppressTimeEvent: true
+  });
+}
+
+export function startPlayerEmploymentShift(session: GameSession, contractId: string): GameSession {
+  const contract = session.jobs.work.contracts.find((item) => item.id === contractId);
+  const venue = contract ? venueAtPlayer(session, contract.venueId) : undefined;
+  const operation = venue ? session.urban.venueOperations.operations.find((item) => item.venueId === venue.id) : undefined;
+  if (!contract || !venue || operation?.status !== "operating" || !venueIsOpenAt(venue, session.timestamp)) return session;
+  const work = startPlayerWorkShift(session.jobs.work, contractId, session.timestamp);
+  if (work === session.jobs.work) return session;
+  const shift = work.shifts.find((item) => item.id === work.activeShiftId);
+  return {
+    ...session,
+    jobs: { ...session.jobs, work },
+    currentActivity: `Смена: ${contract.title}`,
+    events: [
+      createEvent(session, session.timestamp, "work", `Смена начата: ${contract.title}.`, shift?.lateMinutes ? `Опоздание ${shift.lateMinutes} мин.` : "Отметка выполнена вовремя.", shift?.lateMinutes && shift.lateMinutes >= 30 ? 2 : 1),
+      ...session.events
+    ].slice(0, 100)
+  };
+}
+
+export function performPlayerWorkTask(session: GameSession, taskId: string): GameSession {
+  const shift = session.jobs.work.shifts.find((item) => item.id === session.jobs.work.activeShiftId);
+  if (!shift || !venueAtPlayer(session, shift.venueId)) return session;
+  const result = completePlayerWorkTask(session.jobs.work, taskId, {
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    timestamp: session.timestamp,
+    venues: session.urban.venueOperations.registry.map((entry) => entry.venue),
+    venueOperations: session.urban.venueOperations
+  });
+  if (!result) return session;
+  return progressLife({
+    ...session,
+    jobs: { ...session.jobs, work: result.state },
+    urban: { ...session.urban, venueOperations: result.venueOperations }
+  }, result.durationMinutes, {
+    category: "work",
+    title: result.message,
+    importance: 1,
+    fatigueDelta: Math.max(.2, result.durationMinutes / 45),
+    stressDelta: -0.5,
+    activity: "Рабочая задача",
+    suppressTimeEvent: true
+  });
+}
+
+export function finishPlayerEmploymentShift(session: GameSession): GameSession {
+  const shift = session.jobs.work.shifts.find((item) => item.id === session.jobs.work.activeShiftId);
+  if (!shift || !venueAtPlayer(session, shift.venueId)) return session;
+  const result = finishPlayerWorkShift(session.jobs.work, {
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    timestamp: session.timestamp,
+    venues: session.urban.venueOperations.registry.map((entry) => entry.venue),
+    venueOperations: session.urban.venueOperations
+  });
+  if (!result) return session;
+  const contract = result.state.contracts.find((item) => item.id === shift.contractId);
+  const progressed = progressLife({
+    ...session,
+    jobs: { ...session.jobs, work: result.state },
+    urban: { ...session.urban, venueOperations: result.venueOperations }
+  }, Math.max(1, result.remainingMinutes), {
+    category: "work",
+    title: result.message,
+    detail: `Качество смены ${shift.quality}% · выполнено ${shift.completedTaskCount}/${shift.taskIds.length} задач.`,
+    importance: result.unpaid > 0 ? 2 : 1,
+    balanceDelta: result.pay,
+    balanceCounterpartyEntityId: `venue-account:${shift.venueId}`,
+    balanceReason: "wage",
+    fatigueDelta: 5,
+    stressDelta: result.unpaid > 0 ? 5 : -2,
+    activity: "Смена завершена",
+    suppressTimeEvent: true
+  });
+  return {
+    ...progressed,
+    player: { ...progressed.player, occupation: contract?.title.toUpperCase() ?? progressed.player.occupation }
   };
 }
 

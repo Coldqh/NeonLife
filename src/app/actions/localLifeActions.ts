@@ -4,18 +4,24 @@ import {
   buyFoodAtCurrentLocation,
   deliverCourierOrder,
   discardSpoiled,
+  finishPlayerEmploymentShift,
   eatFoodFromStorage,
   enterPlayerHomeUnit,
   leaveBuildingUnit,
   payPlayerObligationAtHome,
   pickupCourierOrder,
+  interviewForPlayerWork,
   joinVenueQueue,
   leaveVenueQueue,
+  performPlayerWorkTask,
   purchaseVenueOffer,
+  signPlayerEmploymentContract,
+  startPlayerEmploymentShift,
   receiveClinicCare,
   sleepAtHome,
   sleepOutside,
-  storeCarriedFoodAtHome
+  storeCarriedFoodAtHome,
+  waitForPlayerWorkShift
 } from "../../gameplay/life/lifeSimulation";
 
 export type LocalLifeAction =
@@ -34,7 +40,13 @@ export type LocalLifeAction =
   | { kind: "clinic-care"; care: "checkup" | "stabilize" }
   | { kind: "join-venue-queue"; venueId: string }
   | { kind: "leave-venue-queue"; venueId: string }
-  | { kind: "buy-venue-offer"; venueId: string; offerId: string };
+  | { kind: "buy-venue-offer"; venueId: string; offerId: string }
+  | { kind: "interview-work"; vacancyId: string }
+  | { kind: "sign-work-contract"; vacancyId: string }
+  | { kind: "wait-work-shift"; contractId: string }
+  | { kind: "start-work-shift"; contractId: string }
+  | { kind: "perform-work-task"; taskId: string }
+  | { kind: "finish-work-shift" };
 
 export function applyLocalLifeAction(session: GameSession, action: LocalLifeAction): GameSession {
   switch (action.kind) {
@@ -54,5 +66,11 @@ export function applyLocalLifeAction(session: GameSession, action: LocalLifeActi
     case "join-venue-queue": return joinVenueQueue(session, action.venueId);
     case "leave-venue-queue": return leaveVenueQueue(session, action.venueId);
     case "buy-venue-offer": return purchaseVenueOffer(session, action.venueId, action.offerId);
+    case "interview-work": return interviewForPlayerWork(session, action.vacancyId);
+    case "sign-work-contract": return signPlayerEmploymentContract(session, action.vacancyId);
+    case "wait-work-shift": return waitForPlayerWorkShift(session, action.contractId);
+    case "start-work-shift": return startPlayerEmploymentShift(session, action.contractId);
+    case "perform-work-task": return performPlayerWorkTask(session, action.taskId);
+    case "finish-work-shift": return finishPlayerEmploymentShift(session);
   }
 }

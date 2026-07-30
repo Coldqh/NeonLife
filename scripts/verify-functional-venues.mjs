@@ -22,8 +22,8 @@ const service = read("src/app/map/BuildingServicePanel.tsx");
 const profile = read("src/app/map/MapProfileOverlay.tsx");
 const css = read("src/ui/theme/venue-operations.css");
 
-check("package version is 0.39.3", packageJson.version === "0.39.3");
-check("save schema is 34", saves.includes("SAVE_SCHEMA_VERSION = 34"));
+check("package version includes functional-venue baseline", Number(packageJson.version.split(".")[1]) >= 39);
+check("save schema includes functional-venue baseline", Number(saves.match(/SAVE_SCHEMA_VERSION\s*=\s*(\d+)/)?.[1] ?? 0) >= 34);
 check("urban fabric owns venue operations", urbanTypes.includes("venueOperations: VenueOperationsState") && urbanTypes.includes("operatingStatus: VenueOperatingStatus"));
 check("venue operations are normalized and advanced", urban.includes("createVenueOperationsState") && urban.includes("advanceVenueOperationsState"));
 check("venue offers have stock price duration and effects", ["currentPrice", "stock", "durationMinutes", "effects"].every((token) => operationTypes.includes(token)));

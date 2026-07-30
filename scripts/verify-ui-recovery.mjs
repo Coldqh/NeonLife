@@ -33,11 +33,11 @@ const reconcile = read("src/gameplay/transit/reconcileTransitJourney.ts");
 check("old desktop shell removed", !exists("src/app/layout/NeonShell.tsx"));
 check("old mobile shell removed", !exists("src/app/mobile/MobileExperience.tsx"));
 check("app starts on map", app.includes('useState<GameScreen>("map")'));
-check("only three primary screens", ["profile", "map", "nearby"].every((name) => nav.includes(`id: "${name}"`)) && !nav.includes('id: "home"'));
+check("four primary screens", ["profile", "map", "work", "nearby"].every((name) => nav.includes(`id: "${name}"`)) && !nav.includes('id: "home"'));
 check("map hides generic header", shell.includes('screen === "map" ? null : <GameHeader'));
 check("map owns its fullscreen HUD", map.includes("<MapTopBar") && mapTopBar.includes("GLOBAL_LAYERS") && mapTopBar.includes("LOCAL_LAYERS"));
 check("map nav is not a special raised button", !shellCss.includes("primary-nav__map"));
-check("navigation uses equal columns", shellCss.includes("grid-template-columns: repeat(3, minmax(0, 1fr))"));
+check("navigation uses equal columns", shellCss.includes("grid-template-columns: repeat(4, minmax(0, 1fr))"));
 check("screen scroll resets", shell.includes("scrollTo({ top: 0"));
 check("screen swipe exists", shell.includes("SCREEN_ORDER") && shell.includes("pointerUp"));
 check("safe area is respected", shellCss.includes("env(safe-area-inset-top)") && shellCss.includes("env(safe-area-inset-bottom)"));
@@ -59,7 +59,7 @@ check("local map shows real stops", localMap.includes("session.transit.stops") &
 check("selection sheet has real route and entry actions", mapSheet.includes("onBuildRoute") && mapSheet.includes("onStartRoute") && mapSheet.includes("onEnterBuilding") && mapSheet.includes("onEnterVehicle"));
 check("profiles expose floors and physical actions", mapProfile.includes("FloorGrid") && mapProfile.includes("onMoveFloor") && mapProfile.includes("onEnterBuilding") && mapProfile.includes("onLeaveBuilding"));
 check("interior map exposes floors units rooms and exits", interiorMap.includes("FloorRail") && interiorMap.includes("floor-unit-grid") && interiorMap.includes("unit-plan") && interiorMap.includes("onEnterUnit") && interiorMap.includes("onEnterRoom") && interiorMap.includes("onLeaveBuilding"));
-check("building services dispatch real life actions", servicePanel.includes("buy-food") && servicePanel.includes("clinic-care") && servicePanel.includes("accept-courier") && servicePanel.includes("pickup-courier") && servicePanel.includes("deliver-courier"));
+check("building services dispatch real life actions", servicePanel.includes("buy-venue-offer") && servicePanel.includes("VenueWorkPanel") && servicePanel.includes("accept-courier") && servicePanel.includes("pickup-courier") && servicePanel.includes("deliver-courier"));
 check("transit has walking scene", transit.includes('journey.phase === "walking"') && transit.includes("Дойти до остановки"));
 check("transit has explicit waiting scene", transit.includes("waitingMinutesRemaining") && transit.includes("Дождаться рейса"));
 check("transit lists every stop", transit.includes("segment.stopIds.map"));
@@ -72,12 +72,12 @@ check("building exit is wired", app.includes("leaveLocalBuilding") && nearby.inc
 check("vehicle exit is wired", app.includes("leavePhysicalVehicle") && nearby.includes("onLeaveVehicle") && nearby.includes("Выйти из машины"));
 check("map uses time-aware opening hours", mapProfile.includes("isLocationOpen(location, session.timestamp)") && mapSheet.includes("isLocationOpen(selection.location, session.timestamp)"));
 
-for (const file of ["src/ui/theme/app-shell.css", "src/ui/theme/screens.css", "src/ui/theme/map.css", "src/ui/theme/city-map.css", "src/ui/theme/city-map-render.css", "src/ui/theme/city-profiles.css", "src/ui/theme/building-interiors.css", "src/ui/theme/nearby.css", "src/ui/theme/transit.css"]) {
+for (const file of ["src/ui/theme/app-shell.css", "src/ui/theme/screens.css", "src/ui/theme/map.css", "src/ui/theme/city-map.css", "src/ui/theme/city-map-render.css", "src/ui/theme/city-profiles.css", "src/ui/theme/building-interiors.css", "src/ui/theme/work.css", "src/ui/theme/nearby.css", "src/ui/theme/transit.css"]) {
   const text = read(file);
   check(`${file} braces balanced`, (text.match(/\{/g) ?? []).length === (text.match(/\}/g) ?? []).length);
 }
 
-for (const file of ["src/app/App.tsx", "src/app/screens/ProfileScreen.tsx", "src/app/screens/NearbyScreen.tsx", "src/app/screens/TransitJourneyScreen.tsx", "src/app/screens/MapScreen.tsx", "src/app/map/LocalSectorMap.tsx", "src/app/map/GlobalCityMap.tsx", "src/app/map/MapProfileOverlay.tsx", "src/app/map/MapSelectionSheet.tsx", "src/app/map/BuildingInteriorMap.tsx", "src/app/map/BuildingServicePanel.tsx"]) {
+for (const file of ["src/app/App.tsx", "src/app/screens/ProfileScreen.tsx", "src/app/screens/NearbyScreen.tsx", "src/app/screens/TransitJourneyScreen.tsx", "src/app/screens/MapScreen.tsx", "src/app/screens/WorkScreen.tsx", "src/app/map/VenueWorkPanel.tsx", "src/app/map/LocalSectorMap.tsx", "src/app/map/GlobalCityMap.tsx", "src/app/map/MapProfileOverlay.tsx", "src/app/map/MapSelectionSheet.tsx", "src/app/map/BuildingInteriorMap.tsx", "src/app/map/BuildingServicePanel.tsx"]) {
   const lines = read(file).split(/\r?\n/).length;
   check(`${file} remains bounded`, lines <= 600);
 }

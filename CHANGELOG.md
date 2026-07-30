@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.40.0 — Living Work
+
+- added a player-facing work state with skills, vacancies, applications, contracts, shifts and tasks;
+- generated vacancies from real operating venues and their staffing pressure;
+- restricted interviews, contract signing, shift start, tasks and shift completion to the exact workplace unit;
+- added cashier, cafe crew, clinic aide and mechanic task sets;
+- connected work tasks to venue queues, sales, inventory, revenue and the venue ledger;
+- paid wages from the employer venue account and tracked unpaid wage debt;
+- added lateness warnings, missed shifts and dismissal after three violations;
+- added skill growth, probation progression, rank and wage increases;
+- added a dedicated Work screen and workplace controls inside venue service panels;
+- pinned contracted workplaces in the urban cache and migrated saves to schema 36.
+
 ## 0.39.4 — Venue Integrity
 
 - added a persistent venue registry independent from spatial streaming;

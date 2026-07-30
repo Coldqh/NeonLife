@@ -5,6 +5,7 @@ import { currentPhysicalLocation, isCourierDispatchLocation, isPlayerInsideHome,
 import type { GameSession } from "../../world/state/types";
 import { venueCategoryLabel, venueIsOpen } from "./mapUi";
 import type { LocalLifeAction } from "../actions/localLifeActions";
+import { VenueWorkPanel } from "./VenueWorkPanel";
 
 function venueStatusLabel(status: GameSession["urban"]["venueOperations"]["operations"][number]["status"] | undefined): string {
   if (status === "insolvent") return "БАНКРОТ";
@@ -85,6 +86,8 @@ export function BuildingServicePanel({
           {venueOperation.queue.playerState === "waiting" ? <button type="button" className="venue-service__leave" onClick={() => onAction({ kind: "leave-venue-queue", venueId: venue.id })}>Покинуть очередь</button> : null}
         </section>
       ) : null}
+
+      {venue ? <VenueWorkPanel session={session} venueId={venue.id} onAction={onAction} /> : null}
 
       {atDispatch ? (
         <section>

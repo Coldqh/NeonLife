@@ -21,8 +21,8 @@ const mapUi = read("src/app/map/mapUi.ts");
 const renderCss = read("src/ui/theme/city-map-render.css");
 const profileCss = read("src/ui/theme/city-profiles.css");
 
-check("package version is 0.39.3", packageJson.version === "0.39.3");
-check("save schema is 34", saves.includes("SAVE_SCHEMA_VERSION = 34"));
+check("package version includes city-fabric baseline", Number(packageJson.version.split(".")[1]) >= 39);
+check("save schema includes city-fabric baseline", Number(saves.match(/SAVE_SCHEMA_VERSION\s*=\s*(\d+)/)?.[1] ?? 0) >= 34);
 check("old saves rebuild the physical player position", migrations.includes("schemaVersion < 33 ? undefined : payload.localScene"));
 check("metropolitan placement version is 3", spatialTypes.includes("version: 3") && metro.includes("version: 3"));
 check("urban fabric version is 3", urbanTypes.includes("version: 3") && urban.includes("version: 3"));
