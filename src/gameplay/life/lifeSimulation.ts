@@ -1,5 +1,6 @@
 import type { EventCategory, WorldEvent } from "../../core/events/types";
 import { createStableEntityId } from "../../core/ids/entityId";
+import { SeededRandom } from "../../core/random/seededRandom";
 import { processEventQueue } from "../../core/simulation/eventQueue";
 import { advanceGameTime } from "../../core/time/gameTime";
 import { getFoodProduct } from "../../data/products/foodCatalog";
@@ -50,6 +51,8 @@ import { advanceLocalMovementRoute, localMovementCurrentStreet, localMovementTar
 import type { LocalMovementTargetState } from "../../simulation/localMovement/types";
 import { advanceStreetSceneState, applyStreetIncidentAction } from "../../simulation/streetScene/streetSceneSystem";
 import { advanceSocialState } from "../../simulation/social/socialSystem";
+import { advanceWorldCoreState, projectWorldCoreState, remapWorldCoreTransactions, synchronizeWorldCoreFromKernel, worldCoreManagedLocationIds } from "../../simulation/worldCore/worldCoreSystem";
+import { advancePlayerCrimeState, recordPlayerCrimeAction, releasePlayerCustodyState } from "../../simulation/crime/playerCrimeSystem";
 import { joinVenueQueueState, leaveVenueQueueState, purchaseVenueOfferState, venueIsOpenAt } from "../../simulation/venues/venueOperationsSystem";
 import type { StreetIncidentAction } from "../../simulation/streetScene/types";
 import {
@@ -219,7 +222,8 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     populationSyncedPeople.people,
     populationAdvance.state,
     populationAdvance.food,
-    pulse.state
+    pulse.state,
+    worldCoreManagedLocationIds(session.worldCore)
   );
   const infrastructureAdvance = advanceInfrastructure(
     session.infrastructure,
@@ -513,6 +517,18 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     streetScene: streetAdvance.state
   });
   peopleState = socialAdvance.people;
+  const playerCrimeAdvance = advancePlayerCrimeState(session.playerCrime, {
+    seed: session.world.meta.seed,
+    timestamp: nextTimestamp,
+    playerId: session.player.id,
+    playerPosition: localSceneState.playerPosition,
+    localScene: localSceneState,
+    streetScene: streetAdvance.state,
+    data: crimeAdvance.data,
+    urban: urbanState,
+    districts: session.world.districts,
+    organizations: crimeAdvance.organizations
+  });
 
   const generated: WorldEvent[] = [];
   if (options.title && options.category) {
@@ -574,6 +590,9 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   for (const notice of socialAdvance.notices) {
     generated.push(createEvent(session, nextTimestamp, "contact", notice.title, notice.detail, notice.importance));
   }
+  for (const notice of playerCrimeAdvance.notices) {
+    generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
+  }
 
   // Needs must not depend on whether time advanced in one large action or
   // many small actions. Player condition supports fractional accumulation.
@@ -590,7 +609,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   );
   const selectedPerson = getPerson(peopleState, session.world.primaryContactId)
     ?? getPerson(peopleState, peopleState.selectedPersonId);
-  const worldEventCount = options.worldEvents ?? (queued.events.length + pulse.events.length + network.notices.length + economyAdvance.notices.length + populationAdvance.notices.length + infrastructureAdvance.notices.length + productionAdvance.notices.length + organizationAdvance.notices.length + governmentAdvance.notices.length + healthAdvance.notices.length + dataAdvance.notices.length + pressureAdvance.notices.length + crimeAdvance.newlyReported.length + streetAdvance.notices.length + socialAdvance.notices.length);
+  const worldEventCount = options.worldEvents ?? (queued.events.length + pulse.events.length + network.notices.length + economyAdvance.notices.length + populationAdvance.notices.length + infrastructureAdvance.notices.length + productionAdvance.notices.length + organizationAdvance.notices.length + governmentAdvance.notices.length + healthAdvance.notices.length + dataAdvance.notices.length + pressureAdvance.notices.length + crimeAdvance.newlyReported.length + streetAdvance.notices.length + socialAdvance.notices.length + playerCrimeAdvance.notices.length);
   const pressure = trackPressureMetrics(pressureAdvance.state, {
     balanceDelta: options.trackBalance === false ? 0 : options.balanceDelta,
     deliveries: options.deliveryCompleted ? 1 : 0,
@@ -641,12 +660,12 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     urban: urbanState,
     localScene: localSceneState
   });
-  const kernelDrafts = [...populationAdvance.transactions, ...economyAdvance.transactions, ...infrastructureAdvance.transactions, ...productionAdvance.transactions, ...organizationAdvance.transactions, ...governmentAdvance.transactions, ...healthAdvance.transactions, ...dataAdvance.transactions, ...crimeAdvance.transactions];
+  const rawKernelDrafts = [...populationAdvance.transactions, ...economyAdvance.transactions, ...infrastructureAdvance.transactions, ...productionAdvance.transactions, ...organizationAdvance.transactions, ...governmentAdvance.transactions, ...healthAdvance.transactions, ...dataAdvance.transactions, ...crimeAdvance.transactions];
   const previousVenueLedgerTimestamp = session.urban.venueOperations.lastUpdatedAt ?? session.timestamp;
   const venueById = new Map(urbanState.venueOperations.registry.map((entry) => [entry.venue.id, entry.venue]));
   for (const entry of urbanState.venueOperations.ledger) {
     if (!entry.postToKernel || entry.timestamp <= previousVenueLedgerTimestamp) continue;
-    kernelDrafts.push({
+    rawKernelDrafts.push({
       idempotencyKey: entry.idempotencyKey,
       timestamp: entry.timestamp,
       debitEntityId: entry.debitEntityId,
@@ -660,7 +679,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
   if ((options.balanceDelta ?? 0) !== 0) {
     const amount = Math.abs(options.balanceDelta ?? 0);
     const counterpartyEntityId = options.balanceCounterpartyEntityId ?? kernelSystemEntityId(session.world.meta.seed, "clearing");
-    kernelDrafts.push({
+    rawKernelDrafts.push({
       idempotencyKey: `${session.world.meta.seed}:player:${nextTimestamp}:${options.title ?? options.activity ?? "action"}:${options.balanceDelta}`,
       timestamp: nextTimestamp,
       debitEntityId: (options.balanceDelta ?? 0) < 0 ? session.player.id : counterpartyEntityId,
@@ -671,6 +690,20 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
       description: options.title ?? options.activity ?? "Player balance action."
     });
   }
+  const preKernelWorldCore = advanceWorldCoreState({
+    seed: session.world.meta.seed,
+    timestamp: nextTimestamp,
+    playerId: session.player.id,
+    locations: session.world.locations,
+    organizations: nextOrganizations,
+    economy: healthAdvance.economy,
+    population: crimeAdvance.population,
+    urban: urbanState,
+    work: workState,
+    kernel: session.kernel,
+    previous: session.worldCore
+  });
+  const kernelDrafts = remapWorldCoreTransactions(preKernelWorldCore, rawKernelDrafts);
   const kernel = advanceSimulationKernel(session.kernel, {
     timestamp: nextTimestamp,
     seed: session.world.meta.seed,
@@ -688,9 +721,24 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     health: healthAdvance.state,
     data: crimeAdvance.data,
     vehicles: crimeVehiclesState,
+    worldCore: preKernelWorldCore,
     food: productionAdvance.food,
     drafts: kernelDrafts
   });
+  const worldCore = synchronizeWorldCoreFromKernel(preKernelWorldCore, kernel);
+  const coreProjection = projectWorldCoreState({
+    seed: session.world.meta.seed,
+    timestamp: nextTimestamp,
+    playerId: session.player.id,
+    locations: session.world.locations,
+    organizations: nextOrganizations,
+    economy: healthAdvance.economy,
+    population: crimeAdvance.population,
+    urban: urbanState,
+    work: workState,
+    kernel,
+    previous: worldCore
+  }, worldCore);
 
   return {
     ...session,
@@ -709,9 +757,10 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
       : session.primaryContact,
     people: peopleState,
     pressure,
-    economy: healthAdvance.economy,
-    population: crimeAdvance.population,
+    economy: coreProjection.economy,
+    population: coreProjection.population,
     kernel,
+    worldCore,
     infrastructure: governmentAdvance.infrastructure,
     production: healthAdvance.production,
     organizationEcosystem: organizationAdvance.state,
@@ -719,7 +768,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     health: healthAdvance.state,
     data: crimeAdvance.data,
     metropolitan: metropolitanState,
-    urban: urbanState,
+    urban: coreProjection.urban,
     streets: streetsState,
     mobility: mobilityState,
     localScene: localSceneState,
@@ -729,6 +778,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     vehicles: crimeVehiclesState,
     transit: transitState,
     vehicleCrime: crimeAdvance.state,
+    playerCrime: playerCrimeAdvance.state,
     district: infrastructurePulse,
     eventQueue: queued.queue,
     currentActivity: pressureAdvance.evicted
@@ -742,7 +792,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     jobs: {
       ...session.jobs,
       courier: courierState,
-      work: workState
+      work: coreProjection.work
     },
     player: nextPlayer,
     events: [...generated, ...queued.events.reverse(), ...pulse.events.reverse(), ...session.events].slice(0, 100)
@@ -1658,7 +1708,36 @@ export function hotwirePhysicalVehicle(session: GameSession, vehicleId: string):
   const result = attemptVehicleCrimeAction(session.vehicleCrime, { ...input, action: "hotwire" });
   const data = appendVehicleCrimeObservations(session.data, result.observations, session.timestamp);
   const position = result.success ? playerVehiclePosition(input.vehicle, session.timestamp + 6 * 60_000, "vehicle") : session.localScene.playerPosition;
-  return progressLife({ ...session, vehicleCrime: result.state, data }, 6, {
+  const playerCrime = recordPlayerCrimeAction(session.playerCrime, {
+    seed: session.world.meta.seed,
+    timestamp: session.timestamp,
+    playerId: session.player.id,
+    playerPosition: session.localScene.playerPosition,
+    localScene: session.localScene,
+    streetScene: session.streetScene,
+    data,
+    urban: session.urban,
+    districts: session.world.districts,
+    organizations: session.world.organizations,
+    kind: "vehicle-theft",
+    sectorId: input.vehicle.position.sectorId,
+    districtId: input.districtId,
+    xM: input.vehicle.position.xM,
+    yM: input.vehicle.position.yM,
+    vehicleId,
+    success: result.success,
+    violence: result.alarmTriggered ? 24 : 8,
+    stolenValue: result.success ? getVehicleCrimeInspection(session.vehicleCrime, vehicleId)?.estimatedFenceValue ?? 250 : 0,
+    alarmTriggered: result.alarmTriggered,
+    stolenProperty: result.success ? {
+      sourceVehicleId: vehicleId,
+      name: `${input.vehicle.modelName} · ${input.vehicle.plate}`,
+      value: getVehicleCrimeInspection(session.vehicleCrime, vehicleId)?.estimatedFenceValue ?? 250,
+      quantity: 1,
+      evidenceStrength: result.evidence
+    } : undefined
+  });
+  return progressLife({ ...session, vehicleCrime: result.state, playerCrime, data }, 6, {
     category: "personal",
     title: result.success ? `Машина ${input.vehicle.plate} угнана.` : `Зажигание ${input.vehicle.plate} не поддалось.`,
     detail: `${result.detail} · заявление владельца ${result.ownerReportDueAt ? "ожидается" : "не создано"}`,
@@ -2345,6 +2424,249 @@ export function purchaseVenueOffer(session: GameSession, venueId: string, offerI
     life: { ...progressed.life, food },
     vehicles
   };
+}
+
+
+function playerCrimeLocation(session: GameSession) {
+  const position = session.localScene.playerPosition;
+  const sector = session.metropolitan.sectors.find((item) => item.id === position.sectorId);
+  return {
+    sectorId: position.sectorId,
+    districtId: sector?.districtId ?? session.world.activeDistrictId,
+    xM: position.xM,
+    yM: position.yM
+  };
+}
+
+function visibleCrimeWitnessCount(session: GameSession): number {
+  const position = session.localScene.playerPosition;
+  return session.localScene.actors.filter((actor) => {
+    if (!actor.visible || actor.distanceToPlayerM > 42) return false;
+    if (position.state === "inside") {
+      if (actor.position.buildingId !== position.buildingId) return false;
+      if (position.unitId && actor.position.unitId !== position.unitId) return false;
+      if (position.roomId && actor.position.roomId !== position.roomId) return false;
+    }
+    return true;
+  }).length;
+}
+
+function recordCrimeAtPlayer(session: GameSession, input: {
+  kind: "shoplifting" | "register-robbery" | "vehicle-theft" | "assault";
+  venueId?: string;
+  vehicleId?: string;
+  victimActorId?: string;
+  victimResidentId?: string;
+  success: boolean;
+  violence: number;
+  stolenValue: number;
+  alarmTriggered?: boolean;
+  stolenProperty?: {
+    sourceVenueId?: string;
+    sourceVehicleId?: string;
+    offerId?: string;
+    name: string;
+    value: number;
+    quantity: number;
+    evidenceStrength: number;
+  };
+}) {
+  const location = playerCrimeLocation(session);
+  return recordPlayerCrimeAction(session.playerCrime, {
+    seed: session.world.meta.seed,
+    timestamp: session.timestamp,
+    playerId: session.player.id,
+    playerPosition: session.localScene.playerPosition,
+    localScene: session.localScene,
+    streetScene: session.streetScene,
+    data: session.data,
+    urban: session.urban,
+    districts: session.world.districts,
+    organizations: session.world.organizations,
+    ...location,
+    ...input
+  });
+}
+
+export function shopliftVenueOffer(session: GameSession, venueId: string, offerId: string): GameSession {
+  if (session.playerCrime.custody?.status === "detained") return session;
+  const venue = venueAtPlayer(session, venueId);
+  const operation = venue ? session.urban.venueOperations.operations.find((item) => item.venueId === venue.id) : undefined;
+  const offer = operation?.offers.find((item) => item.id === offerId);
+  if (!venue || !operation || operation.status !== "operating" || !offer || !offer.active || offer.stock <= 0) return session;
+  if (offer.kind === "food-goods" && offer.productId) {
+    const product = getFoodProduct(offer.productId);
+    if (getCarriedMassGrams(session.life.food) + product.massGrams > session.life.food.carryingCapacityGrams) return session;
+  }
+  const witnesses = visibleCrimeWitnessCount(session);
+  const rng = new SeededRandom(`${session.world.meta.seed}:shoplift:${venue.id}:${offer.id}:${Math.floor(session.timestamp / 60_000)}`);
+  const successChance = clamp(84 - venue.security * .52 - witnesses * 7);
+  const success = rng.chance(successChance / 100);
+  const urban = success ? {
+    ...session.urban,
+    venueOperations: {
+      ...session.urban.venueOperations,
+      operations: session.urban.venueOperations.operations.map((item) => item.venueId !== venue.id ? item : {
+        ...item,
+        offers: item.offers.map((candidate) => candidate.id === offer.id ? { ...candidate, stock: Math.max(0, candidate.stock - 1) } : candidate)
+      })
+    }
+  } : session.urban;
+  let food = session.life.food;
+  if (success && offer.kind === "food-goods" && offer.productId) {
+    const received = receiveFood(food, session.world.meta.seed, offer.productId, 1, session.timestamp, "carried");
+    if (received) food = received.state;
+  }
+  const playerCrime = recordCrimeAtPlayer({ ...session, urban }, {
+    kind: "shoplifting",
+    venueId: venue.id,
+    success,
+    violence: 0,
+    stolenValue: success ? offer.currentPrice : 0,
+    alarmTriggered: !success || witnesses > 0,
+    stolenProperty: success ? {
+      sourceVenueId: venue.id,
+      offerId: offer.id,
+      name: offer.name,
+      value: offer.currentPrice,
+      quantity: 1,
+      evidenceStrength: clamp(35 + venue.security * .35 + witnesses * 6)
+    } : undefined
+  });
+  return progressLife({ ...session, urban, playerCrime, life: { ...session.life, food } }, 3, {
+    category: "personal",
+    title: success ? `Украдено: ${offer.name}.` : `Кража сорвалась: ${venue.name}.`,
+    detail: `${venue.name} · свидетели ${witnesses} · риск опознания ${Math.round(100 - successChance)}%.`,
+    importance: success && !witnesses ? 2 : 3,
+    stressDelta: success ? 5 : 9,
+    activity: `Кража: ${venue.name}`,
+    suppressTimeEvent: true
+  });
+}
+
+export function robVenueRegister(session: GameSession, venueId: string): GameSession {
+  if (session.playerCrime.custody?.status === "detained") return session;
+  const venue = venueAtPlayer(session, venueId);
+  const operation = venue ? session.urban.venueOperations.operations.find((item) => item.venueId === venue.id) : undefined;
+  if (!venue || !operation || operation.status !== "operating" || operation.cash < 60) return session;
+  const witnesses = visibleCrimeWitnessCount(session);
+  const rng = new SeededRandom(`${session.world.meta.seed}:register-robbery:${venue.id}:${Math.floor(session.timestamp / 60_000)}`);
+  const successChance = clamp(76 - venue.security * .55 - operation.staffPresent * 3 - witnesses * 5);
+  const success = rng.chance(successChance / 100);
+  const amount = success ? Math.min(Math.floor(operation.cash), rng.integer(90, Math.max(110, Math.min(650, Math.floor(operation.cash * .2))))) : 0;
+  const urban = success ? {
+    ...session.urban,
+    venueOperations: {
+      ...session.urban.venueOperations,
+      operations: session.urban.venueOperations.operations.map((item) => item.venueId === venue.id ? { ...item, cash: Math.max(0, item.cash - amount) } : item)
+    }
+  } : session.urban;
+  const playerCrime = recordCrimeAtPlayer({ ...session, urban }, {
+    kind: "register-robbery",
+    venueId: venue.id,
+    success,
+    violence: 68,
+    stolenValue: amount,
+    alarmTriggered: true,
+    stolenProperty: success ? {
+      sourceVenueId: venue.id,
+      name: `Наличные ${venue.name}`,
+      value: amount,
+      quantity: 1,
+      evidenceStrength: clamp(58 + venue.security * .32 + witnesses * 5)
+    } : undefined
+  });
+  return progressLife({ ...session, urban, playerCrime }, 5, {
+    category: "personal",
+    title: success ? `Касса ограблена: ₵ ${amount}.` : `Ограбление сорвалось: ${venue.name}.`,
+    detail: `${venue.name} · тревога активирована · свидетели ${witnesses}.`,
+    importance: 3,
+    balanceDelta: amount,
+    balanceCounterpartyEntityId: `venue-account:${venue.id}`,
+    stressDelta: success ? 11 : 14,
+    activity: `Ограбление: ${venue.name}`,
+    suppressTimeEvent: true
+  });
+}
+
+export function assaultLocalActor(session: GameSession, actorId: string): GameSession {
+  if (session.playerCrime.custody?.status === "detained") return session;
+  const actor = session.localScene.actors.find((item) => item.id === actorId);
+  if (!actor || !actor.visible || actor.distanceToPlayerM > 4.5) return session;
+  const position = session.localScene.playerPosition;
+  if (position.state === "inside" && (actor.position.buildingId !== position.buildingId || position.unitId && actor.position.unitId !== position.unitId)) return session;
+  const witnesses = visibleCrimeWitnessCount(session);
+  const rng = new SeededRandom(`${session.world.meta.seed}:assault:${actor.id}:${Math.floor(session.timestamp / 60_000)}`);
+  const success = rng.chance(clamp(64 + session.player.condition.health * .12 - session.player.condition.fatigue * .18) / 100);
+  const violence = success ? rng.integer(52, 82) : rng.integer(25, 45);
+  const population = success ? {
+    ...session.population,
+    residents: session.population.residents.map((resident) => resident.id === actor.residentId ? {
+      ...resident,
+      healthScore: clamp(resident.healthScore - rng.integer(8, 22)),
+      health: resident.healthScore <= 38 ? "ill" as const : "strained" as const
+    } : resident)
+  } : session.population;
+  const playerCrime = recordCrimeAtPlayer({ ...session, population }, {
+    kind: "assault",
+    victimActorId: actor.id,
+    victimResidentId: actor.residentId,
+    success,
+    violence,
+    stolenValue: 0,
+    alarmTriggered: witnesses > 0
+  });
+  const people = actor.activePersonId ? recordPlayerAction(
+    session.people,
+    session.world.meta.seed,
+    actor.activePersonId,
+    session.timestamp,
+    "Игрок напал на человека без предупреждения.",
+    { trust: -35, respect: -12, irritation: 55, importance: 94, emotionalValue: -70 }
+  ) : session.people;
+  return progressLife({ ...session, population, playerCrime, people }, 6, {
+    category: "personal",
+    title: success ? `${actor.name} получил травмы.` : `${actor.name} отбился.`,
+    detail: `Свидетели ${witnesses} · тяжесть ${violence}%.`,
+    importance: 3,
+    healthDelta: success ? -2 : -8,
+    fatigueDelta: 6,
+    stressDelta: 8,
+    activity: `Нападение: ${actor.name}`,
+    suppressTimeEvent: true
+  });
+}
+
+export function resolvePlayerCustody(session: GameSession, method: "pay" | "serve"): GameSession {
+  const custody = session.playerCrime.custody;
+  if (!custody || custody.status !== "detained") return session;
+  if (method === "pay") {
+    if (session.player.balance < custody.fine) return session;
+    const playerCrime = releasePlayerCustodyState(session.playerCrime, session.timestamp, true);
+    return progressLife({ ...session, playerCrime }, 20, {
+      category: "finance",
+      title: "Штраф оплачен. Игрок освобождён.",
+      detail: `−₵ ${custody.fine} · изъятые вещи остаются уликами.`,
+      importance: 2,
+      balanceDelta: -custody.fine,
+      balanceCounterpartyEntityId: session.world.organizations.find((item) => item.type === "government")?.id,
+      stressDelta: -4,
+      activity: "Освобождение из-под стражи",
+      suppressTimeEvent: true
+    });
+  }
+  const minutes = Math.max(1, Math.ceil((custody.releaseAt - session.timestamp) / 60_000));
+  const progressed = progressLife(session, minutes, {
+    category: "personal",
+    title: "Срок задержания окончен.",
+    detail: `Проведено под стражей ${Math.ceil(minutes / 60)} ч.`,
+    importance: 2,
+    fatigueDelta: 12,
+    stressDelta: 10,
+    activity: "Под стражей",
+    suppressTimeEvent: true
+  });
+  return { ...progressed, playerCrime: releasePlayerCustodyState(progressed.playerCrime, progressed.timestamp, false) };
 }
 
 

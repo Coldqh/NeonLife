@@ -31,8 +31,10 @@ import { normalizeBuildingAccessState } from "../../simulation/access/buildingAc
 import { normalizePhysicalVehiclesState, refreshPhysicalVehicleSpatialPresentation } from "../../simulation/vehicles/physicalVehicleSystem";
 import { normalizeTransitOperationsState } from "../../simulation/transit/transitOperationsSystem";
 import { normalizeVehicleCrimeState } from "../../simulation/crime/vehicleCrimeSystem";
+import { normalizePlayerCrimeState } from "../../simulation/crime/playerCrimeSystem";
 import { normalizeStreetSceneState } from "../../simulation/streetScene/streetSceneSystem";
 import { normalizeSocialState } from "../../simulation/social/socialSystem";
+import { normalizeWorldCoreState, projectWorldCoreState, synchronizeWorldCoreFromKernel } from "../../simulation/worldCore/worldCoreSystem";
 import { alignUrbanFabricToStreetTopology, normalizeStreetTopologyState, snapPhysicalVehicleParkingToStreetTopology, snapTransitStopsToStreetTopology } from "../../simulation/streets/streetTopologySystem";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
@@ -711,6 +713,30 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
   });
   const social = normalizeSocialState(payload.social, seed, timestamp, people, locations);
   const vehicleCrime = normalizeVehicleCrimeState(payload.vehicleCrime, timestamp);
+  const playerCrime = normalizePlayerCrimeState(payload.playerCrime, {
+    seed,
+    timestamp,
+    playerId: playerState.id,
+    playerPosition: localScene.playerPosition,
+    localScene,
+    streetScene,
+    data,
+    urban,
+    districts,
+    organizations
+  });
+  const preKernelWorldCore = normalizeWorldCoreState(payload.worldCore, {
+    seed,
+    timestamp,
+    playerId: playerState.id,
+    locations,
+    organizations,
+    economy,
+    population,
+    urban,
+    work,
+    kernel: baseKernel
+  });
   const kernel = advanceSimulationKernel(baseKernel, {
     timestamp,
     seed,
@@ -728,8 +754,23 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     health,
     data,
     vehicles,
+    worldCore: preKernelWorldCore,
     food: foodState
   });
+  const worldCore = synchronizeWorldCoreFromKernel(preKernelWorldCore, kernel);
+  const coreProjection = projectWorldCoreState({
+    seed,
+    timestamp,
+    playerId: playerState.id,
+    locations,
+    organizations,
+    economy,
+    population,
+    urban,
+    work,
+    kernel,
+    previous: worldCore
+  }, worldCore);
 
   const { situations: _discardedSituations, ...payloadWithoutSituations } = payload;
   const migratedPayload = {
@@ -740,9 +781,10 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     primaryContact,
     people,
     pressure,
-    economy,
-    population,
+    economy: coreProjection.economy,
+    population: coreProjection.population,
     kernel,
+    worldCore,
     infrastructure,
     production,
     organizationEcosystem,
@@ -750,7 +792,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     health,
     data,
     metropolitan: mobilitySynchronizedMetropolitan,
-    urban,
+    urban: coreProjection.urban,
     streets,
     mobility,
     localScene,
@@ -760,6 +802,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     vehicles,
     transit,
     vehicleCrime,
+    playerCrime,
     currentActivity: `На месте: ${existingLocationName}`,
     world: {
       ...world,
@@ -768,7 +811,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
       organizations,
       districts: districts.map((district) => ({
         ...district,
-        population: Math.round(population.lifecycle.representedPopulationByDistrict[district.id] ?? district.population)
+        population: Math.round(coreProjection.population.lifecycle.representedPopulationByDistrict[district.id] ?? district.population)
       })),
       city: { ...cityState, population: mobilitySynchronizedMetropolitan.totals.representedPopulation }
     },
@@ -788,7 +831,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
       ),
       lastSleepAt: null
     },
-    jobs: { ...existingJobs, courier, work }
+    jobs: { ...existingJobs, courier, work: coreProjection.work }
   } as unknown as GameSession;
 
   return {

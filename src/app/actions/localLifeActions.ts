@@ -18,6 +18,13 @@ import {
   signPlayerEmploymentContract,
   startPlayerEmploymentShift,
   receiveClinicCare,
+  shopliftVenueOffer,
+  robVenueRegister,
+  assaultLocalActor,
+  inspectPhysicalVehicleForTheft,
+  forceOpenPhysicalVehicle,
+  hotwirePhysicalVehicle,
+  resolvePlayerCustody,
   sleepAtHome,
   sleepOutside,
   storeCarriedFoodAtHome,
@@ -46,7 +53,14 @@ export type LocalLifeAction =
   | { kind: "wait-work-shift"; contractId: string }
   | { kind: "start-work-shift"; contractId: string }
   | { kind: "perform-work-task"; taskId: string }
-  | { kind: "finish-work-shift" };
+  | { kind: "finish-work-shift" }
+  | { kind: "shoplift-venue-offer"; venueId: string; offerId: string }
+  | { kind: "rob-venue-register"; venueId: string }
+  | { kind: "assault-actor"; actorId: string }
+  | { kind: "inspect-vehicle-crime"; vehicleId: string }
+  | { kind: "break-in-vehicle"; vehicleId: string }
+  | { kind: "hotwire-vehicle"; vehicleId: string }
+  | { kind: "resolve-custody"; method: "pay" | "serve" };
 
 export function applyLocalLifeAction(session: GameSession, action: LocalLifeAction): GameSession {
   switch (action.kind) {
@@ -72,5 +86,12 @@ export function applyLocalLifeAction(session: GameSession, action: LocalLifeActi
     case "start-work-shift": return startPlayerEmploymentShift(session, action.contractId);
     case "perform-work-task": return performPlayerWorkTask(session, action.taskId);
     case "finish-work-shift": return finishPlayerEmploymentShift(session);
+    case "shoplift-venue-offer": return shopliftVenueOffer(session, action.venueId, action.offerId);
+    case "rob-venue-register": return robVenueRegister(session, action.venueId);
+    case "assault-actor": return assaultLocalActor(session, action.actorId);
+    case "inspect-vehicle-crime": return inspectPhysicalVehicleForTheft(session, action.vehicleId);
+    case "break-in-vehicle": return forceOpenPhysicalVehicle(session, action.vehicleId);
+    case "hotwire-vehicle": return hotwirePhysicalVehicle(session, action.vehicleId);
+    case "resolve-custody": return resolvePlayerCustody(session, action.method);
   }
 }

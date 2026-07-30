@@ -12,6 +12,7 @@ import "./ui/theme/city-profiles.css";
 import "./ui/theme/building-interiors.css";
 import "./ui/theme/venue-operations.css";
 import "./ui/theme/work.css";
+import "./ui/theme/crime.css";
 import "./ui/theme/local-movement.css";
 import "./ui/theme/nearby.css";
 import "./ui/theme/social.css";

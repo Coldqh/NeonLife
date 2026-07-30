@@ -5,6 +5,7 @@ import { isLocationOpen } from "../../gameplay/travel/travelSystem";
 import { PLACE_ICONS, personPortrait, vehicleStateLabel } from "../shared/presentation";
 import type { CityMapSelection } from "./mapUi";
 import type { StreetIncidentAction } from "../../simulation/streetScene/types";
+import type { LocalLifeAction } from "../actions/localLifeActions";
 import { activityLabel, buildingUseLabel, landUseLabel, locationTypeLabel, riskLabel, selectionTitle, venueCategoryLabel, venueIsOpen } from "./mapUi";
 
 function routeCaption(preview: LocalMovementState | null, travel?: TravelOption): string {
@@ -36,7 +37,8 @@ export function MapSelectionSheet({
   onLeaveBuilding,
   onEnterVehicle,
   onLeaveVehicle,
-  onStreetIncidentAction
+  onStreetIncidentAction,
+  onLifeAction
 }: {
   session: GameSession;
   selection: CityMapSelection;
@@ -57,6 +59,7 @@ export function MapSelectionSheet({
   onEnterVehicle: (vehicleId: string) => void;
   onLeaveVehicle: () => void;
   onStreetIncidentAction: (incidentId: string, action: StreetIncidentAction) => void;
+  onLifeAction: (action: LocalLifeAction) => void;
 }) {
   if (selection.kind === "district") {
     const sectorIds = new Set(selection.district.sectorIds);
@@ -192,19 +195,23 @@ export function MapSelectionSheet({
   }
 
   if (selection.kind === "actor") {
+    const assaultRange = selection.actor.visible && selection.actor.distanceToPlayerM <= 4.5 && session.playerCrime.custody?.status !== "detained";
     return (
       <aside className="map-selection-sheet map-selection-sheet--person" data-no-swipe>
         <img src={personPortrait(selection.actor.id)} alt="" />
-        <div className="map-selection-sheet__body"><header><div><span>{selection.actor.roleLabel}</span><h2>{selection.actor.name}</h2><p>{selection.actor.activityLabel} · {Math.round(selection.actor.distanceToPlayerM)} м</p></div><button type="button" className="icon-button" onClick={onClose}>×</button></header><div className="map-selection-sheet__actions"><button type="button" className="map-action map-action--primary" disabled={!target} onClick={onBuildRoute}>Идти к человеку</button><button type="button" className="map-action" onClick={onDetails}>Подробнее</button></div>{preview ? <button type="button" className="map-route-start" onClick={onStartRoute}>Начать · {routeCaption(preview)}</button> : null}</div>
+        <div className="map-selection-sheet__body"><header><div><span>{selection.actor.roleLabel}</span><h2>{selection.actor.name}</h2><p>{selection.actor.activityLabel} · {Math.round(selection.actor.distanceToPlayerM)} м</p></div><button type="button" className="icon-button" onClick={onClose}>×</button></header><div className="map-selection-sheet__actions"><button type="button" className="map-action map-action--primary" disabled={!target} onClick={onBuildRoute}>Идти к человеку</button><button type="button" className="map-action" onClick={onDetails}>Подробнее</button><button type="button" className="map-action map-action--danger" disabled={!assaultRange} onClick={() => onLifeAction({ kind: "assault-actor", actorId: selection.actor.id })}>Напасть</button></div>{!assaultRange ? <p className="map-selection-sheet__route">Для нападения нужно находиться рядом. Свидетели и камеры создадут улики.</p> : null}{preview ? <button type="button" className="map-route-start" onClick={onStartRoute}>Начать · {routeCaption(preview)}</button> : null}</div>
       </aside>
     );
   }
 
   if (selection.kind === "vehicle") {
     const inside = session.vehicles.player.currentVehicleId === selection.vehicle.id;
+    const close = session.localScene.playerPosition.state === "outside" && selection.vehicle.distanceToPlayerM <= 6;
+    const inspection = session.vehicleCrime.inspections.find((item) => item.vehicleId === selection.vehicle.id);
+    const crimeAllowed = close && selection.vehicle.access !== "owned" && selection.vehicle.state !== "moving" && session.playerCrime.custody?.status !== "detained";
     return (
       <aside className="map-selection-sheet" data-no-swipe>
-        <div className="map-selection-sheet__handle" /><header><div><span>{vehicleStateLabel(selection.vehicle)}</span><h2>{selection.vehicle.modelName}</h2><p>{selection.vehicle.plate} · {Math.round(selection.vehicle.distanceToPlayerM)} м</p></div><button type="button" className="icon-button" onClick={onClose}>×</button></header><div className="map-selection-sheet__actions"><button type="button" className="map-action map-action--primary" disabled={!target} onClick={onBuildRoute}>Идти к машине</button>{inside ? <button type="button" className="map-action" onClick={onLeaveVehicle}>Выйти</button> : selection.vehicle.playerCanEnter && selection.vehicle.distanceToPlayerM <= 12 ? <button type="button" className="map-action" onClick={() => onEnterVehicle(selection.vehicle.id)}>Сесть</button> : null}</div>{preview ? <button type="button" className="map-route-start" onClick={onStartRoute}>Начать · {routeCaption(preview)}</button> : null}
+        <div className="map-selection-sheet__handle" /><header><div><span>{vehicleStateLabel(selection.vehicle)}</span><h2>{selection.vehicle.modelName}</h2><p>{selection.vehicle.plate} · {Math.round(selection.vehicle.distanceToPlayerM)} м</p></div><button type="button" className="icon-button" onClick={onClose}>×</button></header><div className="map-selection-sheet__actions"><button type="button" className="map-action map-action--primary" disabled={!target} onClick={onBuildRoute}>Идти к машине</button>{inside ? <button type="button" className="map-action" onClick={onLeaveVehicle}>Выйти</button> : selection.vehicle.playerCanEnter && selection.vehicle.distanceToPlayerM <= 12 ? <button type="button" className="map-action" onClick={() => onEnterVehicle(selection.vehicle.id)}>Сесть</button> : null}{crimeAllowed ? <button type="button" className="map-action map-action--danger" onClick={() => onLifeAction({ kind: "inspect-vehicle-crime", vehicleId: selection.vehicle.id })}>Осмотреть защиту</button> : null}{crimeAllowed && inspection && selection.vehicle.locked ? <button type="button" className="map-action map-action--danger" onClick={() => onLifeAction({ kind: "break-in-vehicle", vehicleId: selection.vehicle.id })}>Вскрыть машину</button> : null}{crimeAllowed && inspection && !selection.vehicle.locked ? <button type="button" className="map-action map-action--danger" onClick={() => onLifeAction({ kind: "hotwire-vehicle", vehicleId: selection.vehicle.id })}>Угнать</button> : null}</div>{inspection ? <p className="map-selection-sheet__route">Замок {inspection.lockDifficulty}% · зажигание {inspection.ignitionDifficulty}% · камеры {inspection.cameraRisk}% · свидетели {inspection.witnessRisk}%</p> : null}{preview ? <button type="button" className="map-route-start" onClick={onStartRoute}>Начать · {routeCaption(preview)}</button> : null}
       </aside>
     );
   }

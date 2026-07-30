@@ -11,6 +11,7 @@ import type { GovernmentCrimeState } from "../government/types";
 import type { HealthCyberwareState } from "../health/types";
 import type { DataSurveillanceState } from "../data/types";
 import type { PhysicalVehiclesState } from "../vehicles/types";
+import type { WorldCoreBusinessState, WorldCoreEmploymentState, WorldCoreState } from "../worldCore/types";
 import type {
   KernelAccountState,
   KernelAssetState,
@@ -52,6 +53,7 @@ export interface KernelSyncInput {
   health?: HealthCyberwareState;
   data?: DataSurveillanceState;
   vehicles?: PhysicalVehiclesState;
+  worldCore?: WorldCoreState;
   food: FoodState;
   drafts?: KernelTransactionDraft[];
 }
@@ -130,7 +132,7 @@ function entityKindFor(id: string, input: KernelSyncInput): KernelEntityKind {
   if (input.organizations.some((item) => item.id === id)) return "organization";
   if (input.population.households.some((item) => item.id === id)) return "household";
   if (input.population.residents.some((item) => item.id === id)) return "resident";
-  if (input.economy.businesses.some((item) => item.id === id)) return "business";
+  if (input.worldCore?.businesses.some((item) => item.id === id) || input.economy.businesses.some((item) => item.id === id)) return "business";
   if (input.production.facilities.some((item) => item.id === id)) return "production-facility";
   if (input.health?.facilities.some((item) => item.id === id)) return "health-facility";
   if (input.locations.some((item) => item.id === id)) return "location";
@@ -160,6 +162,11 @@ function snapshotAccounts(input: KernelSyncInput): KernelAccountState[] {
       const physicalFoodUnits = shopStock ? Object.values(shopStock).reduce((sum, units) => sum + units, 0) : 0;
       balances.push(balance("food-units", physicalFoodUnits));
     }
+    accounts.push(account(business.id, "business", balances, input.timestamp));
+  }
+  for (const business of input.worldCore?.businesses ?? []) {
+    const balances = [balance("credits", business.cash)];
+    if (business.stockUnits > 0) balances.push(balance(resourceForSupply(business.supplyClass), business.stockUnits));
     accounts.push(account(business.id, "business", balances, input.timestamp));
   }
   for (const facility of input.production.facilities) {
@@ -207,6 +214,13 @@ function assetStatusFromBusiness(business: BusinessState): KernelAssetStatus {
   return "active";
 }
 
+function assetStatusFromWorldCoreBusiness(business: WorldCoreBusinessState): KernelAssetStatus {
+  if (["closed", "vacant", "renovation", "insolvent", "seized"].includes(business.status)) return "offline";
+  if (business.status === "restricted") return "restricted";
+  if (business.status === "strained") return "strained";
+  return "active";
+}
+
 function assetStatusFromHousing(housing: HousingMarketState): KernelAssetStatus {
   if (housing.status === "critical") return "restricted";
   if (housing.status === "degraded") return "strained";
@@ -236,6 +250,29 @@ function buildAssets(input: KernelSyncInput): KernelAssetState[] {
       resources: [
         balance(resourceForSupply(business.supplyClass), business.stock),
         balance("labor-hours", Math.max(0, business.staffing) * 8)
+      ],
+      updatedAt: input.timestamp
+    });
+  }
+
+  const legacyBusinessIds = new Set(input.economy.businesses.map((item) => item.id));
+  for (const business of input.worldCore?.businesses ?? []) {
+    if (legacyBusinessIds.has(business.id)) continue;
+    assets.push({
+      id: assetId("business", business.id),
+      kind: "business-operation",
+      name: business.name,
+      ownerEntityId: business.ownerEntityId,
+      controllerEntityId: business.operatorEntityId,
+      locationId: business.locationId,
+      districtId: business.districtId,
+      status: assetStatusFromWorldCoreBusiness(business),
+      condition: Math.max(0, Math.min(100, Math.round((business.stockPercent + Math.min(100, business.activeWorkers / Math.max(1, business.targetStaff) * 100)) / 2))),
+      capacity: Math.max(1, business.targetStaff),
+      valuation: Math.max(0, Math.round(business.cash + business.stockUnits * 18 + business.targetStaff * 800)),
+      resources: [
+        balance(resourceForSupply(business.supplyClass), business.stockUnits),
+        balance("labor-hours", Math.max(0, business.activeWorkers) * 8)
       ],
       updatedAt: input.timestamp
     });
@@ -464,6 +501,32 @@ function activeEmploymentContract(input: KernelSyncInput, employment: Employment
   };
 }
 
+function activeWorldCoreEmploymentContract(input: KernelSyncInput, employment: WorldCoreEmploymentState): KernelContractState | null {
+  const business = input.worldCore?.businesses.find((item) => item.id === employment.businessId);
+  if (!business) return null;
+  const status = employment.status === "ended" ? "ended" : employment.status === "breached" ? "breached" : employment.status === "suspended" ? "suspended" : "active";
+  return {
+    id: employmentContractId(employment.sourceEmploymentId ?? employment.sourcePlayerContractId ?? employment.id),
+    kind: "employment",
+    sourceEntityId: business.operatorEntityId || business.id,
+    targetEntityId: employment.residentId,
+    assetId: assetId("business", business.id),
+    locationId: business.locationId,
+    status,
+    startedAt: employment.startedAt,
+    endedAt: status === "ended" ? input.timestamp : undefined,
+    nextSettlementAt: (input.population.dayIndex + 1) * DAY_MS,
+    breachCount: status === "breached" ? 1 : 0,
+    terms: [{ resource: "credits", amount: employment.wagePerDay, unitValue: 1, intervalMinutes: 24 * 60 }],
+    metadata: {
+      title: employment.role,
+      shift: employment.shift,
+      playerControlled: employment.playerControlled,
+      canonicalBusinessId: business.id
+    }
+  };
+}
+
 function leaseContract(input: KernelSyncInput, household: HouseholdState): KernelContractState | null {
   if (!household.homeLocationId || household.kind === "unhoused") return null;
   const housing = input.population.housing.find((item) => item.locationId === household.homeLocationId);
@@ -668,7 +731,9 @@ function dataAccessContracts(input: KernelSyncInput): KernelContractState[] {
 
 function buildContracts(input: KernelSyncInput, previous: KernelContractState[]): KernelContractState[] {
   const generated = [
-    ...input.population.employments.map((item) => activeEmploymentContract(input, item)).filter((item): item is KernelContractState => Boolean(item)),
+    ...(input.worldCore
+      ? input.worldCore.employments.map((item) => activeWorldCoreEmploymentContract(input, item)).filter((item): item is KernelContractState => Boolean(item))
+      : input.population.employments.map((item) => activeEmploymentContract(input, item)).filter((item): item is KernelContractState => Boolean(item))),
     ...input.population.households.map((item) => leaseContract(input, item)).filter((item): item is KernelContractState => Boolean(item)),
     ...input.production.contracts.map((item) => productionContract(input, item)),
     ...utilityContracts(input),

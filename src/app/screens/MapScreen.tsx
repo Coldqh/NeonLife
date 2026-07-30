@@ -425,6 +425,7 @@ export function MapScreen({
             pedestrians={streetSceneVisible && (localLayer === "all" || localLayer === "people") ? nearbyPedestrians : []}
             traffic={streetSceneVisible && (localLayer === "all" || localLayer === "cars") ? nearbyTraffic : []}
             incidents={streetSceneVisible && (localLayer === "all" || localLayer === "incidents") ? visibleIncidents : []}
+            policeResponses={localLayer === "all" || localLayer === "incidents" ? session.playerCrime.policeResponses.filter((response) => response.sectorId === selectedSector.id && response.status !== "resolved") : []}
             crossings={streetSceneVisible ? nearbyCrossings : []}
             focusRevision={localFocusRevision}
             onSelect={chooseLocal}
@@ -461,6 +462,7 @@ export function MapScreen({
           onEnterVehicle={onEnterVehicle}
           onLeaveVehicle={onLeaveVehicle}
           onStreetIncidentAction={onStreetIncidentAction}
+          onLifeAction={onLifeAction}
         />
       ) : null}
 

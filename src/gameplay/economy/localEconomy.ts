@@ -202,7 +202,8 @@ export function advanceLocalEconomy(
   people: PersonState[],
   population: PopulationState,
   foodState: FoodState,
-  pulse: DistrictPulseState
+  pulse: DistrictPulseState,
+  managedLocationIds?: ReadonlySet<string>
 ): EconomyAdvanceResult {
   if (timestamp <= state.lastUpdatedAt) return { state, food: foodState, notices: [], transactions: [] };
   const targetCycle = Math.floor(timestamp / CYCLE_MS);
@@ -227,6 +228,22 @@ export function advanceLocalEconomy(
         + (business.kind === "medical" ? 8 : 0)
         + rng.integer(-9, 12)
       ), 18, 100);
+      if (managedLocationIds?.has(business.locationId)) {
+        let status = statusFor(business.stock, staffing, business.cash);
+        if (infrastructureLevel < 20) status = "closed";
+        else if (infrastructureLevel < 45 && status !== "closed") status = "restricted";
+        else if (infrastructureLevel < 70 && status === "stable") status = "strained";
+        return {
+          ...business,
+          staffing,
+          demand,
+          status,
+          priceIndex: priceIndexFor(business.stock, demand, status, pulse.transitDelayMinutes),
+          shortage: business.stock < 42,
+          lastStatusChangeAt: status === business.status ? business.lastStatusChangeAt : timestamp,
+          lastUpdatedAt: timestamp
+        };
+      }
       const consumption = Math.max(1, Math.round(demand / 17));
       const foodBefore = totalFoodStock(food, business.locationId);
       food = consumeFoodStock(food, business.locationId, consumption, rng);

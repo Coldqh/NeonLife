@@ -1,14 +1,14 @@
 {
   "name": "neon-life",
   "private": true,
-  "version": "0.40.0",
+  "version": "0.42.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json --pretty false && tsc --noEmit -p tsconfig.node.json --pretty false",
-    "test:ui": "npm run test:ui:architecture && npm run test:ui:recovery && npm run test:recovery && npm run test:movement && npm run test:map-ui && npm run test:building-ui && npm run test:street-ui && npm run test:social-ui && npm run test:fabric-ui && npm run test:venue-ui && npm run test:work-ui",
+    "test:ui": "npm run test:ui:architecture && npm run test:ui:recovery && npm run test:recovery && npm run test:movement && npm run test:map-ui && npm run test:building-ui && npm run test:street-ui && npm run test:social-ui && npm run test:fabric-ui && npm run test:venue-ui && npm run test:work-ui && npm run test:crime-ui",
     "test:ui:architecture": "node scripts/verify-ui-architecture.mjs",
     "test:ui:recovery": "node scripts/verify-ui-recovery.mjs",
     "test:map": "node scripts/verify-map-foundation.mjs",
@@ -16,7 +16,7 @@
     "test:recovery": "node scripts/verify-map-profile-recovery.mjs",
     "test:movement": "node scripts/verify-local-movement.mjs",
     "test:movement:domain": "node scripts/run-local-movement-domain-test.mjs",
-    "test": "npm run typecheck && npm run test:ui && npm run test:integrity && npm run test:life && npm run test:building && npm run test:street && npm run test:social && npm run test:fabric && npm run test:venue && npm run test:work",
+    "test": "npm run typecheck && npm run test:ui && npm run test:integrity && npm run test:life && npm run test:building && npm run test:street && npm run test:social && npm run test:fabric && npm run test:venue && npm run test:work && npm run test:crime && npm run test:world-core",
     "test:integrity": "node scripts/run-world-integrity-domain-test.mjs",
     "test:life": "node scripts/run-physical-life-domain-test.mjs",
     "test:map-ui": "node scripts/verify-city-map-overhaul.mjs",
@@ -31,7 +31,10 @@
     "test:venue-ui": "node scripts/verify-functional-venues.mjs",
     "test:venue": "node scripts/run-functional-venue-domain-test.mjs",
     "test:work-ui": "node scripts/verify-living-work.mjs",
-    "test:work": "node scripts/run-player-work-domain-test.mjs"
+    "test:work": "node scripts/run-player-work-domain-test.mjs",
+    "test:crime-ui": "node scripts/verify-crime-gangs-police.mjs",
+    "test:crime": "node scripts/run-player-crime-domain-test.mjs",
+    "test:world-core": "node scripts/run-world-core-consolidation-test.mjs"
   },
   "dependencies": {
     "react": "18.3.1",

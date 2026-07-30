@@ -27,10 +27,12 @@ import type { BuildingAccessState } from "../../simulation/access/types";
 import type { PhysicalVehiclesState } from "../../simulation/vehicles/types";
 import type { TransitOperationsState } from "../../simulation/transit/types";
 import type { VehicleCrimeState } from "../../simulation/crime/types";
+import type { PlayerCrimeState } from "../../simulation/crime/playerCrimeTypes";
 import type { StreetTopologyState } from "../../simulation/streets/types";
 import type { LocalMovementState } from "../../simulation/localMovement/types";
 import type { StreetSceneState } from "../../simulation/streetScene/types";
 import type { SocialState } from "../../simulation/social/types";
+import type { WorldCoreState } from "../../simulation/worldCore/types";
 
 export interface CityState {
   id: EntityId;
@@ -122,6 +124,7 @@ export interface GameSession {
   economy: LocalEconomyState;
   population: PopulationState;
   kernel: SimulationKernelState;
+  worldCore: WorldCoreState;
   infrastructure: InfrastructureState;
   production: ProductionState;
   organizationEcosystem: OrganizationEcosystemState;
@@ -140,6 +143,7 @@ export interface GameSession {
   vehicles: PhysicalVehiclesState;
   transit: TransitOperationsState;
   vehicleCrime: VehicleCrimeState;
+  playerCrime: PlayerCrimeState;
   events: WorldEvent[];
   eventQueue: ScheduledWorldEvent[];
   currentActivity: string;

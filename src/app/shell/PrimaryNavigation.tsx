@@ -1,10 +1,11 @@
-import { Icon } from "../../ui/components/Icons";
+import { Icon, type IconName } from "../../ui/components/Icons";
 import type { GameScreen } from "../shared/types";
 
-const items: Array<{ id: GameScreen; label: string; icon: "people" | "city" | "work" | "network" }> = [
+const items: Array<{ id: GameScreen; label: string; icon: IconName }> = [
   { id: "profile", label: "Профиль", icon: "people" },
   { id: "map", label: "Карта", icon: "city" },
   { id: "work", label: "Работа", icon: "work" },
+  { id: "crime", label: "Розыск", icon: "alert" },
   { id: "nearby", label: "Рядом", icon: "network" }
 ];
 

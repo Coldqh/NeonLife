@@ -309,3 +309,12 @@
 .local-map__venue.is-selected > path { stroke: #fff; stroke-width: .62; }
 .local-map__venue-label rect { fill: rgba(3, 8, 14, .96); stroke: rgba(255, 78, 103, .48); stroke-width: .18; }
 .local-map__venue-label text { fill: #f4f7fb; font-size: 1.12px; font-weight: 800; letter-spacing: .02em; }
+
+/* v0.41.0 — physical police response */
+.local-map__police-response { pointer-events: none; }
+.local-map__police-response rect { fill: #2469d8; stroke: #e8f3ff; stroke-width: .24; filter: drop-shadow(0 0 .9px rgba(47, 125, 255, .9)); }
+.local-map__police-response path { fill: rgba(210, 238, 255, .72); }
+.local-map__police-response text { fill: #a9d5ff; font-size: .95px; font-weight: 800; paint-order: stroke; stroke: #03101f; stroke-width: .4px; }
+.local-map__police-pulse { fill: none; stroke: rgba(58, 139, 255, .62); stroke-width: .32; animation: crime-police-pulse 1.15s ease-out infinite; }
+.local-map__police-response--on-scene rect, .local-map__police-response--searching rect { animation: street-response-flash .7s steps(2, end) infinite; }
+@keyframes crime-police-pulse { from { r: 2.9; opacity: .9; } to { r: 6.8; opacity: 0; } }

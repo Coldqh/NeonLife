@@ -9,6 +9,7 @@ import { ProfileScreen } from "./screens/ProfileScreen";
 import { MapScreen } from "./screens/MapScreen";
 import { NearbyScreen } from "./screens/NearbyScreen";
 import { WorkScreen } from "./screens/WorkScreen";
+import { CrimeScreen } from "./screens/CrimeScreen";
 import { TransitJourneyScreen } from "./screens/TransitJourneyScreen";
 import { LocalMovementScreen } from "./screens/LocalMovementScreen";
 import { SettingsOverlay } from "./overlays/SettingsOverlay";
@@ -64,6 +65,9 @@ export default function App() {
   const versionGuard = useVersionGuard();
   const { session, setSession } = save;
   useEffect(() => writeLocal(UI_SETTINGS_KEY, settings), [settings]);
+  useEffect(() => {
+    if (session?.playerCrime.custody?.status === "detained") setScreen("crime");
+  }, [session?.playerCrime.custody?.status]);
   useEffect(() => {
     if (!session?.localMovement) return;
     setSession((current) => reconcileLocalMovement(current));
@@ -188,7 +192,7 @@ export default function App() {
       <GameShell
         session={session}
         screen={screen}
-        onScreenChange={setScreen}
+        onScreenChange={(next) => setScreen(session.playerCrime.custody?.status === "detained" ? "crime" : next)}
         onSettings={() => setSettingsOpen(true)}
         overlay={transitOverlay ?? localMovementOverlay ?? settingsOverlay}
         notice={notice ? <div className={`toast toast--${notice.tone}`} role="status">{notice.text}</div> : null}
@@ -211,6 +215,7 @@ export default function App() {
           />
         ) : null}
         {screen === "work" ? <WorkScreen session={session} onOpenVenue={openVenueOnMap} /> : null}
+        {screen === "crime" ? <CrimeScreen session={session} onAction={(action) => setSession((current) => applyLocalLifeAction(current, action))} /> : null}
         {screen === "nearby" ? (
           <NearbyScreen
             session={session}

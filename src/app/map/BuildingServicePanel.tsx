@@ -77,13 +77,20 @@ export function BuildingServicePanel({
                 return (
                   <article key={offer.id}>
                     <div><strong>{offer.name}</strong><span>{offer.description}</span><small>₵ {offer.currentPrice} · остаток {offer.stock} · {offer.durationMinutes} мин.</small></div>
-                    <button type="button" disabled={!venueOpen || offer.stock <= 0 || session.player.balance < offer.currentPrice || !fits || vehicleRequired} onClick={() => onAction({ kind: "buy-venue-offer", venueId: venue.id, offerId: offer.id })}>{vehicleRequired ? "Нет машины рядом" : offer.stock <= 0 ? "Нет в наличии" : "Купить"}</button>
+                    <div className="venue-offer-actions">
+                      <button type="button" disabled={!venueOpen || offer.stock <= 0 || session.player.balance < offer.currentPrice || !fits || vehicleRequired} onClick={() => onAction({ kind: "buy-venue-offer", venueId: venue.id, offerId: offer.id })}>{vehicleRequired ? "Нет машины рядом" : offer.stock <= 0 ? "Нет в наличии" : "Купить"}</button>
+                      <button type="button" className="crime-action" disabled={!venueOpen || offer.stock <= 0 || !fits || session.playerCrime.custody?.status === "detained"} onClick={() => onAction({ kind: "shoplift-venue-offer", venueId: venue.id, offerId: offer.id })}>Украсть</button>
+                    </div>
                   </article>
                 );
               })}
             </div>
           )}
           {venueOperation.queue.playerState === "waiting" ? <button type="button" className="venue-service__leave" onClick={() => onAction({ kind: "leave-venue-queue", venueId: venue.id })}>Покинуть очередь</button> : null}
+          <div className="venue-crime-actions">
+            <span>Незаконные действия оставляют свидетелей, камеры и физические улики.</span>
+            <button type="button" className="crime-action crime-action--danger" disabled={!venueOpen || venueOperation.cash < 60 || session.playerCrime.custody?.status === "detained"} onClick={() => onAction({ kind: "rob-venue-register", venueId: venue.id })}>Ограбить кассу</button>
+          </div>
         </section>
       ) : null}
 

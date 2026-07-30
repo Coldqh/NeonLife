@@ -89,6 +89,7 @@ export function LocalSectorMap({
   pedestrians = [],
   traffic = [],
   incidents = [],
+  policeResponses = [],
   crossings = [],
   focusRevision = 0,
   onSelect
@@ -105,6 +106,7 @@ export function LocalSectorMap({
   pedestrians?: StreetPedestrianState[];
   traffic?: StreetTrafficState[];
   incidents?: StreetIncidentState[];
+  policeResponses?: GameSession["playerCrime"]["policeResponses"];
   crossings?: StreetCrossingState[];
   focusRevision?: number;
   onSelect?: (selection: LocalMapSelection) => void;
@@ -342,6 +344,7 @@ export function LocalSectorMap({
           const vehicle = vehicles.find((item) => item.id === streetVehicle.vehicleId) ?? session.vehicles.vehicles.find((item) => item.id === streetVehicle.vehicleId);
           return vehicle ? <g key={streetVehicle.id} transform={`translate(${toX(streetVehicle.xM)} ${toY(streetVehicle.yM)}) rotate(${streetVehicle.headingDeg})`} className={`local-map__vehicle local-map__vehicle--${streetVehicle.motion}${selectedKey === `vehicle:${vehicle.id}` ? " is-selected" : ""}`}><rect x="-2.4" y="-1.15" width="4.8" height="2.3" rx=".65"/><path className="local-map__vehicle-windshield" d="M-.8-.85H1.1l.7.65H-1.5z"/><circle cx="-1.35" cy="1.2" r=".4"/><circle cx="1.35" cy="1.2" r=".4"/>{streetVehicle.brakeLights ? <path className="local-map__brake-lights" d="M-2.25-.72v1.44M2.25-.72v1.44"/> : null}</g> : null;
         }) : null}
+        {policeResponses.filter((response) => response.status !== "resolved").map((response) => <g key={response.id} transform={`translate(${toX(response.currentX)} ${toY(response.currentY)})`} className={`local-map__police-response local-map__police-response--${response.status}`}><circle className="local-map__police-pulse" r="4.6"/><rect x="-2.7" y="-1.45" width="5.4" height="2.9" rx=".7"/><path d="M-1.3-.85H1.1l.8.7h-3.8z"/><text textAnchor="middle" y="4.4">{response.unitCode}</text></g>)}
         {incidents.filter((incident) => incident.status !== "resolved").map((incident) => <g key={incident.id} transform={`translate(${toX(incident.xM)} ${toY(incident.yM)})`} className={`local-map__incident local-map__incident--${incident.type}${selectedKey === `incident:${incident.id}` ? " is-selected" : ""}`}><circle className="local-map__incident-pulse" r="5"/><path d="M0-4 3.7-2 3.7 2 0 4-3.7 2-3.7-2z"/><text textAnchor="middle" y="1.2">!</text></g>)}
         {route?.points.length ? <g className="local-map__route" aria-hidden="true"><polyline className="local-map__route-base" points={route.points.map((point) => `${toX(point.xM)},${toY(point.yM)}`).join(" ")}/><polyline className="local-map__route-remaining" points={remainingRoutePoints.map((point) => `${toX(point.xM)},${toY(point.yM)}`).join(" ")}/><circle className="local-map__route-target" cx={toX(route.target.xM)} cy={toY(route.target.yM)} r="2.2"/></g> : null}
         {selected?.kind === "point" ? <g transform={`translate(${toX(selected.xM)} ${toY(selected.yM)})`} className="local-map__point"><circle r="2.8"/><path d="M0-5 3.2-.8 0 4-3.2-.8z"/></g> : null}

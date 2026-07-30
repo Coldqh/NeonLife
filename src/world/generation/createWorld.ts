@@ -28,8 +28,10 @@ import { createBuildingAccessState } from "../../simulation/access/buildingAcces
 import { createPhysicalVehiclesState, refreshPhysicalVehicleSpatialPresentation } from "../../simulation/vehicles/physicalVehicleSystem";
 import { createTransitOperationsState } from "../../simulation/transit/transitOperationsSystem";
 import { createVehicleCrimeState } from "../../simulation/crime/vehicleCrimeSystem";
+import { createPlayerCrimeState } from "../../simulation/crime/playerCrimeSystem";
 import { createStreetSceneState } from "../../simulation/streetScene/streetSceneSystem";
 import { createSocialState } from "../../simulation/social/socialSystem";
+import { createWorldCoreState, projectWorldCoreState, synchronizeWorldCoreFromKernel } from "../../simulation/worldCore/worldCoreSystem";
 import { alignUrbanFabricToStreetTopology, createStreetTopologyState, snapPhysicalVehicleParkingToStreetTopology, snapTransitStopsToStreetTopology } from "../../simulation/streets/streetTopologySystem";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
@@ -411,6 +413,19 @@ export function createWorldSession(seed: string): GameSession {
     vehicles
   });
 
+  const playerCrime = createPlayerCrimeState({
+    seed,
+    timestamp: INITIAL_GAME_TIMESTAMP,
+    playerId: player.id,
+    playerPosition: localScene.playerPosition,
+    localScene,
+    streetScene,
+    data,
+    urban,
+    districts,
+    organizations
+  });
+
   const social = createSocialState(seed, INITIAL_GAME_TIMESTAMP, people, locations);
 
   const syncedKernel = advanceSimulationKernel(kernel, {
@@ -432,6 +447,59 @@ export function createWorldSession(seed: string): GameSession {
     vehicles,
     food: foodState
   });
+  const work = createPlayerWorkState({
+    seed,
+    playerId: player.id,
+    timestamp: INITIAL_GAME_TIMESTAMP,
+    venues: urban.venueOperations.registry.map((entry) => entry.venue),
+    venueOperations: urban.venueOperations
+  });
+  const initialWorldCore = createWorldCoreState({
+    seed,
+    timestamp: INITIAL_GAME_TIMESTAMP,
+    playerId: player.id,
+    locations,
+    organizations,
+    economy,
+    population,
+    urban,
+    work,
+    kernel: syncedKernel
+  });
+  const coreKernel = advanceSimulationKernel(syncedKernel, {
+    timestamp: INITIAL_GAME_TIMESTAMP,
+    seed,
+    city,
+    districts,
+    locations,
+    organizations,
+    player,
+    population,
+    economy,
+    infrastructure,
+    production,
+    organizationEcosystem,
+    government,
+    health,
+    data,
+    vehicles,
+    worldCore: initialWorldCore,
+    food: foodState
+  });
+  const worldCore = synchronizeWorldCoreFromKernel(initialWorldCore, coreKernel);
+  const coreProjection = projectWorldCoreState({
+    seed,
+    timestamp: INITIAL_GAME_TIMESTAMP,
+    playerId: player.id,
+    locations,
+    organizations,
+    economy,
+    population,
+    urban,
+    work,
+    kernel: coreKernel,
+    previous: worldCore
+  }, worldCore);
 
   return {
     schemaVersion: SAVE_SCHEMA_VERSION,
@@ -441,9 +509,10 @@ export function createWorldSession(seed: string): GameSession {
     primaryContact,
     people,
     pressure,
-    economy,
-    population,
-    kernel: syncedKernel,
+    economy: coreProjection.economy,
+    population: coreProjection.population,
+    kernel: coreKernel,
+    worldCore,
     infrastructure,
     production,
     organizationEcosystem,
@@ -451,7 +520,7 @@ export function createWorldSession(seed: string): GameSession {
     health,
     data,
     metropolitan,
-    urban,
+    urban: coreProjection.urban,
     streets,
     mobility,
     localScene,
@@ -461,6 +530,7 @@ export function createWorldSession(seed: string): GameSession {
     vehicles,
     transit: transitOperations,
     vehicleCrime,
+    playerCrime,
     events: createInitialEvents({
       seed,
       districtName: lower.name,
@@ -479,12 +549,7 @@ export function createWorldSession(seed: string): GameSession {
     },
     jobs: {
       courier: createInitialCourierState(seed, INITIAL_GAME_TIMESTAMP, locations, people.people, economy.businesses),
-      work: createPlayerWorkState({
-        seed,
-        timestamp: INITIAL_GAME_TIMESTAMP,
-        venues: urban.venueOperations.registry.map((entry) => entry.venue),
-        venueOperations: urban.venueOperations
-      })
+      work: coreProjection.work
     }
   };
 }

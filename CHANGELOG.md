@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.42.0 — World Core Consolidation
+
+- added a canonical World Core registry for businesses, employment and world time;
+- merged legacy named businesses with their physical venue operations through stable aliases;
+- registered procedural venues and staffed institutions as canonical businesses;
+- made Simulation Kernel create accounts, assets and employment contracts from World Core;
+- remapped legacy and venue ledger transactions onto canonical business accounts;
+- projected canonical cash and status back into compatibility domains;
+- disabled duplicate LocalEconomy passive simulation for merged physical venues;
+- unified NPC employments and player work contracts in one employment registry;
+- added cross-domain integrity checks for ownership, references, account drift and clock drift;
+- migrated saves to schema 38 and added an executable World Core consolidation regression.
+
+## 0.41.0 — Crime, Gangs & Police
+
+- added a persistent player-crime state with incidents, evidence, warrants, stolen property, custody and heat;
+- added physical shoplifting, register robbery, vehicle theft and assault actions;
+- generated witness, camera, vehicle, blood and stolen-property evidence with retention and identification strength;
+- added delayed reports, district or city warrants and moving police responses rendered on the local map;
+- added detention, confiscation, fines and time-served release;
+- connected vehicle hotwiring to the general criminal investigation system;
+- added autonomous gang factions, territory influence, controlled businesses and cash;
+- added a dedicated Crime screen and crime actions inside venue, person and vehicle interfaces;
+- migrated saves to schema 37 and added crime UI and domain regression checks.
+
 ## 0.40.0 — Living Work
 
 - added a player-facing work state with skills, vacancies, applications, contracts, shifts and tasks;
