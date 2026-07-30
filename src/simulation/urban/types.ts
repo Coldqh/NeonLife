@@ -289,6 +289,7 @@ export interface UrbanFabricInput {
   population: import("../population/types").PopulationState;
   transportServiceLevel: number;
   dataServiceLevel: number;
+  externallyManagedBusinessEconomy?: boolean;
 }
 
 export interface UrbanFabricAdvanceResult {

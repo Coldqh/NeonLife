@@ -288,6 +288,31 @@ function advanceOperation(
   };
   let orders = initialOrders.map((order) => ({ ...order }));
   const generatedLedger: VenueLedgerEntryState[] = [];
+  if (input.externallyManaged) {
+    const generatedQueue = queueFor({ ...venue, operatingStatus: operation.status, active: operation.status === "operating" }, input.timestamp);
+    const playerReady = operation.queue.playerState === "waiting" && (operation.queue.playerReadyAt ?? Number.POSITIVE_INFINITY) <= input.timestamp;
+    return {
+      operation: {
+        ...operation,
+        staffPresent: operation.status === "operating" && venueIsOpenAt({ ...venue, operatingStatus: operation.status, active: true }, input.timestamp)
+          ? Math.max(1, Math.round(venue.staffing / 17))
+          : 0,
+        serviceCapacityPerHour: Math.max(2, Math.round(2 + venue.staffing / 15)),
+        queue: {
+          ...generatedQueue,
+          servedToday: operation.queue.servedToday,
+          abandonedToday: operation.queue.abandonedToday,
+          playerState: playerReady ? "ready" : operation.queue.playerState,
+          playerJoinedAt: operation.queue.playerJoinedAt,
+          playerReadyAt: operation.queue.playerReadyAt,
+          waitingCount: Math.max(generatedQueue.waitingCount, operation.queue.playerState === "waiting" ? 1 : 0)
+        },
+        lastUpdatedAt: input.timestamp
+      },
+      orders,
+      ledger: []
+    };
+  }
   let cursor = base.lastUpdatedAt;
   let activeDay = Math.floor(cursor / DAY_MS);
 

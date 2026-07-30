@@ -5,10 +5,10 @@ import type { ProductionState } from "../production/types";
 import type { UrbanFabricState } from "../urban/types";
 import type { WorldCoreState } from "../worldCore/types";
 
-export type InventoryOwnerKind = "player" | "household" | "business" | "facility" | "vehicle" | "building-unit" | "shipment";
+export type InventoryOwnerKind = "player" | "household" | "business" | "facility" | "vehicle" | "building-unit" | "shipment" | "market";
 export type InventoryStackStatus = "available" | "reserved" | "expired" | "recalled" | "destroyed";
 export type ProductBatchOrigin = "production" | "import" | "migration" | "purchase" | "transfer" | "reconciliation";
-export type ProductTransferReason = "production-output" | "shipment" | "wholesale" | "retail-sale" | "household-purchase" | "player-purchase" | "storage" | "consumption" | "reconciliation";
+export type ProductTransferReason = "production-output" | "shipment" | "wholesale" | "retail-sale" | "household-purchase" | "player-purchase" | "storage" | "consumption" | "market-consumption" | "reconciliation";
 
 export interface ProductBatchState {
   id: EntityId;
@@ -154,5 +154,13 @@ export interface ProductInventoryProjectionResult {
 export interface ProductTransferResult {
   state: ProductInventoryState;
   transferred: number;
+  transferIds: EntityId[];
+}
+
+export interface ProductConsumptionResult {
+  state: ProductInventoryState;
+  consumed: number;
+  inventoryCost: number;
+  batchIds: EntityId[];
   transferIds: EntityId[];
 }

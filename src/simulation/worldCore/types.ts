@@ -6,7 +6,7 @@ import type { PopulationState, ShiftType } from "../population/types";
 import type { UrbanFabricState, VenueCategory, VenueOperatingStatus } from "../urban/types";
 import type { LocationState, OrganizationState } from "../../world/state/types";
 
-export type WorldCoreBusinessSource = "legacy" | "venue" | "merged" | "institution";
+export type WorldCoreBusinessSource = "legacy" | "venue" | "merged" | "institution" | "registry";
 export type WorldCoreBusinessStatus = VenueOperatingStatus | "restricted" | "strained";
 export type WorldCoreEmploymentStatus = "active" | "suspended" | "breached" | "ended";
 

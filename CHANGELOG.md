@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.44.0 — Unified Business Economy
+
+- added a deterministic citywide registry of businesses that exists independently from map streaming and materialization;
+- introduced operating companies with corporate, independent, franchise, cooperative, public and criminal ownership models;
+- linked every business to a physical premises, canonical inventory, operator, landlord, lease and license;
+- added district/category markets with demand, supply, price pressure, market share and concentration;
+- made autonomous trade consume exact canonical SKU batches instead of percentage stock or synthetic venue offers;
+- added unified sales, payroll, rent, utilities, tax, debt and profit settlement through the Simulation Kernel;
+- added business openings, reopening, insolvency, bankruptcy, lease default, acquisition and ownership reassignment;
+- registered company accounts, business assets, leases and licenses in the canonical kernel;
+- disabled duplicate passive venue and LocalEconomy settlement while retaining backward-compatible projections;
+- migrated saves to schema 40 and added a 120-day headless business-economy regression.
+
 ## 0.43.0 — Product & Inventory Foundation
 
 - added a canonical catalog of 84 physical SKUs across food, medicine, parts, apparel, electronics, cyberware, household goods, fuel, contraband and raw materials;

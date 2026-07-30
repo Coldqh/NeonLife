@@ -1,24 +1,28 @@
-NEON LIFE 0.43.0 — changed and new files
+NEON LIFE 0.44.0 — changed and new files
 APPLY_PATCH.ps1
 CHANGELOG.md
-PATCH_0.43.0.md
+PATCH_0.44.0.md
 PATCH_FILES.txt
 README.md
 package-lock.json
 package.json
 public/sw.js
 public/version.json
-scripts/run-product-inventory-domain-test.mjs
-scripts/verify-crime-gangs-police.mjs
+scripts/run-unified-business-economy-test.mjs
 src/core/saves/migrations.ts
 src/core/saves/types.ts
-src/data/products/productCatalog.ts
-src/data/products/types.ts
 src/gameplay/life/lifeSimulation.ts
+src/simulation/business/businessEconomySystem.ts
+src/simulation/business/types.ts
 src/simulation/inventory/inventorySystem.ts
 src/simulation/inventory/types.ts
-src/simulation/venues/catalog.ts
+src/simulation/kernel/simulationKernel.ts
+src/simulation/urban/types.ts
+src/simulation/urban/urbanSystem.ts
+src/simulation/venues/types.ts
+src/simulation/venues/venueOperationsSystem.ts
+src/simulation/worldCore/types.ts
 src/world/generation/createWorld.ts
 src/world/state/types.ts
-tests/productInventoryFoundationTest.ts
-tsconfig.productinventorytest.json
+tests/unifiedBusinessEconomyTest.ts
+tsconfig.businesseconomytest.json

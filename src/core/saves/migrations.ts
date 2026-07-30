@@ -36,6 +36,7 @@ import { normalizeStreetSceneState } from "../../simulation/streetScene/streetSc
 import { normalizeSocialState } from "../../simulation/social/socialSystem";
 import { normalizeWorldCoreState, projectWorldCoreState, synchronizeWorldCoreFromKernel } from "../../simulation/worldCore/worldCoreSystem";
 import { normalizeProductInventoryState, projectProductInventoryState } from "../../simulation/inventory/inventorySystem";
+import { normalizeBusinessEconomyState, projectBusinessEconomyToWorldCore, synchronizeBusinessEconomyFromKernel } from "../../simulation/business/businessEconomySystem";
 import { alignUrbanFabricToStreetTopology, normalizeStreetTopologyState, snapPhysicalVehicleParkingToStreetTopology, snapTransitStopsToStreetTopology } from "../../simulation/streets/streetTopologySystem";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
@@ -619,7 +620,8 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     organizations,
     population,
     transportServiceLevel: infrastructure.networks.find((item) => item.kind === "transport")?.averageServiceLevel ?? 100,
-    dataServiceLevel: infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100
+    dataServiceLevel: infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100,
+    externallyManagedBusinessEconomy: true
   });
   const streetInput = { timestamp, seed, metropolitan, urban };
   const streets = normalizeStreetTopologyState(payload.streets, streetInput);
@@ -738,6 +740,33 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     work,
     kernel: baseKernel
   });
+  const productInventoryBase = normalizeProductInventoryState(payload.productInventory, {
+    seed,
+    timestamp,
+    playerId: playerState.id,
+    worldCore: preKernelWorldCore,
+    production,
+    urban,
+    population,
+    food: foodState
+  });
+  const businessBase = normalizeBusinessEconomyState(payload.businessEconomy, {
+    seed,
+    timestamp,
+    playerId: playerState.id,
+    districts,
+    locations,
+    organizations,
+    metropolitan: mobilitySynchronizedMetropolitan,
+    urban,
+    population,
+    government,
+    infrastructure,
+    economy,
+    worldCore: preKernelWorldCore,
+    productInventory: productInventoryBase,
+    kernel: baseKernel
+  });
   const kernel = advanceSimulationKernel(baseKernel, {
     timestamp,
     seed,
@@ -747,7 +776,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     organizations,
     player: playerState,
     population,
-    economy,
+    economy: businessBase.economy,
     infrastructure,
     production,
     organizationEcosystem,
@@ -755,34 +784,27 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     health,
     data,
     vehicles,
-    worldCore: preKernelWorldCore,
+    worldCore: businessBase.worldCore,
+    businessEconomy: businessBase.state,
     food: foodState
   });
-  const worldCore = synchronizeWorldCoreFromKernel(preKernelWorldCore, kernel);
+  let worldCore = synchronizeWorldCoreFromKernel(businessBase.worldCore, kernel);
+  const businessEconomy = synchronizeBusinessEconomyFromKernel(businessBase.state, kernel, timestamp);
+  worldCore = projectBusinessEconomyToWorldCore(businessEconomy, worldCore, timestamp);
   const coreProjection = projectWorldCoreState({
     seed,
     timestamp,
     playerId: playerState.id,
     locations,
     organizations,
-    economy,
+    economy: businessBase.economy,
     population,
-    urban,
+    urban: businessBase.urban,
     work,
     kernel,
     previous: worldCore
   }, worldCore);
-  const productInventoryBase = normalizeProductInventoryState(payload.productInventory, {
-    seed,
-    timestamp,
-    playerId: playerState.id,
-    worldCore,
-    production,
-    urban: coreProjection.urban,
-    population: coreProjection.population,
-    food: foodState
-  });
-  const inventoryProjection = projectProductInventoryState(productInventoryBase, {
+  const inventoryProjection = projectProductInventoryState(businessBase.productInventory, {
     seed,
     timestamp,
     playerId: playerState.id,
@@ -791,7 +813,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     urban: coreProjection.urban,
     population: coreProjection.population,
     food: foodState,
-    previous: productInventoryBase
+    previous: businessBase.productInventory
   });
 
   const { situations: _discardedSituations, ...payloadWithoutSituations } = payload;
@@ -808,6 +830,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     kernel,
     worldCore: inventoryProjection.worldCore,
     productInventory: inventoryProjection.state,
+    businessEconomy,
     infrastructure,
     production: inventoryProjection.production,
     organizationEcosystem,

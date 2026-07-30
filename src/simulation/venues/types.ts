@@ -143,6 +143,7 @@ export interface VenueOperationsInput {
   timestamp: number;
   venues: VenueState[];
   landlordByBuildingId?: Record<EntityId, EntityId>;
+  externallyManaged?: boolean;
 }
 
 export interface VenuePurchaseResult {

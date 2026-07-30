@@ -53,6 +53,7 @@ import { advanceStreetSceneState, applyStreetIncidentAction } from "../../simula
 import { advanceSocialState } from "../../simulation/social/socialSystem";
 import { advanceWorldCoreState, projectWorldCoreState, remapWorldCoreTransactions, synchronizeWorldCoreFromKernel, worldCoreManagedLocationIds } from "../../simulation/worldCore/worldCoreSystem";
 import { advanceProductInventoryState, projectProductInventoryState } from "../../simulation/inventory/inventorySystem";
+import { advanceBusinessEconomyState, projectBusinessEconomyToWorldCore, synchronizeBusinessEconomyFromKernel } from "../../simulation/business/businessEconomySystem";
 import { advancePlayerCrimeState, recordPlayerCrimeAction, releasePlayerCustodyState } from "../../simulation/crime/playerCrimeSystem";
 import { joinVenueQueueState, leaveVenueQueueState, purchaseVenueOfferState, venueIsOpenAt } from "../../simulation/venues/venueOperationsSystem";
 import type { StreetIncidentAction } from "../../simulation/streetScene/types";
@@ -332,7 +333,8 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     organizations: dataAdvance.organizations,
     population: dataAdvance.population,
     transportServiceLevel: governmentAdvance.infrastructure.networks.find((item) => item.kind === "transport")?.averageServiceLevel ?? 100,
-    dataServiceLevel: governmentAdvance.infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100
+    dataServiceLevel: governmentAdvance.infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100,
+    externallyManagedBusinessEconomy: true
   });
   let urbanState = urbanAdvance.state;
   if (options.playerPosition?.buildingId) {
@@ -704,7 +706,37 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     kernel: session.kernel,
     previous: session.worldCore
   });
-  const kernelDrafts = remapWorldCoreTransactions(preKernelWorldCore, rawKernelDrafts);
+  const preBusinessInventory = advanceProductInventoryState({
+    seed: session.world.meta.seed,
+    timestamp: nextTimestamp,
+    playerId: session.player.id,
+    worldCore: preKernelWorldCore,
+    production: healthAdvance.production,
+    urban: urbanState,
+    population: crimeAdvance.population,
+    food: productionAdvance.food,
+    previous: session.productInventory
+  });
+  const businessAdvance = advanceBusinessEconomyState({
+    seed: session.world.meta.seed,
+    timestamp: nextTimestamp,
+    playerId: session.player.id,
+    districts: nextDistricts,
+    locations: session.world.locations,
+    organizations: nextOrganizations,
+    metropolitan: metropolitanState,
+    urban: urbanState,
+    population: crimeAdvance.population,
+    government: crimeAdvance.government,
+    infrastructure: governmentAdvance.infrastructure,
+    economy: healthAdvance.economy,
+    worldCore: preKernelWorldCore,
+    productInventory: preBusinessInventory,
+    kernel: session.kernel,
+    previous: session.businessEconomy
+  });
+  for (const transaction of businessAdvance.drafts) rawKernelDrafts.push(transaction);
+  const kernelDrafts = remapWorldCoreTransactions(businessAdvance.worldCore, rawKernelDrafts);
   const kernel = advanceSimulationKernel(session.kernel, {
     timestamp: nextTimestamp,
     seed: session.world.meta.seed,
@@ -714,7 +746,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     organizations: nextOrganizations,
     player: nextPlayer,
     population: crimeAdvance.population,
-    economy: healthAdvance.economy,
+    economy: businessAdvance.economy,
     infrastructure: governmentAdvance.infrastructure,
     production: healthAdvance.production,
     organizationEcosystem: organizationAdvance.state,
@@ -722,25 +754,28 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     health: healthAdvance.state,
     data: crimeAdvance.data,
     vehicles: crimeVehiclesState,
-    worldCore: preKernelWorldCore,
+    worldCore: businessAdvance.worldCore,
+    businessEconomy: businessAdvance.state,
     food: productionAdvance.food,
     drafts: kernelDrafts
   });
-  const worldCore = synchronizeWorldCoreFromKernel(preKernelWorldCore, kernel);
+  let worldCore = synchronizeWorldCoreFromKernel(businessAdvance.worldCore, kernel);
+  const businessEconomy = synchronizeBusinessEconomyFromKernel(businessAdvance.state, kernel, nextTimestamp);
+  worldCore = projectBusinessEconomyToWorldCore(businessEconomy, worldCore, nextTimestamp);
   const coreProjection = projectWorldCoreState({
     seed: session.world.meta.seed,
     timestamp: nextTimestamp,
     playerId: session.player.id,
     locations: session.world.locations,
     organizations: nextOrganizations,
-    economy: healthAdvance.economy,
+    economy: businessAdvance.economy,
     population: crimeAdvance.population,
-    urban: urbanState,
+    urban: businessAdvance.urban,
     work: workState,
     kernel,
     previous: worldCore
   }, worldCore);
-  const productInventoryBase = advanceProductInventoryState({
+  const inventoryProjection = projectProductInventoryState(businessAdvance.productInventory, {
     seed: session.world.meta.seed,
     timestamp: nextTimestamp,
     playerId: session.player.id,
@@ -749,18 +784,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     urban: coreProjection.urban,
     population: coreProjection.population,
     food: productionAdvance.food,
-    previous: session.productInventory
-  });
-  const inventoryProjection = projectProductInventoryState(productInventoryBase, {
-    seed: session.world.meta.seed,
-    timestamp: nextTimestamp,
-    playerId: session.player.id,
-    worldCore,
-    production: healthAdvance.production,
-    urban: coreProjection.urban,
-    population: coreProjection.population,
-    food: productionAdvance.food,
-    previous: productInventoryBase
+    previous: businessAdvance.productInventory
   });
 
   return {
@@ -785,6 +809,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     kernel,
     worldCore: inventoryProjection.worldCore,
     productInventory: inventoryProjection.state,
+    businessEconomy,
     infrastructure: governmentAdvance.infrastructure,
     production: inventoryProjection.production,
     organizationEcosystem: organizationAdvance.state,

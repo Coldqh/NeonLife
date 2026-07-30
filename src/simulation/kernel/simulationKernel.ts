@@ -12,6 +12,7 @@ import type { HealthCyberwareState } from "../health/types";
 import type { DataSurveillanceState } from "../data/types";
 import type { PhysicalVehiclesState } from "../vehicles/types";
 import type { WorldCoreBusinessState, WorldCoreEmploymentState, WorldCoreState } from "../worldCore/types";
+import type { BusinessEconomyState, BusinessLeaseState, UnifiedBusinessState } from "../business/types";
 import type {
   KernelAccountState,
   KernelAssetState,
@@ -54,6 +55,7 @@ export interface KernelSyncInput {
   data?: DataSurveillanceState;
   vehicles?: PhysicalVehiclesState;
   worldCore?: WorldCoreState;
+  businessEconomy?: BusinessEconomyState;
   food: FoodState;
   drafts?: KernelTransactionDraft[];
 }
@@ -129,7 +131,7 @@ function setBalance(account: KernelAccountState, resource: KernelResource, amoun
 function entityKindFor(id: string, input: KernelSyncInput): KernelEntityKind {
   if (id === input.player.id) return "player";
   if (id === input.city.id) return "city";
-  if (input.organizations.some((item) => item.id === id)) return "organization";
+  if (input.organizations.some((item) => item.id === id) || input.businessEconomy?.companies.some((item) => item.id === id)) return "organization";
   if (input.population.households.some((item) => item.id === id)) return "household";
   if (input.population.residents.some((item) => item.id === id)) return "resident";
   if (input.worldCore?.businesses.some((item) => item.id === id) || input.economy.businesses.some((item) => item.id === id)) return "business";
@@ -152,6 +154,11 @@ function snapshotAccounts(input: KernelSyncInput): KernelAccountState[] {
 
   for (const organization of input.organizations) {
     accounts.push(account(organization.id, "organization", [balance("credits", organization.budget)], input.timestamp));
+  }
+  const organizationIds = new Set(input.organizations.map((organization) => organization.id));
+  for (const company of input.businessEconomy?.companies ?? []) {
+    if (organizationIds.has(company.id)) continue;
+    accounts.push(account(company.id, "organization", [balance("credits", company.treasury)], input.timestamp));
   }
   for (const district of input.districts) accounts.push(account(district.id, "district", [], input.timestamp));
   for (const location of input.locations) accounts.push(account(location.id, "location", [], input.timestamp));
@@ -653,6 +660,48 @@ function organizationAgreementContract(input: KernelSyncInput, agreement: Organi
   };
 }
 
+function unifiedBusinessLeaseContract(input: KernelSyncInput, lease: BusinessLeaseState): KernelContractState | null {
+  const business = input.businessEconomy?.businesses.find((item) => item.id === lease.businessId);
+  if (!business) return null;
+  return {
+    id: createStableEntityId("contract", `business-lease:${lease.id}`),
+    kind: "lease",
+    sourceEntityId: lease.tenantCompanyId,
+    targetEntityId: lease.landlordEntityId,
+    beneficiaryEntityId: business.id,
+    assetId: assetId("business", business.id),
+    locationId: business.locationId,
+    status: lease.status === "terminated" ? "ended" : lease.status === "arrears" ? "breached" : "active",
+    startedAt: lease.startedDay * DAY_MS,
+    endedAt: lease.terminatedDay ? lease.terminatedDay * DAY_MS : undefined,
+    nextSettlementAt: lease.nextPaymentDay * DAY_MS,
+    breachCount: lease.arrearsDays,
+    terms: lease.monthlyRent > 0 ? [{ resource: "credits", amount: lease.monthlyRent, unitValue: 1, intervalMinutes: 30 * 24 * 60 }] : [],
+    metadata: { premisesId: lease.premisesId, status: lease.status, deposit: lease.deposit }
+  };
+}
+
+function unifiedBusinessLicenseContract(input: KernelSyncInput, business: UnifiedBusinessState): KernelContractState {
+  const authority = input.government?.budget.authorityOrganizationId ?? input.city.id;
+  const status = business.licenseStatus === "revoked" ? "ended" : business.licenseStatus === "suspended" ? "suspended" : business.licenseStatus === "probation" || business.licenseStatus === "unlicensed" ? "breached" : "active";
+  return {
+    id: createStableEntityId("contract", `business-license:${business.id}`),
+    kind: "license",
+    sourceEntityId: business.id,
+    targetEntityId: authority,
+    beneficiaryEntityId: input.city.id,
+    assetId: assetId("business", business.id),
+    locationId: business.locationId,
+    status,
+    startedAt: business.foundedDay * DAY_MS,
+    endedAt: business.licenseStatus === "revoked" ? input.timestamp : undefined,
+    nextSettlementAt: (input.population.dayIndex + 7) * DAY_MS,
+    breachCount: business.licenseStatus === "active" ? 0 : 1,
+    terms: business.licenseStatus === "unlicensed" ? [] : [{ resource: "credits", amount: Math.max(4, Math.round(6 + business.quality * .18)), unitValue: 1, intervalMinutes: 7 * 24 * 60 }],
+    metadata: { category: business.category, status: business.licenseStatus, canonicalBusinessId: business.id }
+  };
+}
+
 function governmentLicenseContracts(input: KernelSyncInput): KernelContractState[] {
   if (!input.government) return [];
   return input.government.licenses.map((license) => {
@@ -735,10 +784,11 @@ function buildContracts(input: KernelSyncInput, previous: KernelContractState[])
       ? input.worldCore.employments.map((item) => activeWorldCoreEmploymentContract(input, item)).filter((item): item is KernelContractState => Boolean(item))
       : input.population.employments.map((item) => activeEmploymentContract(input, item)).filter((item): item is KernelContractState => Boolean(item))),
     ...input.population.households.map((item) => leaseContract(input, item)).filter((item): item is KernelContractState => Boolean(item)),
+    ...(input.businessEconomy?.leases ?? []).map((item) => unifiedBusinessLeaseContract(input, item)).filter((item): item is KernelContractState => Boolean(item)),
     ...input.production.contracts.map((item) => productionContract(input, item)),
     ...utilityContracts(input),
     ...(input.organizationEcosystem?.agreements ?? []).map((item) => organizationAgreementContract(input, item)),
-    ...governmentLicenseContracts(input),
+    ...(input.businessEconomy ? input.businessEconomy.businesses.map((item) => unifiedBusinessLicenseContract(input, item)) : governmentLicenseContracts(input)),
     ...healthContracts(input),
     ...dataAccessContracts(input)
   ];
@@ -746,7 +796,7 @@ function buildContracts(input: KernelSyncInput, previous: KernelContractState[])
   const ended = previous
     .filter((item) => !generatedIds.has(item.id) && item.status !== "ended")
     .map((item) => ({ ...item, status: "ended" as const, endedAt: input.timestamp }));
-  return [...generated, ...ended].slice(-2_500);
+  return [...generated, ...ended].slice(-10_000);
 }
 
 function applyTransaction(
@@ -765,6 +815,26 @@ function applyTransaction(
   const creditIndex = ensure(transaction.creditEntityId);
   next[debitIndex] = setBalance(next[debitIndex], transaction.resource, getBalance(next[debitIndex], transaction.resource) - transaction.amount, timestamp);
   next[creditIndex] = setBalance(next[creditIndex], transaction.resource, getBalance(next[creditIndex], transaction.resource) + transaction.amount, timestamp);
+  return next;
+}
+
+function applyTransactionsBatch(accounts: KernelAccountState[], transactions: KernelTransactionState[], timestamp: number): KernelAccountState[] {
+  const next = accounts.map((item) => ({ ...item, balances: item.balances.map((entry) => ({ ...entry })) }));
+  const indexByEntity = new Map(next.map((item, index) => [item.entityId, index]));
+  const ensure = (entityId: string): number => {
+    const found = indexByEntity.get(entityId);
+    if (found !== undefined) return found;
+    const index = next.length;
+    next.push(account(entityId, "system", [], timestamp));
+    indexByEntity.set(entityId, index);
+    return index;
+  };
+  for (const transaction of transactions) {
+    const debitIndex = ensure(transaction.debitEntityId);
+    const creditIndex = ensure(transaction.creditEntityId);
+    next[debitIndex] = setBalance(next[debitIndex], transaction.resource, getBalance(next[debitIndex], transaction.resource) - transaction.amount, timestamp);
+    next[creditIndex] = setBalance(next[creditIndex], transaction.resource, getBalance(next[creditIndex], transaction.resource) + transaction.amount, timestamp);
+  }
   return next;
 }
 
@@ -977,9 +1047,9 @@ export function advanceSimulationKernel(state: SimulationKernelState, input: Ker
     const transaction = transactionFromDraft(draft);
     if (existingIds.has(transaction.id)) continue;
     existingIds.add(transaction.id);
-    accounts = applyTransaction(accounts, transaction, input.timestamp);
     newTransactions.push(transaction);
   }
+  if (newTransactions.length) accounts = applyTransactionsBatch(accounts, newTransactions, input.timestamp);
 
   const snapshot = snapshotAccounts(input);
   const reconciled = reconcileAccounts(accounts, snapshot, input, existingIds);

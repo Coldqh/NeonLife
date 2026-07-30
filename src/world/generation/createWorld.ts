@@ -33,6 +33,7 @@ import { createStreetSceneState } from "../../simulation/streetScene/streetScene
 import { createSocialState } from "../../simulation/social/socialSystem";
 import { createWorldCoreState, projectWorldCoreState, synchronizeWorldCoreFromKernel } from "../../simulation/worldCore/worldCoreSystem";
 import { createProductInventoryState, projectProductInventoryState } from "../../simulation/inventory/inventorySystem";
+import { createBusinessEconomyState, projectBusinessEconomyToWorldCore, synchronizeBusinessEconomyFromKernel } from "../../simulation/business/businessEconomySystem";
 import { alignUrbanFabricToStreetTopology, createStreetTopologyState, snapPhysicalVehicleParkingToStreetTopology, snapTransitStopsToStreetTopology } from "../../simulation/streets/streetTopologySystem";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
@@ -330,7 +331,8 @@ export function createWorldSession(seed: string): GameSession {
     organizations,
     population,
     transportServiceLevel: infrastructure.networks.find((item) => item.kind === "transport")?.averageServiceLevel ?? 100,
-    dataServiceLevel: infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100
+    dataServiceLevel: infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100,
+    externallyManagedBusinessEconomy: true
   });
   const streetInput = { timestamp: INITIAL_GAME_TIMESTAMP, seed, metropolitan: metropolitanBase, urban: rawUrban };
   const streets = createStreetTopologyState(streetInput);
@@ -467,6 +469,33 @@ export function createWorldSession(seed: string): GameSession {
     work,
     kernel: syncedKernel
   });
+  const productInventoryBase = createProductInventoryState({
+    seed,
+    timestamp: INITIAL_GAME_TIMESTAMP,
+    playerId: player.id,
+    worldCore: initialWorldCore,
+    production,
+    urban,
+    population,
+    food: foodState
+  });
+  const initialBusinessEconomy = createBusinessEconomyState({
+    seed,
+    timestamp: INITIAL_GAME_TIMESTAMP,
+    playerId: player.id,
+    districts,
+    locations,
+    organizations,
+    metropolitan,
+    urban,
+    population,
+    government,
+    infrastructure,
+    economy,
+    worldCore: initialWorldCore,
+    productInventory: productInventoryBase,
+    kernel: syncedKernel
+  });
   const coreKernel = advanceSimulationKernel(syncedKernel, {
     timestamp: INITIAL_GAME_TIMESTAMP,
     seed,
@@ -476,7 +505,7 @@ export function createWorldSession(seed: string): GameSession {
     organizations,
     player,
     population,
-    economy,
+    economy: initialBusinessEconomy.economy,
     infrastructure,
     production,
     organizationEcosystem,
@@ -484,43 +513,36 @@ export function createWorldSession(seed: string): GameSession {
     health,
     data,
     vehicles,
-    worldCore: initialWorldCore,
+    worldCore: initialBusinessEconomy.worldCore,
+    businessEconomy: initialBusinessEconomy.state,
     food: foodState
   });
-  const worldCore = synchronizeWorldCoreFromKernel(initialWorldCore, coreKernel);
+  const worldCore = synchronizeWorldCoreFromKernel(initialBusinessEconomy.worldCore, coreKernel);
+  const businessEconomy = synchronizeBusinessEconomyFromKernel(initialBusinessEconomy.state, coreKernel, INITIAL_GAME_TIMESTAMP);
+  const businessWorldCore = projectBusinessEconomyToWorldCore(businessEconomy, worldCore, INITIAL_GAME_TIMESTAMP);
   const coreProjection = projectWorldCoreState({
     seed,
     timestamp: INITIAL_GAME_TIMESTAMP,
     playerId: player.id,
     locations,
     organizations,
-    economy,
+    economy: initialBusinessEconomy.economy,
     population,
-    urban,
+    urban: initialBusinessEconomy.urban,
     work,
     kernel: coreKernel,
-    previous: worldCore
-  }, worldCore);
-  const productInventoryBase = createProductInventoryState({
+    previous: businessWorldCore
+  }, businessWorldCore);
+  const inventoryProjection = projectProductInventoryState(initialBusinessEconomy.productInventory, {
     seed,
     timestamp: INITIAL_GAME_TIMESTAMP,
     playerId: player.id,
-    worldCore,
-    production,
-    urban: coreProjection.urban,
-    population: coreProjection.population,
-    food: foodState
-  });
-  const inventoryProjection = projectProductInventoryState(productInventoryBase, {
-    seed,
-    timestamp: INITIAL_GAME_TIMESTAMP,
-    playerId: player.id,
-    worldCore,
+    worldCore: businessWorldCore,
     production,
     urban: coreProjection.urban,
     population: coreProjection.population,
     food: foodState,
-    previous: productInventoryBase
+    previous: initialBusinessEconomy.productInventory
   });
 
   return {
@@ -536,6 +558,7 @@ export function createWorldSession(seed: string): GameSession {
     kernel: coreKernel,
     worldCore: inventoryProjection.worldCore,
     productInventory: inventoryProjection.state,
+    businessEconomy,
     infrastructure,
     production: inventoryProjection.production,
     organizationEcosystem,

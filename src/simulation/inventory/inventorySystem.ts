@@ -14,6 +14,7 @@ import type {
   InventoryState,
   ProductBatchOrigin,
   ProductBatchState,
+  ProductConsumptionResult,
   ProductInventoryInput,
   ProductInventoryIntegrityState,
   ProductInventoryProjectionResult,
@@ -41,6 +42,50 @@ export function playerStorageInventoryId(playerId: string): string { return inve
 export function businessInventoryId(businessId: string): string { return inventoryId(businessId, "stockroom"); }
 export function facilityInventoryId(facilityId: string): string { return inventoryId(facilityId, "warehouse"); }
 export function householdInventoryId(householdId: string): string { return inventoryId(householdId, "pantry"); }
+
+export function ensureCanonicalInventory(
+  state: ProductInventoryState,
+  ownerEntityId: string,
+  ownerKind: InventoryOwnerKind,
+  compartment: string,
+  timestamp: number,
+  locationId?: string,
+  capacityMassGrams?: number,
+  capacityVolumeMl?: number
+): ProductInventoryState {
+  const id = inventoryId(ownerEntityId, compartment);
+  const current = state.inventories.find((item) => item.id === id);
+  if (current) {
+    return {
+      ...state,
+      inventories: state.inventories.map((item) => item.id === id ? {
+        ...item,
+        ownerEntityId,
+        ownerKind,
+        compartment,
+        locationId: locationId ?? item.locationId,
+        capacityMassGrams: capacityMassGrams ?? item.capacityMassGrams,
+        capacityVolumeMl: capacityVolumeMl ?? item.capacityVolumeMl,
+        lastUpdatedAt: timestamp
+      } : item)
+    };
+  }
+  return {
+    ...state,
+    inventories: [...state.inventories, {
+      id,
+      ownerEntityId,
+      ownerKind,
+      compartment,
+      locationId,
+      capacityMassGrams,
+      capacityVolumeMl,
+      stacks: [],
+      lastUpdatedAt: timestamp
+    }],
+    lastUpdatedAt: timestamp
+  };
+}
 
 function inventoryShell(target: AdapterTarget, timestamp: number): InventoryState {
   const product = getProduct(target.productId);
@@ -237,6 +282,189 @@ export function produceProductBatch(state: ProductInventoryState, seed: string, 
   return { ...result.state, inventories, lastUpdatedAt: timestamp };
 }
 
+export function stockCanonicalInventory(
+  state: ProductInventoryState,
+  seed: string,
+  ownerEntityId: string,
+  ownerKind: InventoryOwnerKind,
+  compartment: string,
+  productId: string,
+  quantity: number,
+  timestamp: number,
+  options: { locationId?: string; unitCost?: number; quality?: number; origin?: ProductBatchOrigin; producerEntityId?: string; capacityMassGrams?: number; capacityVolumeMl?: number } = {}
+): ProductInventoryState {
+  let next = ensureCanonicalInventory(state, ownerEntityId, ownerKind, compartment, timestamp, options.locationId, options.capacityMassGrams, options.capacityVolumeMl);
+  if (quantity <= 0) return next;
+  const id = inventoryId(ownerEntityId, compartment);
+  const inventory = next.inventories.find((item) => item.id === id);
+  if (!inventory) return next;
+  const result = createBatchAndStack(
+    next,
+    inventory,
+    seed,
+    productId,
+    quantity,
+    timestamp,
+    options.producerEntityId ?? ownerEntityId,
+    options.origin ?? "reconciliation",
+    options.unitCost,
+    timestamp,
+    undefined,
+    options.quality ?? 72
+  );
+  return {
+    ...result.state,
+    inventories: next.inventories.map((item) => item.id === id ? result.inventory : item),
+    lastUpdatedAt: timestamp
+  };
+}
+
+
+export interface CanonicalInventorySeedSpec {
+  ownerEntityId: string;
+  ownerKind: InventoryOwnerKind;
+  compartment: string;
+  locationId?: string;
+  capacityMassGrams?: number;
+  capacityVolumeMl?: number;
+  products: Array<{ productId: string; quantity: number; unitCost?: number; quality?: number; producerEntityId?: string; origin?: ProductBatchOrigin }>;
+}
+
+export function seedCanonicalInventories(
+  state: ProductInventoryState,
+  seed: string,
+  specs: CanonicalInventorySeedSpec[],
+  timestamp: number
+): ProductInventoryState {
+  const batches = state.batches.map((item) => ({ ...item }));
+  const inventories = state.inventories.map((item) => ({ ...item, stacks: item.stacks.map((stack) => ({ ...stack })) }));
+  const inventoryById = new Map(inventories.map((item) => [item.id, item]));
+  let sequence = state.sequence;
+  for (const spec of specs) {
+    const id = inventoryId(spec.ownerEntityId, spec.compartment);
+    let inventory = inventoryById.get(id);
+    if (!inventory) {
+      inventory = {
+        id,
+        ownerEntityId: spec.ownerEntityId,
+        ownerKind: spec.ownerKind,
+        compartment: spec.compartment,
+        locationId: spec.locationId,
+        capacityMassGrams: spec.capacityMassGrams,
+        capacityVolumeMl: spec.capacityVolumeMl,
+        stacks: [],
+        lastUpdatedAt: timestamp
+      };
+      inventories.push(inventory);
+      inventoryById.set(id, inventory);
+    } else {
+      inventory.ownerEntityId = spec.ownerEntityId;
+      inventory.ownerKind = spec.ownerKind;
+      inventory.compartment = spec.compartment;
+      inventory.locationId = spec.locationId ?? inventory.locationId;
+      inventory.capacityMassGrams = spec.capacityMassGrams ?? inventory.capacityMassGrams;
+      inventory.capacityVolumeMl = spec.capacityVolumeMl ?? inventory.capacityVolumeMl;
+      inventory.lastUpdatedAt = timestamp;
+    }
+    if (inventory.stacks.length) continue;
+    for (const item of spec.products) {
+      const quantity = Math.max(0, Math.round(item.quantity));
+      if (!quantity) continue;
+      const product = getProduct(item.productId);
+      sequence += 1;
+      const idValue = batchId(seed, item.productId, item.producerEntityId ?? spec.ownerEntityId, timestamp, sequence);
+      const expiry = product.shelfLifeHours === null ? undefined : timestamp + product.shelfLifeHours * 3_600_000;
+      const quality = clamp(item.quality ?? 72);
+      const batch: ProductBatchState = {
+        id: idValue,
+        productId: item.productId,
+        lotCode: lotCode(product, timestamp, sequence),
+        producerEntityId: item.producerEntityId ?? spec.ownerEntityId,
+        origin: item.origin ?? "migration",
+        quantityProduced: quantity,
+        quantityRemaining: quantity,
+        quality,
+        condition: 100,
+        manufacturedAt: timestamp,
+        expiresAt: expiry,
+        legal: product.legality !== "illegal",
+        recalled: false
+      };
+      const stack: InventoryStackState = {
+        id: stackId(inventory.id, batch.id, sequence),
+        inventoryId: inventory.id,
+        productId: item.productId,
+        batchId: batch.id,
+        quantity,
+        reservedQuantity: 0,
+        unitCost: item.unitCost ?? product.basePrice,
+        quality,
+        condition: 100,
+        acquiredAt: timestamp,
+        expiresAt: expiry,
+        status: expiry !== undefined && expiry <= timestamp ? "expired" : "available"
+      };
+      batches.push(batch);
+      inventory.stacks.push(stack);
+    }
+  }
+  return { ...state, batches, inventories, sequence, lastUpdatedAt: timestamp };
+}
+
+export function consumeInventoryProduct(
+  state: ProductInventoryState,
+  sourceInventoryId: string,
+  productId: string,
+  quantity: number,
+  timestamp: number,
+  reason: ProductTransferReason = "consumption",
+  unitPrice = 0,
+  consumerEntityId = "market-consumption"
+): ProductConsumptionResult {
+  const source = state.inventories.find((item) => item.id === sourceInventoryId);
+  if (!source || quantity <= 0) return { state, consumed: 0, inventoryCost: 0, batchIds: [], transferIds: [] };
+  const removal = removeQuantity(source, state.batches, productId, quantity, timestamp, true);
+  const consumed = removal.removed.reduce((sum, item) => sum + item.quantity, 0);
+  if (!consumed) return { state, consumed: 0, inventoryCost: 0, batchIds: [], transferIds: [] };
+  let sequence = state.sequence;
+  const targetInventoryId = inventoryId(consumerEntityId, "consumed");
+  const transfers: ProductTransferState[] = removal.removed.map((item) => {
+    sequence += 1;
+    return {
+      id: createStableEntityId("product-transfer", `${sourceInventoryId}:${targetInventoryId}:${item.batchId}:${timestamp}:${sequence}`),
+      productId,
+      batchId: item.batchId,
+      sourceInventoryId,
+      targetInventoryId,
+      quantity: item.quantity,
+      unitPrice,
+      totalValue: round(item.quantity * unitPrice),
+      reason,
+      createdAt: timestamp,
+      completedAt: timestamp
+    };
+  });
+  const inventoryCost = round(removal.removed.reduce((sum, item) => sum + item.quantity * item.unitCost, 0));
+  const nextState: ProductInventoryState = {
+    ...state,
+    sequence,
+    batches: removal.batches,
+    inventories: state.inventories.map((item) => item.id === source.id ? removal.inventory : item),
+    transfers: [...state.transfers, ...transfers].slice(-MAX_TRANSFERS),
+    lastUpdatedAt: timestamp
+  };
+  return { state: nextState, consumed, inventoryCost, batchIds: [...new Set(removal.removed.map((item) => item.batchId))], transferIds: transfers.map((item) => item.id) };
+}
+
+export function finalizeProductInventoryState(state: ProductInventoryState, timestamp: number): ProductInventoryState {
+  const next = {
+    ...state,
+    transfers: state.transfers.slice(-MAX_TRANSFERS),
+    lastUpdatedAt: timestamp
+  };
+  return { ...next, totals: totals(next), integrity: integrity(next, timestamp) };
+}
+
 function canonicalBusinessForLocation(worldCore: WorldCoreState, locationId: string): WorldCoreBusinessState | undefined {
   return worldCore.businesses.find((business) => business.locationId === locationId);
 }
@@ -261,22 +489,22 @@ function adapterTargets(input: ProductInventoryInput): AdapterTarget[] {
   pushFoodStacks(input.food.carried, "carried");
   pushFoodStacks(input.food.storage, "home-storage");
 
-  const venueBusinessIds = new Set<string>();
+  const venueProductKeys = new Set<string>();
   for (const operation of input.urban.venueOperations.operations) {
     const business = canonicalBusinessForVenue(input.worldCore, operation.venueId);
     if (!business) continue;
-    venueBusinessIds.add(business.id);
     for (const offer of operation.offers) {
       if (!offer.productId || !PRODUCT_CATALOG.some((product) => product.id === offer.productId)) continue;
+      venueProductKeys.add(`${business.id}|${offer.productId}`);
       targets.push({ key: `venue:${offer.id}`, inventoryId: businessInventoryId(business.id), ownerEntityId: business.id, ownerKind: "business", compartment: "stockroom", locationId: business.locationId, productId: offer.productId, quantity: Math.max(0, offer.stock), unitCost: Math.max(1, Math.round(offer.currentPrice * .42)), origin: "migration" });
     }
   }
 
   for (const [locationId, stock] of Object.entries(input.food.shopStocks)) {
     const business = canonicalBusinessForLocation(input.worldCore, locationId);
-    if (!business || venueBusinessIds.has(business.id)) continue;
+    if (!business) continue;
     for (const [productId, quantity] of Object.entries(stock)) {
-      if (!PRODUCT_CATALOG.some((product) => product.id === productId)) continue;
+      if (!PRODUCT_CATALOG.some((product) => product.id === productId) || venueProductKeys.has(`${business.id}|${productId}`)) continue;
       targets.push({ key: `shop:${locationId}:${productId}`, inventoryId: businessInventoryId(business.id), ownerEntityId: business.id, ownerKind: "business", compartment: "stockroom", locationId, productId, quantity, origin: "migration" });
     }
   }
