@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.43.0 — Product & Inventory Foundation
+
+- added a canonical catalog of 84 physical SKUs across food, medicine, parts, apparel, electronics, cyberware, household goods, fuel, contraband and raw materials;
+- added one inventory model for players, households, businesses and production facilities;
+- added traceable production batches with lot codes, producer, quality, condition, expiry, legality, recipe source and recall state;
+- added capacity-aware FIFO transfers that preserve batch identity and reject negative or impossible movement;
+- converted production and import resource deltas into concrete product batches;
+- added expiry, degradation, recalled stock and inventory integrity checks;
+- converted food storage, household pantries, venue offer stock, production inventory and World Core stock into compatibility projections of canonical inventory;
+- prevented adapter feedback from duplicating goods on later simulation ticks;
+- assigned real product IDs to physical clothing, medicine, alcohol and packaged cyberware offers;
+- migrated saves to schema 39 and added a headless product supply-chain regression.
+
 ## 0.42.0 — World Core Consolidation
 
 - added a canonical World Core registry for businesses, employment and world time;

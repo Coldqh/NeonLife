@@ -17,7 +17,7 @@ const checks = [
   ["src/app/map/LocalSectorMap.tsx", "local-map__police-response"],
   ["src/ui/theme/crime.css", ".crime-screen"],
   ["src/world/state/types.ts", "playerCrime: PlayerCrimeState"],
-  ["src/core/saves/types.ts", "SAVE_SCHEMA_VERSION = 38"]
+  ["src/core/saves/types.ts", "SAVE_SCHEMA_VERSION = 39"]
 ];
 
 let passed = 0;

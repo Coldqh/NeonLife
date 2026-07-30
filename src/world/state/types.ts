@@ -33,6 +33,7 @@ import type { LocalMovementState } from "../../simulation/localMovement/types";
 import type { StreetSceneState } from "../../simulation/streetScene/types";
 import type { SocialState } from "../../simulation/social/types";
 import type { WorldCoreState } from "../../simulation/worldCore/types";
+import type { ProductInventoryState } from "../../simulation/inventory/types";
 
 export interface CityState {
   id: EntityId;
@@ -125,6 +126,7 @@ export interface GameSession {
   population: PopulationState;
   kernel: SimulationKernelState;
   worldCore: WorldCoreState;
+  productInventory: ProductInventoryState;
   infrastructure: InfrastructureState;
   production: ProductionState;
   organizationEcosystem: OrganizationEcosystemState;

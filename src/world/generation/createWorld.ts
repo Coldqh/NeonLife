@@ -32,6 +32,7 @@ import { createPlayerCrimeState } from "../../simulation/crime/playerCrimeSystem
 import { createStreetSceneState } from "../../simulation/streetScene/streetSceneSystem";
 import { createSocialState } from "../../simulation/social/socialSystem";
 import { createWorldCoreState, projectWorldCoreState, synchronizeWorldCoreFromKernel } from "../../simulation/worldCore/worldCoreSystem";
+import { createProductInventoryState, projectProductInventoryState } from "../../simulation/inventory/inventorySystem";
 import { alignUrbanFabricToStreetTopology, createStreetTopologyState, snapPhysicalVehicleParkingToStreetTopology, snapTransitStopsToStreetTopology } from "../../simulation/streets/streetTopologySystem";
 import { createInitialDistrictPulse } from "../city/districtPulse";
 import { createWorldMeta } from "../city/demoWorld";
@@ -500,6 +501,27 @@ export function createWorldSession(seed: string): GameSession {
     kernel: coreKernel,
     previous: worldCore
   }, worldCore);
+  const productInventoryBase = createProductInventoryState({
+    seed,
+    timestamp: INITIAL_GAME_TIMESTAMP,
+    playerId: player.id,
+    worldCore,
+    production,
+    urban: coreProjection.urban,
+    population: coreProjection.population,
+    food: foodState
+  });
+  const inventoryProjection = projectProductInventoryState(productInventoryBase, {
+    seed,
+    timestamp: INITIAL_GAME_TIMESTAMP,
+    playerId: player.id,
+    worldCore,
+    production,
+    urban: coreProjection.urban,
+    population: coreProjection.population,
+    food: foodState,
+    previous: productInventoryBase
+  });
 
   return {
     schemaVersion: SAVE_SCHEMA_VERSION,
@@ -510,17 +532,18 @@ export function createWorldSession(seed: string): GameSession {
     people,
     pressure,
     economy: coreProjection.economy,
-    population: coreProjection.population,
+    population: inventoryProjection.population,
     kernel: coreKernel,
-    worldCore,
+    worldCore: inventoryProjection.worldCore,
+    productInventory: inventoryProjection.state,
     infrastructure,
-    production,
+    production: inventoryProjection.production,
     organizationEcosystem,
     government,
     health,
     data,
     metropolitan,
-    urban: coreProjection.urban,
+    urban: inventoryProjection.urban,
     streets,
     mobility,
     localScene,
@@ -544,7 +567,7 @@ export function createWorldSession(seed: string): GameSession {
     life: {
       currentLocationId: housing.id,
       housing: housingState,
-      food: foodState,
+      food: inventoryProjection.food,
       lastSleepAt: null
     },
     jobs: {

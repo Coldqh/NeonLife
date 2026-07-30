@@ -52,6 +52,7 @@ import type { LocalMovementTargetState } from "../../simulation/localMovement/ty
 import { advanceStreetSceneState, applyStreetIncidentAction } from "../../simulation/streetScene/streetSceneSystem";
 import { advanceSocialState } from "../../simulation/social/socialSystem";
 import { advanceWorldCoreState, projectWorldCoreState, remapWorldCoreTransactions, synchronizeWorldCoreFromKernel, worldCoreManagedLocationIds } from "../../simulation/worldCore/worldCoreSystem";
+import { advanceProductInventoryState, projectProductInventoryState } from "../../simulation/inventory/inventorySystem";
 import { advancePlayerCrimeState, recordPlayerCrimeAction, releasePlayerCustodyState } from "../../simulation/crime/playerCrimeSystem";
 import { joinVenueQueueState, leaveVenueQueueState, purchaseVenueOfferState, venueIsOpenAt } from "../../simulation/venues/venueOperationsSystem";
 import type { StreetIncidentAction } from "../../simulation/streetScene/types";
@@ -739,6 +740,28 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     kernel,
     previous: worldCore
   }, worldCore);
+  const productInventoryBase = advanceProductInventoryState({
+    seed: session.world.meta.seed,
+    timestamp: nextTimestamp,
+    playerId: session.player.id,
+    worldCore,
+    production: healthAdvance.production,
+    urban: coreProjection.urban,
+    population: coreProjection.population,
+    food: productionAdvance.food,
+    previous: session.productInventory
+  });
+  const inventoryProjection = projectProductInventoryState(productInventoryBase, {
+    seed: session.world.meta.seed,
+    timestamp: nextTimestamp,
+    playerId: session.player.id,
+    worldCore,
+    production: healthAdvance.production,
+    urban: coreProjection.urban,
+    population: coreProjection.population,
+    food: productionAdvance.food,
+    previous: productInventoryBase
+  });
 
   return {
     ...session,
@@ -758,17 +781,18 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     people: peopleState,
     pressure,
     economy: coreProjection.economy,
-    population: coreProjection.population,
+    population: inventoryProjection.population,
     kernel,
-    worldCore,
+    worldCore: inventoryProjection.worldCore,
+    productInventory: inventoryProjection.state,
     infrastructure: governmentAdvance.infrastructure,
-    production: healthAdvance.production,
+    production: inventoryProjection.production,
     organizationEcosystem: organizationAdvance.state,
     government: crimeAdvance.government,
     health: healthAdvance.state,
     data: crimeAdvance.data,
     metropolitan: metropolitanState,
-    urban: coreProjection.urban,
+    urban: inventoryProjection.urban,
     streets: streetsState,
     mobility: mobilityState,
     localScene: localSceneState,
@@ -786,7 +810,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
       : options.activity ?? session.currentActivity,
     life: {
       ...session.life,
-      food: productionAdvance.food,
+      food: inventoryProjection.food,
       currentLocationId: targetLocation?.id ?? localSceneState.playerPosition.locationId ?? session.life.currentLocationId
     },
     jobs: {

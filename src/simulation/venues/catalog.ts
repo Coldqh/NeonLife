@@ -26,12 +26,13 @@ const TEMPLATES: Record<VenueCategory, VenueOfferTemplate[]> = {
     { code: "C12", name: "PULSERUSH C-12", description: "Холодный стимулятор.", kind: "meal", productId: "pulserush-c12", price: 18, stock: 36, durationMinutes: 3, effects: { hungerDelta: -4, fatigueDelta: -18, stressDelta: 5, healthDelta: -1 } }
   ],
   bar: [
-    { code: "HOUSE", name: "HOUSE SYNTH", description: "Синтетический коктейль заведения.", kind: "entertainment", price: 28, stock: 40, durationMinutes: 18, effects: { stressDelta: -7, fatigueDelta: 2, healthDelta: -1 } },
+    { code: "HOUSE", name: "HOUSE SYNTH", description: "Синтетический коктейль заведения.", kind: "entertainment", productId: "synth-spirit-350", price: 28, stock: 40, durationMinutes: 18, effects: { stressDelta: -7, fatigueDelta: 2, healthDelta: -1 } },
     { code: "BOOTH", name: "PRIVATE BOOTH", description: "Полчаса в отдельной кабинке.", kind: "entertainment", price: 55, stock: 8, durationMinutes: 30, effects: { stressDelta: -11, fatigueDelta: 3 } },
     { code: "SNACK", name: "MORROW BAR SNACK", description: "Водорослевый снек к напиткам.", kind: "meal", productId: "morrow-algae-chips", price: 16, stock: 26, durationMinutes: 4, effects: { hungerDelta: -13, stressDelta: -2 } }
   ],
   pharmacy: [
     { code: "RECOVERY", name: "SABLE RECOVERY PACK", description: "Клиническое восстановительное питание.", kind: "food-goods", productId: "sable-recovery-pack", price: 67, stock: 18, durationMinutes: 4 },
+    { code: "PATCH", name: "MEDPATCH BASIC", description: "Базовый медицинский пластырь для домашней аптечки.", kind: "medical", productId: "medpatch-basic", price: 22, stock: 28, durationMinutes: 3 },
     { code: "FIRSTAID", name: "FIRST-AID PROCEDURE", description: "Обработка мелких повреждений на месте.", kind: "medical", price: 45, stock: 22, durationMinutes: 15, effects: { healthDelta: 5, stressDelta: -2 } }
   ],
   clinic: [
@@ -44,11 +45,12 @@ const TEMPLATES: Record<VenueCategory, VenueOfferTemplate[]> = {
   ],
   cyberware: [
     { code: "SCAN", name: "IMPLANT DIAGNOSTICS", description: "Проверка имплантов и нервных интерфейсов.", kind: "cyberware", price: 90, stock: 18, durationMinutes: 35, effects: { healthDelta: 2, stressDelta: -4 } },
-    { code: "TUNE", name: "NEURAL RECALIBRATION", description: "Настройка существующего импланта.", kind: "cyberware", price: 180, stock: 8, durationMinutes: 70, effects: { healthDelta: 4, fatigueDelta: -5, stressDelta: -6 } }
+    { code: "TUNE", name: "NEURAL RECALIBRATION", description: "Настройка существующего импланта.", kind: "cyberware", price: 180, stock: 8, durationMinutes: 70, effects: { healthDelta: 4, fatigueDelta: -5, stressDelta: -6 } },
+    { code: "NAVLINK", name: "MESHLINE NAVLINK N4", description: "Лицензированный коммуникационный имплант в заводской упаковке.", kind: "cyberware", productId: "meshline-navlink-n4", price: 1150, stock: 3, durationMinutes: 5 }
   ],
   clothing: [
-    { code: "STREET", name: "STREET FIT", description: "Базовый комплект городской одежды.", kind: "apparel", price: 85, stock: 16, durationMinutes: 18, effects: { stressDelta: -3 } },
-    { code: "ARMOR", name: "REINFORCED JACKET", description: "Усиленная куртка с защитными вставками.", kind: "apparel", price: 210, stock: 8, durationMinutes: 22, effects: { stressDelta: -2 } }
+    { code: "STREET", name: "STREET FIT", description: "Базовый комплект городской одежды.", kind: "apparel", productId: "street-fit-set", price: 85, stock: 16, durationMinutes: 18, effects: { stressDelta: -3 } },
+    { code: "ARMOR", name: "REINFORCED JACKET", description: "Усиленная куртка с защитными вставками.", kind: "apparel", productId: "reinforced-jacket", price: 210, stock: 8, durationMinutes: 22, effects: { stressDelta: -2 } }
   ],
   entertainment: [
     { code: "ARCADE", name: "ARCADE SESSION", description: "Сорок минут в игровом зале.", kind: "entertainment", price: 32, stock: 30, durationMinutes: 40, effects: { stressDelta: -10, fatigueDelta: 3 } },

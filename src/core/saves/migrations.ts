@@ -35,6 +35,7 @@ import { normalizePlayerCrimeState } from "../../simulation/crime/playerCrimeSys
 import { normalizeStreetSceneState } from "../../simulation/streetScene/streetSceneSystem";
 import { normalizeSocialState } from "../../simulation/social/socialSystem";
 import { normalizeWorldCoreState, projectWorldCoreState, synchronizeWorldCoreFromKernel } from "../../simulation/worldCore/worldCoreSystem";
+import { normalizeProductInventoryState, projectProductInventoryState } from "../../simulation/inventory/inventorySystem";
 import { alignUrbanFabricToStreetTopology, normalizeStreetTopologyState, snapPhysicalVehicleParkingToStreetTopology, snapTransitStopsToStreetTopology } from "../../simulation/streets/streetTopologySystem";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
 
@@ -771,6 +772,27 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     kernel,
     previous: worldCore
   }, worldCore);
+  const productInventoryBase = normalizeProductInventoryState(payload.productInventory, {
+    seed,
+    timestamp,
+    playerId: playerState.id,
+    worldCore,
+    production,
+    urban: coreProjection.urban,
+    population: coreProjection.population,
+    food: foodState
+  });
+  const inventoryProjection = projectProductInventoryState(productInventoryBase, {
+    seed,
+    timestamp,
+    playerId: playerState.id,
+    worldCore,
+    production,
+    urban: coreProjection.urban,
+    population: coreProjection.population,
+    food: foodState,
+    previous: productInventoryBase
+  });
 
   const { situations: _discardedSituations, ...payloadWithoutSituations } = payload;
   const migratedPayload = {
@@ -782,17 +804,18 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     people,
     pressure,
     economy: coreProjection.economy,
-    population: coreProjection.population,
+    population: inventoryProjection.population,
     kernel,
-    worldCore,
+    worldCore: inventoryProjection.worldCore,
+    productInventory: inventoryProjection.state,
     infrastructure,
-    production,
+    production: inventoryProjection.production,
     organizationEcosystem,
     government,
     health,
     data,
     metropolitan: mobilitySynchronizedMetropolitan,
-    urban: coreProjection.urban,
+    urban: inventoryProjection.urban,
     streets,
     mobility,
     localScene,
@@ -811,7 +834,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
       organizations,
       districts: districts.map((district) => ({
         ...district,
-        population: Math.round(coreProjection.population.lifecycle.representedPopulationByDistrict[district.id] ?? district.population)
+        population: Math.round(inventoryProjection.population.lifecycle.representedPopulationByDistrict[district.id] ?? district.population)
       })),
       city: { ...cityState, population: mobilitySynchronizedMetropolitan.totals.representedPopulation }
     },
@@ -819,16 +842,10 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
       ...district,
       seedScope: typeof district.seedScope === "string" ? district.seedScope : seed
     },
-    life: existingLife ? { ...existingLife, food: foodState, housing: housingState } : {
+    life: existingLife ? { ...existingLife, food: inventoryProjection.food, housing: housingState } : {
       currentLocationId: housingLocation?.id ?? "location-missing",
       housing: createInitialHousing(housingLocation?.id ?? "location-missing", timestamp),
-      food: createInitialFoodState(
-        seed,
-        timestamp,
-        marketLocation?.id ?? "market-missing",
-        kitchenLocation?.id ?? "kitchen-missing",
-        clinicLocation?.id ?? "clinic-missing"
-      ),
+      food: inventoryProjection.food,
       lastSleepAt: null
     },
     jobs: { ...existingJobs, courier, work: coreProjection.work }
