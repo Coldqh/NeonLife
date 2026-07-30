@@ -1,0 +1,35 @@
+/* v0.39.4 — the player is always identified by green, never by danger red. */
+:root { --nl-player: #43e58f; --nl-player-soft: rgba(67, 229, 143, .22); --nl-player-glow: rgba(67, 229, 143, .62); }
+
+.local-map__player circle,
+.local-map__player-ring {
+  fill: var(--nl-player-soft) !important;
+  stroke: var(--nl-player) !important;
+  filter: drop-shadow(0 0 1.2px var(--nl-player-glow));
+}
+.local-map__player path,
+.local-map__player-core {
+  fill: #bfffdc !important;
+  stroke: #11864f !important;
+}
+
+.building-profile__unit-grid > div.is-player,
+.floor-unit-grid button.is-player,
+.unit-plan > button:not(.interior-actor).is-player {
+  background: rgba(67, 229, 143, .14) !important;
+  border-color: var(--nl-player) !important;
+  box-shadow: inset 0 0 0 1px var(--nl-player), 0 0 20px rgba(67, 229, 143, .18) !important;
+}
+.interior-floor-rail button.is-current,
+.floor-corridor b,
+.floor-unit-grid button.is-player > b,
+.unit-plan > button.is-player > b {
+  color: var(--nl-player) !important;
+  border-color: rgba(67, 229, 143, .55) !important;
+}
+.seat-grid button.is-player {
+  background: var(--nl-player) !important;
+  border-color: #bfffdc !important;
+  color: #03110a !important;
+  box-shadow: 0 0 18px rgba(67, 229, 143, .28);
+}

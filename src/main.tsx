@@ -16,6 +16,7 @@ import "./ui/theme/nearby.css";
 import "./ui/theme/social.css";
 import "./ui/theme/transit.css";
 import "./ui/theme/overlays.css";
+import "./ui/theme/player-identity.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

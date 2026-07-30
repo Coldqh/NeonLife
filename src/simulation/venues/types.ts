@@ -1,5 +1,5 @@
 import type { EntityId } from "../../core/ids/entityId";
-import type { VenueCategory, VenueState } from "../urban/types";
+import type { VenueCategory, VenueOperatingStatus, VenueState } from "../urban/types";
 
 export type VenueOfferKind =
   | "food-goods"
@@ -54,16 +54,56 @@ export interface VenueQueueState {
 export interface VenueOperationState {
   venueId: EntityId;
   category: VenueCategory;
-  status: "operating" | "closed" | "renovation" | "vacant" | "insolvent";
+  status: VenueOperatingStatus;
   cash: number;
   revenueToday: number;
   expensesToday: number;
+  lifetimeRevenue: number;
+  lifetimeExpenses: number;
   staffPresent: number;
   serviceCapacityPerHour: number;
   queue: VenueQueueState;
   offers: VenueOfferState[];
   lastRestockedAt: number;
   lastUpdatedAt: number;
+}
+
+export interface VenueRegistryEntryState {
+  venue: VenueState;
+  materialized: boolean;
+  firstSeenAt: number;
+  lastSeenAt: number;
+}
+
+export type VenueSupplyOrderStatus = "ordered" | "in-transit" | "delivered" | "cancelled";
+
+export interface VenueSupplyOrderState {
+  id: EntityId;
+  venueId: EntityId;
+  offerId: EntityId;
+  supplierEntityId: EntityId;
+  quantity: number;
+  unitCost: number;
+  totalCost: number;
+  orderedAt: number;
+  arrivesAt: number;
+  deliveredAt?: number;
+  status: VenueSupplyOrderStatus;
+}
+
+export type VenueLedgerKind = "sale" | "payroll" | "utilities" | "rent" | "supplies" | "tax";
+
+export interface VenueLedgerEntryState {
+  id: EntityId;
+  idempotencyKey: string;
+  timestamp: number;
+  venueId: EntityId;
+  kind: VenueLedgerKind;
+  debitEntityId: EntityId;
+  creditEntityId: EntityId;
+  amount: number;
+  description: string;
+  postToKernel: boolean;
 }
 
 export interface VenueReceiptState {
@@ -81,12 +121,17 @@ export interface VenueOperationsTotalsState {
   waitingCustomers: number;
   sales: number;
   revenue: number;
+  expenses: number;
   stockUnits: number;
+  pendingSupplyOrders: number;
 }
 
 export interface VenueOperationsState {
-  version: 1;
+  version: 2;
   operations: VenueOperationState[];
+  registry: VenueRegistryEntryState[];
+  supplyOrders: VenueSupplyOrderState[];
+  ledger: VenueLedgerEntryState[];
   receipts: VenueReceiptState[];
   totals: VenueOperationsTotalsState;
   lastProcessedDay: number;
@@ -97,6 +142,7 @@ export interface VenueOperationsInput {
   seed: string;
   timestamp: number;
   venues: VenueState[];
+  landlordByBuildingId?: Record<EntityId, EntityId>;
 }
 
 export interface VenuePurchaseResult {

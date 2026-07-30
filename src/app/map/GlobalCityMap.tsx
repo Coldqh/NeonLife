@@ -374,9 +374,9 @@ export function GlobalCityMap({
     context.save();
     context.beginPath(); context.arc(playerX, playerY, 5.2, 0, Math.PI * 2);
     context.fillStyle = "#06101b"; context.fill();
-    context.strokeStyle = "#ff4058"; context.lineWidth = 2.2; context.stroke();
+    context.strokeStyle = "#43e58f"; context.lineWidth = 2.2; context.shadowColor = "rgba(67,229,143,.68)"; context.shadowBlur = 8; context.stroke();
     context.beginPath(); context.arc(playerX, playerY, 1.8, 0, Math.PI * 2);
-    context.fillStyle = "#fff"; context.fill();
+    context.fillStyle = "#bfffdc"; context.fill();
     context.restore();
   }, [camera, cityLoops, districtIndex, districtLoops, layers, resizeTick, selectedDistrictId, selectedPoint, selectedSectorId, session]);
 

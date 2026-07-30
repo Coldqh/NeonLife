@@ -162,7 +162,7 @@ export function BuildingInteriorMap({
                   <button type="button" key={unit.unitId} className={`${selectedUnitId === unit.unitId ? "is-selected" : ""}${active ? " is-player" : ""}${unit.occupied ? " is-occupied" : ""}`} onClick={() => setSelectedUnitId(unit.unitId)}>
                     <i>{unit.use === "apartment" ? "⌂" : unit.use === "shop" ? "▤" : unit.use === "clinic" ? "+" : unit.use === "office" ? "▣" : "□"}</i>
                     <strong>{venue?.name ?? unit.unitNumber}</strong>
-                    <span>{venue ? `${venue.unitNumber} · ${venue.operatingStatus === "operating" ? "работает" : venue.operatingStatus}` : unit.use.replace(/-/g, " ")}</span>
+                    <span>{venue ? `${venue.unitNumber} · ${venue.operatingStatus === "operating" ? "работает" : venue.operatingStatus === "insolvent" ? "банкрот" : venue.operatingStatus === "seized" ? "опечатано" : venue.operatingStatus === "renovation" ? "ремонт" : venue.operatingStatus === "vacant" ? "пустует" : "закрыто"}` : unit.use.replace(/-/g, " ")}</span>
                     <em>{actors.length || unit.residentCount} внутри</em>
                     {active ? <b>ВЫ</b> : null}
                   </button>

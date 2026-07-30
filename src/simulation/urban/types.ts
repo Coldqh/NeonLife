@@ -9,7 +9,7 @@ export type InteriorRoomKind = "entry" | "living" | "kitchen" | "bedroom" | "bat
 export type InteriorDeltaKind = "door" | "damage" | "inventory" | "occupancy" | "evidence" | "ownership" | "access";
 export type VenueCategory = "convenience" | "food" | "bar" | "pharmacy" | "clinic" | "repair" | "cyberware" | "clothing" | "entertainment" | "hotel" | "office-service" | "market";
 export type VenuePriceTier = 1 | 2 | 3 | 4;
-export type VenueOperatingStatus = "operating" | "closed" | "renovation" | "vacant";
+export type VenueOperatingStatus = "operating" | "closed" | "renovation" | "vacant" | "insolvent" | "seized";
 
 export interface SectorBuildingCatalogState {
   sectorId: EntityId;

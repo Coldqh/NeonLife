@@ -1,12 +1,19 @@
-import { FOOD_CATALOG, getFoodProduct } from "../../data/products/foodCatalog";
+import { getFoodProduct } from "../../data/products/foodCatalog";
 import { getCarriedMassGrams } from "../../gameplay/food/foodSystem";
 import { getActiveCourierOrder } from "../../gameplay/jobs/courier/courierSystem";
 import { currentPhysicalLocation, isCourierDispatchLocation, isPlayerInsideHome, isPlayerInsideLocation } from "../../gameplay/life/playerPresence";
-import { getBusinessAtLocation, localPrice } from "../../gameplay/economy/localEconomy";
-import { isLocationOpen } from "../../gameplay/travel/travelSystem";
 import type { GameSession } from "../../world/state/types";
 import { venueCategoryLabel, venueIsOpen } from "./mapUi";
 import type { LocalLifeAction } from "../actions/localLifeActions";
+
+function venueStatusLabel(status: GameSession["urban"]["venueOperations"]["operations"][number]["status"] | undefined): string {
+  if (status === "insolvent") return "БАНКРОТ";
+  if (status === "seized") return "ОПЕЧАТАНО";
+  if (status === "renovation") return "РЕМОНТ";
+  if (status === "vacant") return "ПУСТУЕТ";
+  if (status === "closed") return "ЗАКРЫТО";
+  return "ЗАКРЫТО";
+}
 
 export function BuildingServicePanel({
   session,
@@ -19,21 +26,24 @@ export function BuildingServicePanel({
 }) {
   const location = currentPhysicalLocation(session);
   const insideLocation = Boolean(location && isPlayerInsideLocation(session, location.id));
-  const business = location ? getBusinessAtLocation(session.economy, location.id) : undefined;
-  const shopStock = location && insideLocation ? session.life.food.shopStocks[location.id] : undefined;
-  const clinic = location?.type === "clinic" && insideLocation
-    ? session.health.facilities.find((item) => item.locationId === location.id)
-    : undefined;
   const atDispatch = Boolean(location && insideLocation && isCourierDispatchLocation(location));
   const activeOrder = getActiveCourierOrder(session.jobs.courier);
   const carriedMass = getCarriedMassGrams(session.life.food);
   const insideHome = isPlayerInsideHome(session);
-  const open = location ? isLocationOpen(location, session.timestamp) : false;
   const venue = session.urban.venues.find((item) => item.unitId === session.localScene.playerPosition.unitId);
   const venueOperation = venue ? session.urban.venueOperations.operations.find((item) => item.venueId === venue.id) : undefined;
-  const venueOpen = venue ? venueIsOpen(venue, session.timestamp) && venueOperation?.status === "operating" : false;
+  const venueOpen = Boolean(venue && venueOperation?.status === "operating" && venueIsOpen(venue, session.timestamp));
   const venueQueueReady = venueOperation?.queue.playerState === "ready" || (venueOperation?.queue.estimatedWaitMinutes ?? 0) <= 0;
-  const playerVehicleId = session.vehicles.player.currentVehicleId ?? session.vehicles.player.ownedVehicleIds[0];
+  const venueBuilding = venue ? session.urban.buildings.find((building) => building.id === venue.buildingId) : undefined;
+  const ownedVehicleIds = new Set([session.vehicles.player.currentVehicleId, ...session.vehicles.player.ownedVehicleIds].filter((id): id is string => Boolean(id)));
+  const serviceVehicleId = venueBuilding ? session.vehicles.vehicles.find((vehicle) => {
+    if (!ownedVehicleIds.has(vehicle.id) || vehicle.position.sectorId !== venueBuilding.sectorId) return false;
+    if (vehicle.position.buildingId === venueBuilding.id) return true;
+    const dx = Math.max(venueBuilding.bounds.xM - vehicle.position.xM, 0, vehicle.position.xM - (venueBuilding.bounds.xM + venueBuilding.bounds.widthM));
+    const dy = Math.max(venueBuilding.bounds.yM - vehicle.position.yM, 0, vehicle.position.yM - (venueBuilding.bounds.yM + venueBuilding.bounds.heightM));
+    return Math.hypot(dx, dy) <= 45;
+  })?.id : undefined;
+  const pendingSupplies = venue ? session.urban.venueOperations.supplyOrders.filter((order) => order.venueId === venue.id && (order.status === "ordered" || order.status === "in-transit")) : [];
 
   return (
     <aside className="building-service-panel" data-no-swipe>
@@ -42,16 +52,17 @@ export function BuildingServicePanel({
         <button type="button" onClick={onClose} aria-label="Закрыть">×</button>
       </header>
 
-      {venue ? <div className="building-service-panel__status"><strong className={venueOpen ? "status-good" : "status-bad"}>{venueOpen ? "ОТКРЫТО" : venueOperation?.status === "renovation" ? "РЕМОНТ" : venueOperation?.status === "vacant" ? "ПУСТУЕТ" : "ЗАКРЫТО"}</strong><span>{venue.code} · {venueCategoryLabel(venue.category)}</span></div> : location ? <div className="building-service-panel__status"><strong className={open ? "status-good" : "status-bad"}>{open ? "ОТКРЫТО" : "ЗАКРЫТО"}</strong><span>{location.code}</span></div> : null}
+      {venue ? <div className="building-service-panel__status"><strong className={venueOpen ? "status-good" : "status-bad"}>{venueOpen ? "ОТКРЫТО" : venueStatusLabel(venueOperation?.status)}</strong><span>{venue.code} · {venueCategoryLabel(venue.category)}</span></div> : null}
 
       {venue && venueOperation ? (
         <section className="venue-service">
           <header className="venue-service__summary">
             <div><span>ОЧЕРЕДЬ</span><strong>{venueOperation.queue.waitingCount} чел. · ~{venueOperation.queue.estimatedWaitMinutes} мин.</strong></div>
             <div><span>ПЕРСОНАЛ</span><strong>{venueOperation.staffPresent} на смене</strong></div>
-            <div><span>ВЫРУЧКА СЕГОДНЯ</span><strong>₵ {venueOperation.revenueToday}</strong></div>
+            <div><span>КАССА</span><strong>₵ {Math.round(venueOperation.cash)}</strong></div>
+            <div><span>ПОСТАВКИ</span><strong>{pendingSupplies.length ? `${pendingSupplies.length} в пути` : "нет заказов"}</strong></div>
           </header>
-          {!venueOpen ? <p className="building-service-empty">Заведение сейчас не обслуживает посетителей.</p> : !venueQueueReady ? (
+          {venueOperation.status === "insolvent" ? <p className="building-service-empty">Бизнес неплатёжеспособен. Касса закрыта, новые заказы и обслуживание остановлены.</p> : !venueOpen ? <p className="building-service-empty">Заведение сейчас не обслуживает посетителей.</p> : !venueQueueReady ? (
             <div className="venue-queue-card">
               <p>Перед заказом нужно дождаться кассы. Текущее ожидание: около {venueOperation.queue.estimatedWaitMinutes} мин.</p>
               <button type="button" onClick={() => onAction({ kind: "join-venue-queue", venueId: venue.id })}>Встать в очередь</button>
@@ -61,46 +72,17 @@ export function BuildingServicePanel({
               {venueOperation.offers.filter((offer) => offer.active).map((offer) => {
                 const product = offer.productId ? getFoodProduct(offer.productId) : null;
                 const fits = !product || carriedMass + product.massGrams <= session.life.food.carryingCapacityGrams;
-                const vehicleRequired = offer.kind === "vehicle-service" && !playerVehicleId;
+                const vehicleRequired = offer.kind === "vehicle-service" && !serviceVehicleId;
                 return (
                   <article key={offer.id}>
                     <div><strong>{offer.name}</strong><span>{offer.description}</span><small>₵ {offer.currentPrice} · остаток {offer.stock} · {offer.durationMinutes} мин.</small></div>
-                    <button type="button" disabled={!venueOpen || offer.stock <= 0 || session.player.balance < offer.currentPrice || !fits || vehicleRequired} onClick={() => onAction({ kind: "buy-venue-offer", venueId: venue.id, offerId: offer.id })}>{vehicleRequired ? "Нет машины" : offer.stock <= 0 ? "Нет в наличии" : "Купить"}</button>
+                    <button type="button" disabled={!venueOpen || offer.stock <= 0 || session.player.balance < offer.currentPrice || !fits || vehicleRequired} onClick={() => onAction({ kind: "buy-venue-offer", venueId: venue.id, offerId: offer.id })}>{vehicleRequired ? "Нет машины рядом" : offer.stock <= 0 ? "Нет в наличии" : "Купить"}</button>
                   </article>
                 );
               })}
             </div>
           )}
           {venueOperation.queue.playerState === "waiting" ? <button type="button" className="venue-service__leave" onClick={() => onAction({ kind: "leave-venue-queue", venueId: venue.id })}>Покинуть очередь</button> : null}
-        </section>
-      ) : null}
-
-      {!venue && shopStock && location ? (
-        <section>
-          <h3>КАССА</h3>
-          <div className="building-service-list">
-            {FOOD_CATALOG.filter((product) => (shopStock[product.id] ?? 0) > 0).slice(0, 5).map((product) => {
-              const price = localPrice(product.price, business);
-              const fits = carriedMass + product.massGrams <= session.life.food.carryingCapacityGrams;
-              return (
-                <article key={product.id}>
-                  <div><strong>{product.name}</strong><span>₵ {price} · остаток {shopStock[product.id]} · {product.massGrams} г</span></div>
-                  <button type="button" disabled={!open || !fits || session.player.balance < price} onClick={() => onAction({ kind: "buy-food", productId: product.id })}>Купить</button>
-                </article>
-              );
-            })}
-          </div>
-        </section>
-      ) : null}
-
-      {!venue && clinic && location ? (
-        <section>
-          <h3>МЕДИЦИНСКИЙ ПОСТ</h3>
-          <p>Очередь {clinic.queueLength} · запас {clinic.medicalStock} · сервис {clinic.serviceLevel}%.</p>
-          <div className="building-service-actions">
-            <button type="button" disabled={!open || session.player.balance < 45 || clinic.medicalStock < 1} onClick={() => onAction({ kind: "clinic-care", care: "checkup" })}>Осмотр · ₵ 45</button>
-            <button type="button" disabled={!open || session.player.balance < 120 || clinic.medicalStock < 4} onClick={() => onAction({ kind: "clinic-care", care: "stabilize" })}>Стабилизация · ₵ 120</button>
-          </div>
         </section>
       ) : null}
 
@@ -139,7 +121,7 @@ export function BuildingServicePanel({
         </section>
       ) : null}
 
-      {!venue && !shopStock && !clinic && !atDispatch && !insideHome && !(activeOrder && location && [activeOrder.pickupLocationId, activeOrder.dropoffLocationId].includes(location.id)) ? <p className="building-service-empty">В этой зоне пока нет доступного сервиса.</p> : null}
+      {!venue && !atDispatch && !insideHome && !(activeOrder && location && [activeOrder.pickupLocationId, activeOrder.dropoffLocationId].includes(location.id)) ? <p className="building-service-empty">В этой зоне пока нет доступного сервиса.</p> : null}
     </aside>
   );
 }

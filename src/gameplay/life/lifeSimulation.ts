@@ -6,6 +6,7 @@ import { getFoodProduct } from "../../data/products/foodCatalog";
 import { advanceHumanNetwork, getPerson, recordPlayerAction, toKnownNpc } from "../../people/network/humanNetwork";
 import { advancePopulation, synchronizeActivePeopleFromPopulation } from "../../simulation/population/populationSystem";
 import { advanceSimulationKernel, kernelSystemEntityId } from "../../simulation/kernel/simulationKernel";
+import type { KernelTransactionReason } from "../../simulation/kernel/types";
 import { advanceInfrastructure, applyInfrastructureToDistrictPulse } from "../../simulation/infrastructure/infrastructureSystem";
 import { advanceProductionAndLogistics } from "../../simulation/production/productionSystem";
 import { advanceOrganizationEcosystem } from "../../simulation/organizations/organizationSystem";
@@ -108,6 +109,15 @@ import {
 
 function clamp(value: number): number {
   return Math.max(0, Math.min(100, value));
+}
+
+function venueLedgerReason(kind: GameSession["urban"]["venueOperations"]["ledger"][number]["kind"], category?: GameSession["urban"]["venues"][number]["category"]): KernelTransactionReason {
+  if (kind === "payroll") return "wage";
+  if (kind === "utilities") return "utility-service";
+  if (kind === "rent") return "rent";
+  if (kind === "supplies") return "wholesale-delivery";
+  if (kind === "tax") return "tax";
+  return category && ["food", "bar", "convenience", "market"].includes(category) ? "food-sale" : "retail-service";
 }
 
 function streetGeometryChanged(previous: GameSession["streets"], next: GameSession["streets"]): boolean {
@@ -615,6 +625,21 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
     localScene: localSceneState
   });
   const kernelDrafts = [...populationAdvance.transactions, ...economyAdvance.transactions, ...infrastructureAdvance.transactions, ...productionAdvance.transactions, ...organizationAdvance.transactions, ...governmentAdvance.transactions, ...healthAdvance.transactions, ...dataAdvance.transactions, ...crimeAdvance.transactions];
+  const previousVenueLedgerTimestamp = session.urban.venueOperations.lastUpdatedAt ?? session.timestamp;
+  const venueById = new Map(urbanState.venueOperations.registry.map((entry) => [entry.venue.id, entry.venue]));
+  for (const entry of urbanState.venueOperations.ledger) {
+    if (!entry.postToKernel || entry.timestamp <= previousVenueLedgerTimestamp) continue;
+    kernelDrafts.push({
+      idempotencyKey: entry.idempotencyKey,
+      timestamp: entry.timestamp,
+      debitEntityId: entry.debitEntityId,
+      creditEntityId: entry.creditEntityId,
+      resource: "credits",
+      amount: entry.amount,
+      reason: venueLedgerReason(entry.kind, venueById.get(entry.venueId)?.category),
+      description: entry.description
+    });
+  }
   if ((options.balanceDelta ?? 0) !== 0) {
     const amount = Math.abs(options.balanceDelta ?? 0);
     const counterpartyEntityId = options.balanceCounterpartyEntityId ?? kernelSystemEntityId(session.world.meta.seed, "clearing");
@@ -2246,12 +2271,23 @@ export function purchaseVenueOffer(session: GameSession, venueId: string, offerI
     if (getCarriedMassGrams(session.life.food) + product.massGrams > session.life.food.carryingCapacityGrams) return session;
   }
 
-  const vehicleId = session.vehicles.player.currentVehicleId ?? session.vehicles.player.ownedVehicleIds[0];
+  const venueBuilding = session.urban.buildings.find((building) => building.id === venue.buildingId);
+  const ownedVehicleIds = new Set([session.vehicles.player.currentVehicleId, ...session.vehicles.player.ownedVehicleIds].filter((id): id is string => Boolean(id)));
+  const serviceVehicle = offer.kind === "vehicle-service" && venueBuilding
+    ? session.vehicles.vehicles.find((vehicle) => {
+        if (!ownedVehicleIds.has(vehicle.id) || vehicle.position.sectorId !== venueBuilding.sectorId) return false;
+        if (vehicle.position.buildingId === venueBuilding.id) return true;
+        const dx = Math.max(venueBuilding.bounds.xM - vehicle.position.xM, 0, vehicle.position.xM - (venueBuilding.bounds.xM + venueBuilding.bounds.widthM));
+        const dy = Math.max(venueBuilding.bounds.yM - vehicle.position.yM, 0, vehicle.position.yM - (venueBuilding.bounds.yM + venueBuilding.bounds.heightM));
+        return Math.hypot(dx, dy) <= 45;
+      })
+    : undefined;
+  const vehicleId = offer.kind === "vehicle-service" ? serviceVehicle?.id : session.vehicles.player.currentVehicleId ?? session.vehicles.player.ownedVehicleIds[0];
   if (offer.kind === "vehicle-service" && !vehicleId) return session;
 
-  const purchase = purchaseVenueOfferState(session.urban.venueOperations, venue.id, offer.id, session.timestamp);
+  const purchase = purchaseVenueOfferState(session.urban.venueOperations, venue.id, offer.id, session.timestamp, session.player.id);
   if (!purchase) return session;
-  const counterparty = venue.organizationId ?? venue.id;
+  const counterparty = `venue-account:${venue.id}`;
   const progressed = progressLife({ ...session, urban: { ...session.urban, venueOperations: purchase.state } }, Math.max(1, offer.durationMinutes), {
     category: offer.kind === "medical" || offer.kind === "cyberware" ? "health" : "finance",
     title: `${offer.name}: услуга завершена.`,
@@ -2289,13 +2325,7 @@ export function purchaseVenueOffer(session: GameSession, venueId: string, offerI
   return {
     ...progressed,
     life: { ...progressed.life, food },
-    vehicles,
-    world: {
-      ...progressed.world,
-      organizations: progressed.world.organizations.map((organization) => organization.id === venue.organizationId
-        ? { ...organization, budget: organization.budget + purchase.price }
-        : organization)
-    }
+    vehicles
   };
 }
 

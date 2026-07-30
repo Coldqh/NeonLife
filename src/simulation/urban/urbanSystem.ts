@@ -2,7 +2,7 @@ import { createStableEntityId } from "../../core/ids/entityId";
 import { SeededRandom } from "../../core/random/seededRandom";
 import type { DistrictState, LocationState, OrganizationState } from "../../world/state/types";
 import type { HouseholdState, PopulationState } from "../population/types";
-import { advanceVenueOperationsState, createVenueOperationsState } from "../venues/venueOperationsSystem";
+import { advanceVenueOperationsState, createVenueOperationsState, synchronizeVenueStatesFromOperations } from "../venues/venueOperationsSystem";
 import type { LocationSpatialState, MetropolitanSectorState, MetropolitanState, MetricBounds, SectorLandUse, SpatialDetailLevel } from "../spatial/types";
 import type {
   BuildingScale,
@@ -44,6 +44,11 @@ function clamp(value: number, min = 0, max = 100): number {
 
 function whole(value: number): number {
   return Math.max(0, Math.round(value));
+}
+
+
+function landlordByBuilding(buildings: BuildingState[]): Record<string, string> {
+  return Object.fromEntries(buildings.map((building) => [building.id, building.ownerEntityId]));
 }
 
 function buildingUseForLand(landUse: SectorLandUse, rng: SeededRandom): BuildingUse {
@@ -1017,8 +1022,14 @@ export function createUrbanFabricState(input: UrbanFabricInput): UrbanFabricStat
   });
   const buildings = materializeSectorBuildings(input, catalogs, anchors);
   const assigned = assignDetailedHouseholds(input, buildings, [], []);
-  const venues = materializeVenues(input, buildings, []);
-  const venueOperations = createVenueOperationsState({ seed: input.seed, timestamp: input.timestamp, venues });
+  let venues = materializeVenues(input, buildings, []);
+  const venueOperations = createVenueOperationsState({
+    seed: input.seed,
+    timestamp: input.timestamp,
+    venues,
+    landlordByBuildingId: landlordByBuilding(buildings)
+  });
+  venues = synchronizeVenueStatesFromOperations(venues, venueOperations, input.timestamp);
   const units = mergeVenueUnits(input, buildings, assigned.units, venues, []);
   const interiors = updateInteriorCache(input, buildings, units, []);
   const cohorts = input.metropolitan.sectors.map((sector) => {
@@ -1086,8 +1097,15 @@ export function advanceUrbanFabricState(state: UrbanFabricState, input: UrbanFab
     : input.metropolitan.sectors.map((sector) => catalogForSector(input.seed, input.timestamp, sector));
   const buildings = materializeSectorBuildings(input, catalogs, state.buildings);
   const assigned = assignDetailedHouseholds(input, buildings, state.householdAddresses, state.units);
-  const venues = materializeVenues(input, buildings, state.venues);
-  const venueOperations = advanceVenueOperationsState(state.venueOperations, { seed: input.seed, timestamp: input.timestamp, venues });
+  const registryVenues = state.venueOperations?.registry?.map((entry) => entry.venue) ?? state.venues;
+  let venues = materializeVenues(input, buildings, registryVenues);
+  const venueOperations = advanceVenueOperationsState(state.venueOperations, {
+    seed: input.seed,
+    timestamp: input.timestamp,
+    venues,
+    landlordByBuildingId: landlordByBuilding(buildings)
+  });
+  venues = synchronizeVenueStatesFromOperations(venues, venueOperations, input.timestamp);
   const permanentUnitIds = new Set(assigned.units.map((unit) => unit.id));
   const activeSectors = new Set(input.metropolitan.streaming.activeSectorIds);
   const cachedUnits = state.units
@@ -1144,15 +1162,26 @@ export function normalizeUrbanFabricState(value: unknown, input: UrbanFabricInpu
     return createUrbanFabricState(input);
   }
   const fresh = createUrbanFabricState(input);
+  const normalizedBuildings = Array.isArray(raw.buildings) ? raw.buildings : fresh.buildings;
+  const normalizedVenues = Array.isArray(raw.venues)
+    ? raw.venues.map((venue) => ({ ...venue, operatingStatus: venue.operatingStatus ?? (venue.active ? "operating" : "closed") }))
+    : fresh.venues;
+  const normalizedVenueOperations = advanceVenueOperationsState(raw.venueOperations, {
+    seed: input.seed,
+    timestamp: input.timestamp,
+    venues: normalizedVenues,
+    landlordByBuildingId: landlordByBuilding(normalizedBuildings)
+  });
+  const synchronizedVenues = synchronizeVenueStatesFromOperations(normalizedVenues, normalizedVenueOperations, input.timestamp);
   const normalized: UrbanFabricState = {
     ...fresh,
     ...raw,
     version: 3,
     catalogs: raw.catalogs.length === input.metropolitan.sectors.length ? raw.catalogs : fresh.catalogs,
-    buildings: Array.isArray(raw.buildings) ? raw.buildings : fresh.buildings,
+    buildings: normalizedBuildings,
     units: Array.isArray(raw.units) ? raw.units : fresh.units,
-    venues: Array.isArray(raw.venues) ? raw.venues.map((venue) => ({ ...venue, operatingStatus: venue.operatingStatus ?? (venue.active ? "operating" : "closed") })) : fresh.venues,
-    venueOperations: advanceVenueOperationsState(raw.venueOperations, { seed: input.seed, timestamp: input.timestamp, venues: Array.isArray(raw.venues) ? raw.venues.map((venue) => ({ ...venue, operatingStatus: venue.operatingStatus ?? (venue.active ? "operating" : "closed") })) : fresh.venues }),
+    venues: synchronizedVenues,
+    venueOperations: normalizedVenueOperations,
     householdAddresses: Array.isArray(raw.householdAddresses) ? raw.householdAddresses : fresh.householdAddresses,
     interiors: Array.isArray(raw.interiors) ? raw.interiors : [],
     interiorDeltas: Array.isArray(raw.interiorDeltas) ? raw.interiorDeltas as InteriorPersistentDeltaState[] : [],

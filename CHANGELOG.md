@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.39.4 — Venue Integrity
+
+- added a persistent venue registry independent from spatial streaming;
+- synchronized venue bankruptcy with map, search, access and service UI;
+- replaced the 24-hour simulation cap with complete calendar-interval processing;
+- replaced magical daily restocking with paid supply orders and delivery times;
+- added venue sales, payroll, utilities, rent and supply ledger entries forwarded to the simulation kernel;
+- removed the duplicate legacy shop and clinic counters from the building interface;
+- restricted vehicle service to owned vehicles physically parked near the workshop;
+- changed the player marker to green across global, local, interior and transit views;
+- migrated saves to schema 35 and VenueOperations state version 2.
+
 ## 0.39.3 — Functional Venues
 
 - added persistent operational state for every materialized venue;
