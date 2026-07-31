@@ -23,6 +23,9 @@ check("time pipeline advances social state", life.includes("advanceSocialState")
 check("save migration normalizes social state", migration.includes("normalizeSocialState(payload.social") && Number(read("src/core/saves/types.ts").match(/SAVE_SCHEMA_VERSION\s*=\s*(\d+)/)?.[1] ?? 0) >= 34);
 check("physical availability gates conversation", commands.includes("actor.visible") && commands.includes("actor.interactable") && commands.includes("distanceToPlayerM > 3.5") && commands.includes("participantActorIds.includes"));
 check("nearby exposes real conversation action", nearby.includes("getConversationAvailability") && nearby.includes("onStartConversation") && nearby.includes("Заговорить"));
+check("nearby exposes physical personal-request decisions", nearby.includes("accept-personal-request") && nearby.includes("complete-personal-request") && nearby.includes("decline-personal-request"));
+check("nearby does not leak NPC internal destinations", !nearby.includes("destinationLocationId"));
+check("personal requests require physical contact", life.includes("activePersonId === request.personId") && life.includes("item.visible && item.interactable"));
 check("conversation panel is interactive", panel.includes('onAction("ask-incident")') && panel.includes('onAction("offer-money")') && panel.includes('onAction("threaten")') && panel.includes("Закончить разговор"));
 check("conversation actions are wired in app", app.includes("beginConversation(current") && app.includes("continueConversation(current") && app.includes("endConversation(current"));
 check("knowledge respects source and secrecy", types.includes("KnowledgeSource") && system.includes("source: \"witnessed\"") && system.includes("item.secrecy <= disclosure"));

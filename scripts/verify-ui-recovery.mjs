@@ -46,7 +46,7 @@ check("profile does not print raw coordinates", !profile.includes("xM") && !prof
 check("nearby category swipe exists", nearby.includes("TAB_ORDER") && nearby.includes("pointerUp"));
 check("physical actions tab exists", nearby.includes('id: "actions"') && nearby.includes("LocalActionsPanel"));
 check("physical actions are dispatched outside the view", app.includes("applyLocalLifeAction") && lifeActions.includes("LocalLifeAction"));
-check("home actions require physical presence", localActions.includes("isPlayerInsideHome") && localActions.includes("Войти в свою капсулу"));
+check("home actions require physical presence", localActions.includes("isPlayerInsideHome") && localActions.includes("Войти в своё жильё"));
 check("food has carried and home storage presentation", localActions.includes("Переносимый груз") && localActions.includes("Пищевой шкаф"));
 check("courier loop exposes pickup and delivery", localActions.includes("Забрать груз") && localActions.includes("Передать груз"));
 check("clinic actions are physical", localActions.includes("Стабилизация") && localActions.includes("clinic-care"));

@@ -2324,7 +2324,7 @@ export function deliverCourierOrder(session: GameSession): GameSession {
       jobs: { ...session.jobs, courier: redirected },
       world: { ...session.world, primaryContactId: clientAtDelivery.id },
       primaryContact: toKnownNpc(clientAtDelivery, session.world.locations, session.timestamp),
-      currentActivity: `Клиент сменил точку: ${location?.name ?? "UNKNOWN NODE"}`,
+      currentActivity: `Клиент сменил точку: ${location?.name ?? "неизвестная точка"}`,
       events: [
         createEvent(
           session,
@@ -2418,6 +2418,8 @@ export function deliverCourierOrder(session: GameSession): GameSession {
 export function acceptPersonalRequest(session: GameSession, requestId: string): GameSession {
   const request = session.pressure.requests.find((item) => item.id === requestId);
   if (!request || request.status !== "open" || request.dueAt <= session.timestamp) return session;
+  const actor = session.localScene.actors.find((item) => item.activePersonId === request.personId && item.visible && item.interactable);
+  if (!actor) return session;
   const person = getPerson(session.people, request.personId);
   const targetLocationId = person?.currentLocationId ?? request.targetLocationId;
   const acceptedPressure = acceptNpcRequestState({
@@ -2450,6 +2452,8 @@ export function acceptPersonalRequest(session: GameSession, requestId: string): 
 export function declinePersonalRequest(session: GameSession, requestId: string): GameSession {
   const request = session.pressure.requests.find((item) => item.id === requestId);
   if (!request || (request.status !== "open" && request.status !== "accepted")) return session;
+  const actor = session.localScene.actors.find((item) => item.activePersonId === request.personId && item.visible && item.interactable);
+  if (!actor) return session;
   const pressure = declineNpcRequestState(session.pressure, requestId);
   const people = recordPlayerAction(
     session.people,
@@ -2475,6 +2479,8 @@ export function declinePersonalRequest(session: GameSession, requestId: string):
 export function completePersonalRequest(session: GameSession, requestId: string): GameSession {
   const request = session.pressure.requests.find((item) => item.id === requestId);
   if (!request || request.status !== "accepted") return session;
+  const actor = session.localScene.actors.find((item) => item.activePersonId === request.personId && item.visible && item.interactable);
+  if (!actor) return session;
   const person = getPerson(session.people, request.personId);
   if (person && person.currentLocationId !== request.targetLocationId) {
     const location = session.world.locations.find((item) => item.id === person.currentLocationId);
@@ -2485,7 +2491,7 @@ export function completePersonalRequest(session: GameSession, requestId: string)
         requests: session.pressure.requests.map((item) => item.id === request.id ? { ...item, targetLocationId: person.currentLocationId } : item)
       },
       events: [
-        createEvent(session, session.timestamp, "contact", `${person.name} сменил место.`, `${request.code} · новая точка: ${location?.name ?? "UNKNOWN NODE"}.`, 2),
+        createEvent(session, session.timestamp, "contact", `${person.name} сменил место.`, `${request.code} · новая точка: ${location?.name ?? "неизвестная точка"}.`, 2),
         ...session.events
       ].slice(0, 100)
     };

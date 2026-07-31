@@ -196,7 +196,7 @@ export default function App() {
         overlay={transitOverlay ?? localMovementOverlay ?? settingsOverlay}
         notice={notice ? <div className={`toast toast--${notice.tone}`} role="status">{notice.text}</div> : null}
       >
-        {screen === "profile" ? <ProfileScreen session={session} onOpen={setScreen} /> : null}
+        {screen === "profile" ? <ProfileScreen session={session} onOpen={setScreen} onRouteTo={routeToLocation} /> : null}
         {screen === "map" ? (
           <MapScreen
             session={session} requestedLocationId={requestedLocationId} requestedVenueId={requestedVenueId}
@@ -223,6 +223,8 @@ export default function App() {
             onEnterBuilding={(buildingId) => setSession((current) => enterLocalBuilding(current, buildingId))}
             onEnterVehicle={(vehicleId) => setSession((current) => enterPhysicalVehicle(current, vehicleId))}
             onLeaveBuilding={() => setSession((current) => leaveLocalBuilding(current))}
+            onLeaveBuildingUnit={() => setSession((current) => leaveBuildingUnit(current))}
+            onLeaveInteriorRoom={() => setSession((current) => leaveInteriorRoom(current))}
             onLeaveVehicle={() => setSession((current) => leavePhysicalVehicle(current))}
             onRouteTo={routeToLocation}
             onLifeAction={runLocalLifeAction}

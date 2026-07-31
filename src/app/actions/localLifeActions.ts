@@ -6,9 +6,12 @@ import { isLocationOpen } from "../../gameplay/travel/travelSystem";
 import { currentPhysicalLocation, isPlayerInsideHome, isPlayerInsideLocation } from "../../gameplay/life/playerPresence";
 import {
   acceptCourierOrder,
+  acceptPersonalRequest,
   buyFoodAtCurrentLocation,
   deliverCourierOrder,
+  declinePersonalRequest,
   discardSpoiled,
+  completePersonalRequest,
   finishPlayerEmploymentShift,
   eatFoodFromStorage,
   enterPlayerHomeUnit,
@@ -49,6 +52,9 @@ export type LocalLifeAction =
   | { kind: "accept-courier"; orderId: string }
   | { kind: "pickup-courier" }
   | { kind: "deliver-courier" }
+  | { kind: "accept-personal-request"; requestId: string }
+  | { kind: "decline-personal-request"; requestId: string }
+  | { kind: "complete-personal-request"; requestId: string }
   | { kind: "pay-obligation"; obligationId: string }
   | { kind: "clinic-care"; care: "checkup" | "stabilize" }
   | { kind: "join-venue-queue"; venueId: string }
@@ -90,6 +96,9 @@ function execute(session: GameSession, action: LocalLifeAction): GameSession {
     case "accept-courier": return acceptCourierOrder(session, action.orderId);
     case "pickup-courier": return pickupCourierOrder(session);
     case "deliver-courier": return deliverCourierOrder(session);
+    case "accept-personal-request": return acceptPersonalRequest(session, action.requestId);
+    case "decline-personal-request": return declinePersonalRequest(session, action.requestId);
+    case "complete-personal-request": return completePersonalRequest(session, action.requestId);
     case "pay-obligation": return payPlayerObligationAtHome(session, action.obligationId);
     case "clinic-care": return receiveClinicCare(session, action.care);
     case "join-venue-queue": return joinVenueQueue(session, action.venueId);
@@ -132,7 +141,7 @@ function rejectionReason(session: GameSession, action: LocalLifeAction): string 
     case "sleep-outside": return session.localScene.playerPosition.state === "outside" ? "Сейчас нельзя лечь спать" : "Сначала выйди на улицу";
     case "accept-courier": {
       const courierContract = session.jobs.work.contracts.find((contract) => contract.id === session.jobs.work.activeContractId && contract.role === "courier" && (contract.status === "active" || contract.status === "warning"));
-      if (!courierContract) return "Сначала устройся курьером через профиль";
+      if (!courierContract) return "Сначала устройся курьером во вкладке «Работа»";
       const order = session.jobs.courier.orders.find((item) => item.id === action.orderId);
       if (session.jobs.courier.activeOrderId) return "Сначала закончи текущую доставку";
       if (!order || order.status !== "available") return "Заказ уже недоступен";
@@ -147,6 +156,23 @@ function rejectionReason(session: GameSession, action: LocalLifeAction): string 
     case "deliver-courier": {
       const order = getActiveCourierOrder(session.jobs.courier);
       return !order ? "Активного заказа нет" : order.status !== "in-transit" ? "Сначала забери груз" : "Сначала войди в точку доставки";
+    }
+    case "accept-personal-request": {
+      const request = session.pressure.requests.find((item) => item.id === action.requestId);
+      if (!request || request.status !== "open") return "Просьба уже недоступна";
+      if (request.dueAt <= session.timestamp) return "Срок просьбы истёк";
+      return "Нужно находиться рядом с человеком";
+    }
+    case "decline-personal-request": {
+      const request = session.pressure.requests.find((item) => item.id === action.requestId);
+      return !request || (request.status !== "open" && request.status !== "accepted") ? "Просьба уже закрыта" : "Нужно находиться рядом с человеком";
+    }
+    case "complete-personal-request": {
+      const request = session.pressure.requests.find((item) => item.id === action.requestId);
+      if (!request || request.status !== "accepted") return "Сначала прими просьбу";
+      if (request.dueAt <= session.timestamp) return "Срок просьбы истёк";
+      if (session.player.balance < request.upfrontCost) return `Не хватает ₵ ${request.upfrontCost - session.player.balance}`;
+      return "Нужно встретиться с человеком в указанной точке";
     }
     case "pay-obligation": {
       const obligation = session.pressure.obligations.find((item) => item.id === action.obligationId);
@@ -187,6 +213,9 @@ function successMessage(action: LocalLifeAction, elapsedMinutes: number, moneyDe
     "accept-courier": "Заказ принят",
     "pickup-courier": "Груз получен",
     "deliver-courier": "Доставка завершена",
+    "accept-personal-request": "Просьба принята",
+    "decline-personal-request": "Просьба отклонена",
+    "complete-personal-request": "Просьба выполнена",
     "pay-obligation": "Платёж проведён",
     "clinic-care": "Медицинская процедура завершена",
     "join-venue-queue": "Ты занял место в очереди",
@@ -221,7 +250,7 @@ export function applyLocalLifeAction(session: GameSession, action: LocalLifeActi
     session: next,
     ok: true,
     message: successMessage(action, elapsedMinutes, moneyDelta),
-    tone: action.kind === "shoplift-venue-offer" || action.kind === "rob-venue-register" || action.kind === "assault-actor" || action.kind === "break-in-vehicle" || action.kind === "hotwire-vehicle" ? "warn" : "good",
+    tone: action.kind === "decline-personal-request" || action.kind === "shoplift-venue-offer" || action.kind === "rob-venue-register" || action.kind === "assault-actor" || action.kind === "break-in-vehicle" || action.kind === "hotwire-vehicle" ? "warn" : "good",
     elapsedMinutes,
     moneyDelta
   };

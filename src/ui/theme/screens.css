@@ -246,3 +246,40 @@
   .profile-heading { flex-direction: column; }
   .profile-pressure-grid { grid-template-columns: 1fr; }
 }
+
+/* Profile dashboard: compact game-state hierarchy, no duplicated work screen. */
+.profile-section { position: relative; overflow: hidden; }
+.profile-section::before,
+.life-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: linear-gradient(180deg, var(--nl-accent), transparent 72%);
+  opacity: .7;
+}
+.profile-section__link {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 48, 77, .32);
+  background: rgba(255, 48, 77, .07);
+  color: var(--nl-text);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.profile-section__link:hover { background: rgba(255, 48, 77, .14); }
+.profile-facts article { position: relative; }
+.profile-facts article::after {
+  content: "";
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  width: 4px;
+  height: 4px;
+  background: rgba(154, 174, 199, .35);
+}
+.profile-history strong { overflow-wrap: anywhere; }
+.life-list article.is-danger { border-left: 2px solid var(--nl-accent); }
+.life-list article.is-danger > em { color: var(--nl-accent); }
