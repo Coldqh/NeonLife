@@ -223,3 +223,26 @@
   .property-list i { width: 34px; height: 34px; }
   .property-list em { grid-column: 2; }
 }
+
+/* Profile merges the former Life and More screens. Work remains a separate primary screen. */
+.profile-heading > div:first-child > p {
+  margin-top: 5px;
+  color: var(--nl-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+.profile-overview { display: grid; gap: 10px; }
+.profile-overview .profile-vitals,
+.profile-overview .profile-grid,
+.profile-overview .profile-section { margin-top: 0; }
+.profile-overview .life-priority { margin-top: 0; }
+.profile-pressure-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.profile-events .life-list article { align-items: flex-start; }
+@media (max-width: 760px) {
+  .profile-heading { flex-direction: column; }
+  .profile-pressure-grid { grid-template-columns: 1fr; }
+}

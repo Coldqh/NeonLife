@@ -3,7 +3,7 @@ import { createStableEntityId } from "../ids/entityId";
 import type { GameSession, LocationState } from "../../world/state/types";
 import { createInitialFoodState } from "../../gameplay/food/foodSystem";
 import { createInitialHousing } from "../../gameplay/housing/housingSystem";
-import { createInitialCourierState, type CourierOrder, type CourierState } from "../../gameplay/jobs/courier/courierSystem";
+import { createInitialCourierState, reconcileCourierEmployment, type CourierOrder, type CourierState } from "../../gameplay/jobs/courier/courierSystem";
 import { normalizePlayerWorkState } from "../../gameplay/jobs/work/workSystem";
 import { createHumanNetwork, getPerson, toKnownNpc } from "../../people/network/humanNetwork";
 import type { HumanNetworkState, PersonState } from "../../people/network/types";
@@ -844,13 +844,23 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     worldCore: inventoryProjection.worldCore
   });
 
+  const activeWorkContract = coreProjection.work.contracts.find((contract) =>
+    contract.id === coreProjection.work.activeContractId
+    && (contract.status === "active" || contract.status === "warning")
+  );
+  const migratedPlayer = {
+    ...canonicalCredits.player,
+    occupation: activeWorkContract?.title.toUpperCase() ?? "UNEMPLOYED"
+  };
+  const employedAsCourier = activeWorkContract?.role === "courier";
+
   const { situations: _discardedSituations, ...payloadWithoutSituations } = payload;
   const migratedPayload = {
     ...payloadWithoutSituations,
     schemaVersion: SAVE_SCHEMA_VERSION,
     events: migratedEvents,
     eventQueue: migratedQueue,
-    player: canonicalCredits.player,
+    player: migratedPlayer,
     primaryContact,
     people,
     pressure,
@@ -900,7 +910,11 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
       food: inventoryProjection.food,
       lastSleepAt: null
     },
-    jobs: { ...existingJobs, courier, work: coreProjection.work }
+    jobs: {
+      ...existingJobs,
+      courier: reconcileCourierEmployment(courier, employedAsCourier),
+      work: coreProjection.work
+    }
   } as unknown as GameSession;
 
   return {

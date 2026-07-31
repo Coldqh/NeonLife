@@ -2,7 +2,7 @@ import type { EntityId } from "../../../core/ids/entityId";
 import type { VenueOperationsState } from "../../../simulation/venues/types";
 import type { VenueState } from "../../../simulation/urban/types";
 
-export type PlayerWorkRole = "cashier" | "cafe-crew" | "clinic-aide" | "mechanic";
+export type PlayerWorkRole = "cashier" | "cafe-crew" | "clinic-aide" | "mechanic" | "courier";
 export type PlayerWorkSkill = "service" | "cooking" | "medical" | "technical";
 export type PlayerWorkVacancyStatus = "open" | "offered" | "filled" | "closed";
 export type PlayerWorkApplicationStatus = "interviewed" | "accepted" | "rejected" | "withdrawn";
@@ -21,7 +21,10 @@ export type PlayerWorkTaskKind =
   | "assist-care"
   | "inspect-vehicle"
   | "fetch-parts"
-  | "repair-vehicle";
+  | "repair-vehicle"
+  | "sort-cargo"
+  | "scan-manifest"
+  | "dispatch-run";
 
 export interface PlayerWorkSkillsState {
   service: number;

@@ -219,6 +219,19 @@ export function getActiveCourierOrder(state: CourierState): CourierOrder | null 
   return state.orders.find((order) => order.id === state.activeOrderId) ?? null;
 }
 
+export function reconcileCourierEmployment(state: CourierState, employedAsCourier: boolean): CourierState {
+  if (employedAsCourier || !state.activeOrderId) return state;
+  const activeOrderId = state.activeOrderId;
+  return {
+    ...state,
+    activeOrderId: null,
+    carriedCargo: null,
+    orders: state.orders.map((order) => order.id === activeOrderId && (order.status === "accepted" || order.status === "in-transit")
+      ? { ...order, status: "expired" as const }
+      : order)
+  };
+}
+
 export function refreshCourierBoard(
   state: CourierState,
   seed: string,

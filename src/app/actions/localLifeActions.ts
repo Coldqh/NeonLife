@@ -131,6 +131,8 @@ function rejectionReason(session: GameSession, action: LocalLifeAction): string 
     case "sleep-home": return "Спать дома можно только внутри своего помещения";
     case "sleep-outside": return session.localScene.playerPosition.state === "outside" ? "Сейчас нельзя лечь спать" : "Сначала выйди на улицу";
     case "accept-courier": {
+      const courierContract = session.jobs.work.contracts.find((contract) => contract.id === session.jobs.work.activeContractId && contract.role === "courier" && (contract.status === "active" || contract.status === "warning"));
+      if (!courierContract) return "Сначала устройся курьером через профиль";
       const order = session.jobs.courier.orders.find((item) => item.id === action.orderId);
       if (session.jobs.courier.activeOrderId) return "Сначала закончи текущую доставку";
       if (!order || order.status !== "available") return "Заказ уже недоступен";

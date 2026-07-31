@@ -28,7 +28,8 @@ export function BuildingServicePanel({
   const location = currentPhysicalLocation(session);
   const insideLocation = Boolean(location && isPlayerInsideLocation(session, location.id));
   const atDispatch = Boolean(location && insideLocation && isCourierDispatchLocation(location));
-  const activeOrder = getActiveCourierOrder(session.jobs.courier);
+  const courierContract = session.jobs.work.contracts.find((contract) => contract.id === session.jobs.work.activeContractId && contract.role === "courier" && (contract.status === "active" || contract.status === "warning"));
+  const activeOrder = courierContract ? getActiveCourierOrder(session.jobs.courier) : null;
   const carriedMass = getCarriedMassGrams(session.life.food);
   const insideHome = isPlayerInsideHome(session);
   const venue = session.urban.venues.find((item) => item.unitId === session.localScene.playerPosition.unitId);
@@ -99,12 +100,12 @@ export function BuildingServicePanel({
       {atDispatch ? (
         <section>
           <h3>ДИСПЕТЧЕРСКАЯ MESHLINE</h3>
-          {!activeOrder ? (
+          {!courierContract ? <p className="building-service-empty">Доступ к заказам закрыт. Курьер — обычная профессия: сначала пройди собеседование и подпиши контракт.</p> : !activeOrder ? (
             <div className="building-service-list">
               {session.jobs.courier.orders.filter((order) => order.status === "available").slice(0, 4).map((order) => (
                 <article key={order.id}>
                   <div><strong>{order.code} · ₵ {order.payout}</strong><span>{order.cargoName} · {order.weightKg} кг · риск {order.risk}</span></div>
-                  <button type="button" onClick={() => onAction({ kind: "accept-courier", orderId: order.id })}>Принять</button>
+                  <button type="button" onClick={() => onAction({ kind: "accept-courier", orderId: order.id })}>Принять заказ</button>
                 </article>
               ))}
             </div>

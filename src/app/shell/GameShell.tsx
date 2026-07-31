@@ -14,7 +14,7 @@ interface GameShellProps {
   notice?: ReactNode;
 }
 
-const SCREEN_ORDER: GameScreen[] = ["map", "nearby", "life", "work", "profile"];
+const SCREEN_ORDER: GameScreen[] = ["profile", "map", "nearby", "work"];
 
 interface SwipeStart {
   pointerId: number;

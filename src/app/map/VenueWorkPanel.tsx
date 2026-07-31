@@ -13,9 +13,10 @@ export function VenueWorkPanel({ session, venueId, onAction }: { session: GameSe
   const shift = work.shifts.find((item) => item.id === work.activeShiftId && item.venueId === venueId && item.status === "in-progress");
   const tasks = shift ? work.tasks.filter((task) => task.shiftId === shift.id) : [];
   const pending = tasks.filter((task) => task.status === "pending");
-  const minutesUntilShift = contract ? Math.ceil((contract.nextShiftAt - session.timestamp) / 60_000) : 0;
-  const canStart = Boolean(contract && !shift && session.timestamp >= contract.nextShiftAt - 60 * 60_000 && session.timestamp <= contract.nextShiftAt + 3 * 60 * 60_000);
-  const canWait = Boolean(contract && !shift && minutesUntilShift > 0 && minutesUntilShift <= 18 * 60);
+  const courier = contract?.role === "courier" || vacancy?.role === "courier";
+  const minutesUntilShift = contract && !courier ? Math.ceil((contract.nextShiftAt - session.timestamp) / 60_000) : 0;
+  const canStart = Boolean(contract && !courier && !shift && session.timestamp >= contract.nextShiftAt - 60 * 60_000 && session.timestamp <= contract.nextShiftAt + 3 * 60 * 60_000);
+  const canWait = Boolean(contract && !courier && !shift && minutesUntilShift > 0 && minutesUntilShift <= 18 * 60);
 
   if (!vacancy && !contract && !shift) return null;
 
@@ -26,14 +27,24 @@ export function VenueWorkPanel({ session, venueId, onAction }: { session: GameSe
       {!contract && vacancy ? (
         <div className="venue-work-offer">
           <div><span>Должность</span><b>{roleLabel(vacancy.role)}</b></div>
-          <div><span>Ставка</span><b>₵ {vacancy.wagePerHour}/ч</b></div>
+          <div><span>Оплата</span><b>{vacancy.role === "courier" ? "За выполненный заказ" : `₵ ${vacancy.wagePerHour}/ч`}</b></div>
           <div><span>Требование</span><b>{skillLabel(vacancy.requiredSkill)} {work.skills[vacancy.requiredSkill]}/{vacancy.minimumSkill}</b></div>
-          <div><span>Смена</span><b>{vacancy.shiftStartHour.toString().padStart(2, "0")}:00 · {vacancy.shiftDurationHours} ч.</b></div>
+          <div><span>График</span><b>{vacancy.role === "courier" ? "Свободный" : `${vacancy.shiftStartHour.toString().padStart(2, "0")}:00 · ${vacancy.shiftDurationHours} ч.`}</b></div>
           {!application ? <button type="button" onClick={() => onAction({ kind: "interview-work", vacancyId: vacancy.id })}>Поговорить с управляющим · 20 мин.</button> : application.status === "accepted" && vacancy.status === "offered" ? <><p className="is-accepted">{application.decisionText}</p><button type="button" onClick={() => onAction({ kind: "sign-work-contract", vacancyId: vacancy.id })}>Подписать контракт</button></> : <p className="is-rejected">{application.decisionText}</p>}
         </div>
       ) : null}
 
-      {contract && !shift ? (
+      {contract?.role === "courier" ? (
+        <div className="venue-work-contract venue-work-contract--courier">
+          <div><span>График</span><b>Свободный</b></div>
+          <div><span>Оплата</span><b>За каждый заказ</b></div>
+          <div><span>Рейтинг</span><b>{Math.round(session.jobs.courier.rating)}%</b></div>
+          <div><span>Выполнено</span><b>{session.jobs.courier.completedDeliveries}</b></div>
+          <p>Контракт только открывает диспетчерскую. Заказы не назначаются автоматически: каждый маршрут принимается вручную.</p>
+        </div>
+      ) : null}
+
+      {contract && contract.role !== "courier" && !shift ? (
         <div className="venue-work-contract">
           <div><span>Следующая смена</span><b>{clock(contract.nextShiftAt)}</b></div>
           <div><span>Оплата</span><b>₵ {contract.wagePerHour}/ч</b></div>

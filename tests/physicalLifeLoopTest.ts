@@ -7,9 +7,11 @@ import {
   deliverCourierOrder,
   eatFoodFromStorage,
   enterPlayerHomeUnit,
+  interviewForPlayerWork,
   pickupCourierOrder,
   progressLife,
   receiveClinicCare,
+  signPlayerEmploymentContract,
   sleepAtHome,
   storeCarriedFoodAtHome
 } from "../src/gameplay/life/lifeSimulation";
@@ -41,6 +43,33 @@ function insideLocation<T extends ReturnType<typeof createWorldSession>>(session
       }
     }
   } as T;
+}
+
+function insideVenue<T extends ReturnType<typeof createWorldSession>>(session: T, venueId: string): T {
+  const venue = session.urban.venues.find((item) => item.id === venueId);
+  assert(venue, `venue ${venueId} is missing`);
+  const building = session.urban.buildings.find((item) => item.id === venue.buildingId);
+  assert(building, `building for venue ${venueId} is missing`);
+  return {
+    ...session,
+    life: { ...session.life, currentLocationId: building.anchorLocationId ?? session.life.currentLocationId },
+    localScene: {
+      ...session.localScene,
+      playerPosition: {
+        ...session.localScene.playerPosition,
+        state: "inside",
+        sectorId: building.sectorId,
+        xM: building.bounds.xM + building.bounds.widthM / 2,
+        yM: building.bounds.yM + building.bounds.heightM / 2,
+        locationId: building.anchorLocationId,
+        buildingId: building.id,
+        floor: venue.floor,
+        unitId: venue.unitId,
+        roomId: undefined,
+        vehicleId: undefined
+      }
+    }
+  };
 }
 
 
@@ -108,12 +137,25 @@ const availableOrders = session.jobs.courier.orders.filter((order) => order.stat
 assert(availableOrders.length > 0, "courier order missing");
 assert(availableOrders.every((order) => order.deadlineAt - session.timestamp >= 150 * 60_000), "courier board generated an impossible short deadline");
 const available = availableOrders[0];
-const rejectedRemoteAccept = acceptCourierOrder(session, available.id);
-assert(rejectedRemoteAccept === session, "courier order was accepted away from dispatch");
+assert(!session.jobs.courier.activeOrderId, "fresh world assigned a courier order automatically");
+const rejectedWithoutContract = acceptCourierOrder(insideLocation(session, dispatch.id), available.id);
+assert(rejectedWithoutContract.jobs.courier.activeOrderId === null, "courier order was accepted without employment");
+const courierVacancy = session.jobs.work.vacancies.find((vacancy) => vacancy.role === "courier");
+assert(courierVacancy, "courier vacancy missing from ordinary professions");
+session = {
+  ...insideVenue(session, courierVacancy.venueId),
+  jobs: { ...session.jobs, work: { ...session.jobs.work, skills: { ...session.jobs.work.skills, service: 100 } } }
+};
+session = interviewForPlayerWork(session, courierVacancy.id);
+session = signPlayerEmploymentContract(session, courierVacancy.id);
+const courierContract = session.jobs.work.contracts.find((contract) => contract.id === session.jobs.work.activeContractId);
+assert(courierContract?.role === "courier", "courier contract was not signed through normal employment");
+const rejectedRemoteAccept = acceptCourierOrder({ ...session, localScene: { ...session.localScene, playerPosition: { ...session.localScene.playerPosition, state: "outside", buildingId: undefined, unitId: undefined, roomId: undefined, locationId: undefined } } }, available.id);
+assert(rejectedRemoteAccept.jobs.courier.activeOrderId === null, "courier order was accepted away from dispatch");
 session = insideLocation(session, dispatch.id);
 session = acceptCourierOrder(session, available.id);
 let active = getActiveCourierOrder(session.jobs.courier);
-assert(active?.status === "accepted", "courier order was not accepted at dispatch");
+assert(active?.status === "accepted", "courier order was not accepted at dispatch after employment");
 
 session = insideLocation(session, active.pickupLocationId);
 session = pickupCourierOrder(session);
@@ -174,7 +216,10 @@ const migrated = migrateEnvelope(rawEnvelope, "slot-1");
 assert(migrated?.schemaVersion === SAVE_SCHEMA_VERSION, `save was not migrated to schema ${SAVE_SCHEMA_VERSION}`);
 assert(Array.isArray(migrated.payload.life.food.carried), "migration did not create carried food inventory");
 assert(migrated.payload.life.food.carryingCapacityGrams === 6_500, "migration did not create carrying capacity");
-assert(migrated.payload.jobs.courier.carriedCargo?.orderId === legacyOrder.id, "migration did not reconstruct carried courier cargo");
+assert(migrated.payload.jobs.courier.activeOrderId === null, "migration preserved an orphan courier order without employment");
+assert(migrated.payload.jobs.courier.carriedCargo === null, "migration preserved orphan courier cargo without employment");
+assert(migrated.payload.jobs.courier.orders.find((order) => order.id === legacyOrder.id)?.status === "expired", "migration returned an orphan order to the public board");
+assert(migrated.payload.player.occupation === "UNEMPLOYED", "migration preserved a stale courier occupation without a contract");
 
 const transitional = createWorldSession("physical-life-schema-41");
 const transitionProduct = "kernel-9-brick";

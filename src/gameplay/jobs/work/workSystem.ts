@@ -33,6 +33,8 @@ interface RoleTemplate {
   baseWage: number;
 }
 
+const COURIER_ROLE: RoleTemplate = { role: "courier", title: "Курьер MESHLINE", skill: "service", baseMinimumSkill: 16, baseWage: 0 };
+
 const ROLE_BY_CATEGORY: Partial<Record<VenueState["category"], RoleTemplate>> = {
   convenience: { role: "cashier", title: "Кассир торговой точки", skill: "service", baseMinimumSkill: 16, baseWage: 11 },
   market: { role: "cashier", title: "Кассир рынка", skill: "service", baseMinimumSkill: 18, baseWage: 12 },
@@ -71,6 +73,11 @@ const TASKS_BY_ROLE: Record<PlayerWorkRole, Array<Omit<PlayerWorkTaskState, "id"
     { kind: "repair-vehicle", label: "Выполнить ремонт", description: "Устранить найденную неисправность.", skill: "technical", durationMinutes: 45 },
     { kind: "inspect-vehicle", label: "Проверить результат", description: "Провести контрольную диагностику.", skill: "technical", durationMinutes: 20 },
     { kind: "repair-vehicle", label: "Закрыть заказ", description: "Довести машину до выдачи клиенту.", skill: "technical", durationMinutes: 38 }
+  ],
+  courier: [
+    { kind: "scan-manifest", label: "Проверить терминал", description: "Получить список доступных заказов и ограничения по грузу.", skill: "service", durationMinutes: 10 },
+    { kind: "sort-cargo", label: "Сверить груз", description: "Проверить пломбу, массу и точку выдачи.", skill: "service", durationMinutes: 12 },
+    { kind: "dispatch-run", label: "Закрыть маршрут", description: "Доставить заказ и подтвердить передачу клиенту.", skill: "service", durationMinutes: 30 }
   ]
 };
 
@@ -97,7 +104,13 @@ function nextWorkStart(timestamp: number, hour: number, workDays = DEFAULT_WORK_
   return baseDay + 24 * HOUR_MS + hour * HOUR_MS;
 }
 
+function isCourierVenue(venue: VenueState): boolean {
+  const search = `${venue.name} ${venue.code} ${venue.tags.join(" ")}`.toUpperCase();
+  return venue.category === "office-service" && (search.includes("MESHLINE") || search.includes("DISPATCH") || search.includes("LOGISTICS"));
+}
+
 function roleTemplate(venue: VenueState): RoleTemplate | null {
+  if (isCourierVenue(venue)) return COURIER_ROLE;
   return ROLE_BY_CATEGORY[venue.category] ?? null;
 }
 
@@ -115,13 +128,14 @@ function vacancyFor(seed: string, timestamp: number, venue: VenueState, operatio
   const template = roleTemplate(venue);
   if (!template || operation.status !== "operating") return null;
   const rng = new SeededRandom(`${seed}:player-work-vacancy:${venue.id}:v1`);
+  const courier = template.role === "courier";
   const pressure = operation.queue.waitingCount + Math.max(0, 4 - operation.staffPresent) * 2 + venue.demand / 18;
-  if (pressure < 5 && !rng.chance(.42)) return null;
-  const shiftStartHour = venue.category === "bar"
+  if (!courier && pressure < 5 && !rng.chance(.42)) return null;
+  const shiftStartHour = courier ? 0 : venue.category === "bar"
     ? Math.max(17, venue.openHour)
     : venue.openHour === 0 ? rng.pick([6, 8, 14, 16] as const) : Math.min(20, venue.openHour + rng.integer(0, 2));
   const minimumSkill = Math.round(clamp(template.baseMinimumSkill + venue.quality / 15 + venue.priceTier * 2 + rng.integer(-4, 4), 12, 48));
-  const wagePerHour = Math.max(8, Math.round(template.baseWage + venue.priceTier * 2.2 + venue.quality / 22 + rng.integer(-1, 3)));
+  const wagePerHour = courier ? 0 : Math.max(8, Math.round(template.baseWage + venue.priceTier * 2.2 + venue.quality / 22 + rng.integer(-1, 3)));
   return {
     id: createStableEntityId("player-work-vacancy", `${venue.id}:${template.role}`),
     venueId: venue.id,
@@ -133,7 +147,7 @@ function vacancyFor(seed: string, timestamp: number, venue: VenueState, operatio
     minimumSkill,
     wagePerHour,
     shiftStartHour,
-    shiftDurationHours: 8,
+    shiftDurationHours: courier ? 0 : 8,
     postedAt: timestamp,
     expiresAt: timestamp + 7 * DAY_MS,
     status: "open"
@@ -205,6 +219,7 @@ function markMissedShifts(state: PlayerWorkState, timestamp: number): PlayerWork
   for (let index = 0; index < contracts.length; index += 1) {
     let contract = contracts[index];
     if (contract.status !== "active" && contract.status !== "warning") continue;
+    if (contract.role === "courier") continue;
     const inProgress = state.shifts.some((shift) => shift.contractId === contract.id && shift.status === "in-progress");
     if (inProgress) continue;
     while (timestamp > contract.nextShiftAt + 3 * HOUR_MS && contract.warningCount < 3) {
@@ -272,7 +287,9 @@ export function interviewPlayerForVacancy(state: PlayerWorkState, vacancyId: str
     score,
     interviewedAt: input.timestamp,
     decisionText: accepted
-      ? `Управляющий предлагает контракт: ₵ ${vacancy.wagePerHour}/ч.`
+      ? vacancy.role === "courier"
+        ? "Диспетчер предлагает контракт курьера со свободным графиком и оплатой за заказ."
+        : `Управляющий предлагает контракт: ₵ ${vacancy.wagePerHour}/ч.`
       : `Отказ: требуется ${vacancy.requiredSkill} ${vacancy.minimumSkill}, результат собеседования ${score}.`
   };
   return {
@@ -297,9 +314,9 @@ export function signPlayerWorkContract(state: PlayerWorkState, vacancyId: string
     wagePerHour: vacancy.wagePerHour,
     shiftStartHour: vacancy.shiftStartHour,
     shiftDurationHours: vacancy.shiftDurationHours,
-    workDays: [...DEFAULT_WORK_DAYS],
+    workDays: vacancy.role === "courier" ? [] : [...DEFAULT_WORK_DAYS],
     startedAt: timestamp,
-    nextShiftAt: nextWorkStart(timestamp, vacancy.shiftStartHour, DEFAULT_WORK_DAYS, true),
+    nextShiftAt: vacancy.role === "courier" ? timestamp : nextWorkStart(timestamp, vacancy.shiftStartHour, DEFAULT_WORK_DAYS, true),
     completedShifts: 0,
     probationShifts: 3,
     warningCount: 0,
@@ -327,7 +344,7 @@ function tasksForShift(seed: string, shift: PlayerWorkShiftState, role: PlayerWo
 
 export function startPlayerWorkShift(state: PlayerWorkState, contractId: string, timestamp: number): PlayerWorkState {
   const contract = state.contracts.find((item) => item.id === contractId && (item.status === "active" || item.status === "warning"));
-  if (!contract || state.activeShiftId) return state;
+  if (!contract || state.activeShiftId || contract.role === "courier") return state;
   if (timestamp < contract.nextShiftAt - HOUR_MS || timestamp > contract.nextShiftAt + 3 * HOUR_MS) return state;
   const lateMinutes = Math.max(0, Math.round((timestamp - contract.nextShiftAt) / 60_000));
   const shift: PlayerWorkShiftState = {
@@ -544,6 +561,7 @@ export function roleLabel(role: PlayerWorkRole): string {
   if (role === "cashier") return "Кассир";
   if (role === "cafe-crew") return "Сотрудник кафе";
   if (role === "clinic-aide") return "Санитар клиники";
+  if (role === "courier") return "Курьер";
   return "Механик";
 }
 

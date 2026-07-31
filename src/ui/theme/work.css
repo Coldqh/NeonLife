@@ -3,7 +3,8 @@
 .work-heading > div:first-child > span,
 .work-board > header span,
 .work-contract-card header span { color: var(--nl-accent); font-size: 10px; font-weight: 800; letter-spacing: .14em; }
-.work-heading h1 { margin: 4px 0 5px; font-size: clamp(28px, 6vw, 42px); }
+.work-heading h1,
+.work-heading h2 { margin: 4px 0 5px; font-size: clamp(28px, 6vw, 42px); }
 .work-heading p { margin: 0; color: var(--nl-muted); }
 .work-heading__income { min-width: 180px; display: grid; align-content: center; justify-items: end; padding: 14px 16px; border: 1px solid var(--nl-line); background: var(--nl-surface); }
 .work-heading__income span { color: var(--nl-muted); font-size: 9px; letter-spacing: .12em; }
@@ -27,6 +28,16 @@
 .work-contract-grid div { padding: 10px; border: 1px solid rgba(255,255,255,.07); background: rgba(0,0,0,.18); }
 .work-contract-grid span { display: block; color: var(--nl-muted); font-size: 9px; text-transform: uppercase; }
 .work-contract-grid b { display: block; margin-top: 4px; font-size: 13px; }
+
+.work-contract-note {
+  margin: -4px 0 14px !important;
+  padding: 10px 12px;
+  border-left: 2px solid #42df8b;
+  background: rgba(66, 223, 139, .07);
+  color: #a9c9b7 !important;
+  font-size: 11px;
+  line-height: 17px;
+}
 .work-shift-progress { display: grid; gap: 7px; margin-bottom: 14px; }
 .work-shift-progress small { color: var(--nl-muted); }
 .work-primary { width: 100%; min-height: 46px; display: flex; align-items: center; justify-content: center; gap: 8px; background: #237a50; color: white; }
@@ -79,6 +90,17 @@
 .venue-work-offer p { grid-column: 1 / -1; margin: 0; padding: 9px; }
 .venue-work-offer p.is-accepted { color: #7ff0ad; background: rgba(66,223,139,.08); }
 .venue-work-offer p.is-rejected { color: #ff8a9b; background: rgba(255,75,98,.08); }
+
+.venue-work-contract--courier > p {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 10px 11px;
+  border-left: 2px solid #42df8b;
+  background: rgba(66, 223, 139, .07);
+  color: #a9c9b7;
+  font-size: 11px;
+  line-height: 17px;
+}
 .venue-work-shift__summary { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 10px; margin-bottom: 8px; background: rgba(66,223,139,.08); }
 .venue-work-shift__summary span { color: #42df8b; font-size: 10px; font-weight: 800; }
 .venue-work-shift__summary strong { grid-row: span 2; align-self: center; font-size: 24px; }

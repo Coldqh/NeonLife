@@ -62,7 +62,8 @@ export function LocalActionsPanel({
   const carriedMass = getCarriedMassGrams(session.life.food);
   const shopStock = location && insideLocation ? session.life.food.shopStocks[location.id] : undefined;
   const business = location ? getBusinessAtLocation(session.economy, location.id) : undefined;
-  const activeOrder = getActiveCourierOrder(session.jobs.courier);
+  const courierContract = session.jobs.work.contracts.find((contract) => contract.id === session.jobs.work.activeContractId && contract.role === "courier" && (contract.status === "active" || contract.status === "warning"));
+  const activeOrder = courierContract ? getActiveCourierOrder(session.jobs.courier) : null;
   const dispatch = session.world.locations.find((item) => isCourierDispatchLocation(item));
   const atDispatch = Boolean(dispatch && isPlayerInsideLocation(session, dispatch.id));
   const obligations = activeObligations(session.pressure);
@@ -125,24 +126,26 @@ export function LocalActionsPanel({
         </section>
       ) : null}
 
-      <section className="local-action-card">
-        <header><div><span>Работа</span><h2>Курьер MESHLINE</h2></div><strong>{session.jobs.courier.rating}%</strong></header>
-        {!activeOrder ? atDispatch ? (
-          <div className="local-action-list">{session.jobs.courier.orders.filter((order) => order.status === "available").slice(0, 4).map((order) => (
-            <article key={order.id}><div><strong>{order.code} · ₵ {order.payout}</strong><span>{order.cargoName} · {order.weightKg} кг · риск {order.risk}</span></div><button type="button" onClick={() => onAction({ kind: "accept-courier", orderId: order.id })}>Принять</button></article>
-          ))}</div>
-        ) : <div className="local-action-buttons"><button type="button" disabled={!dispatch} onClick={() => dispatch && onRouteTo(dispatch.id)}>Ехать в диспетчерскую</button></div> : (
-          <div className="courier-active">
-            <strong>{activeOrder.code} · {orderStage(activeOrder.status)}</strong>
-            <span>{activeOrder.cargoName} · срок {formatGameTime(activeOrder.deadlineAt)}</span>
-            {session.jobs.courier.carriedCargo ? <p>Груз: {session.jobs.courier.carriedCargo.weightKg} кг · состояние {session.jobs.courier.carriedCargo.condition}%</p> : null}
-            <div className="local-action-buttons">
-              {activeOrder.status === "accepted" ? <><button type="button" onClick={() => onRouteTo(activeOrder.pickupLocationId)}>Маршрут к грузу</button><button type="button" disabled={!isPlayerInsideLocation(session, activeOrder.pickupLocationId)} onClick={() => onAction({ kind: "pickup-courier" })}>Забрать груз</button></> : null}
-              {activeOrder.status === "in-transit" ? <><button type="button" onClick={() => onRouteTo(activeOrder.dropoffLocationId)}>Маршрут к клиенту</button><button type="button" disabled={!isPlayerInsideLocation(session, activeOrder.dropoffLocationId)} onClick={() => onAction({ kind: "deliver-courier" })}>Передать груз</button></> : null}
+      {courierContract ? (
+        <section className="local-action-card">
+          <header><div><span>Работа</span><h2>Курьер MESHLINE</h2></div><strong>{Math.round(session.jobs.courier.rating)}%</strong></header>
+          {!activeOrder ? atDispatch ? (
+            <div className="local-action-list">{session.jobs.courier.orders.filter((order) => order.status === "available").slice(0, 4).map((order) => (
+              <article key={order.id}><div><strong>{order.code} · ₵ {order.payout}</strong><span>{order.cargoName} · {order.weightKg} кг · риск {order.risk}</span></div><button type="button" onClick={() => onAction({ kind: "accept-courier", orderId: order.id })}>Принять заказ</button></article>
+            ))}</div>
+          ) : <div className="local-action-buttons"><button type="button" disabled={!dispatch} onClick={() => dispatch && onRouteTo(dispatch.id)}>Ехать в диспетчерскую</button></div> : (
+            <div className="courier-active">
+              <strong>{activeOrder.code} · {orderStage(activeOrder.status)}</strong>
+              <span>{activeOrder.cargoName} · срок {formatGameTime(activeOrder.deadlineAt)}</span>
+              {session.jobs.courier.carriedCargo ? <p>Груз: {session.jobs.courier.carriedCargo.weightKg} кг · состояние {session.jobs.courier.carriedCargo.condition}%</p> : null}
+              <div className="local-action-buttons">
+                {activeOrder.status === "accepted" ? <><button type="button" onClick={() => onRouteTo(activeOrder.pickupLocationId)}>Маршрут к грузу</button><button type="button" disabled={!isPlayerInsideLocation(session, activeOrder.pickupLocationId)} onClick={() => onAction({ kind: "pickup-courier" })}>Забрать груз</button></> : null}
+                {activeOrder.status === "in-transit" ? <><button type="button" onClick={() => onRouteTo(activeOrder.dropoffLocationId)}>Маршрут к клиенту</button><button type="button" disabled={!isPlayerInsideLocation(session, activeOrder.dropoffLocationId)} onClick={() => onAction({ kind: "deliver-courier" })}>Передать груз</button></> : null}
+              </div>
             </div>
-          </div>
-        )}
-      </section>
+          )}
+        </section>
+      ) : null}
 
       {clinic && location ? (
         <section className="local-action-card">

@@ -22,10 +22,10 @@ const shell = read("src/app/shell/GameShell.tsx");
 const streets = read("src/simulation/streets/streetTopologySystem.ts");
 const life = read("src/gameplay/life/lifeSimulation.ts");
 
-check("profile is a dossier, not a position debugger", profile.includes("Личное досье") && profile.includes("Собственность") && profile.includes("История мира"));
+check("profile is a dossier, not a position debugger", profile.includes("ЛИЧНОЕ ДОСЬЕ") && profile.includes("СОБСТВЕННОСТЬ") && profile.includes("ИСТОРИЯ МИРА"));
 check("profile removes spatial exit actions", !profile.includes("onLeaveBuilding") && !profile.includes("onLeaveVehicle") && !profile.includes("Количество ключей"));
 check("profile uses only real session data", !profile.includes("Псевдо") && !profile.includes("fake") && profile.includes("session.jobs.courier.completedDeliveries"));
-check("profile stays passive while map and Nearby own physical actions", app.includes("<ProfileScreen session={session} />") && app.includes("onLeaveBuilding={()") && app.includes("onLeaveVehicle={()"));
+check("profile merges life and former more screen without owning physical actions", profile.includes("activeObligations") && profile.includes("ИСТОРИЯ МИРА") && !profile.includes("<WorkScreen") && !profile.includes("onLeaveBuilding") && app.includes('<WorkScreen session={session}') && app.includes("onLeaveBuilding={()") && app.includes("onLeaveVehicle={()"));
 check("map is an immersive full stage", mapScreen.includes("map-screen--immersive") && mapScreen.includes("map-viewport") && shell.includes('screen === "map" ? null : <GameHeader') && mapCss.includes(".map-screen--immersive"));
 check("map uses functional city street and building hierarchy", mapScreen.includes("<MapTopBar") && mapScreen.includes("<GlobalCityMap") && mapScreen.includes("<LocalSectorMap") && mapScreen.includes("<BuildingInteriorMap") && mapTopBar.includes("onMode") && mapTopBar.includes("Город") && mapTopBar.includes("Улица") && mapTopBar.includes("Здание"));
 check("map inspector and full profiles are separate components", mapScreen.includes("<MapSelectionSheet") && mapScreen.includes("<MapProfileOverlay") && mapSheet.includes("map-selection-sheet--venue") && mapProfile.includes("map-profile--building"));
@@ -49,7 +49,7 @@ check("parking snap is dirty driven", life.includes("parkingNetworkChanged") && 
 check("transit snap is dirty driven", life.includes("transitNetworkChanged") && life.includes("? snapTransitStopsToStreetTopology"));
 check("map CSS braces are balanced", (mapCss.match(/\{/g) ?? []).length === (mapCss.match(/\}/g) ?? []).length);
 check("screen CSS braces are balanced", (screenCss.match(/\{/g) ?? []).length === (screenCss.match(/\}/g) ?? []).length);
-check("profile component stays bounded", profile.split(/\r?\n/).length <= 190);
+check("profile component stays bounded", profile.split(/\r?\n/).length <= 260);
 check("map screen stays inside real architecture budget", mapScreen.split(/\r?\n/).length <= 600);
 check("local and global maps stay bounded", localMap.split(/\r?\n/).length <= 600 && globalMap.split(/\r?\n/).length <= 600);
 

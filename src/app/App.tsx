@@ -6,7 +6,6 @@ import { defaultUiSettings, type UiSettings } from "../ui/theme/settings";
 import { VersionGate } from "../ui/components/VersionGate";
 import { GameShell } from "./shell/GameShell";
 import { ProfileScreen } from "./screens/ProfileScreen";
-import { LifeScreen } from "./screens/LifeScreen";
 import { MapScreen } from "./screens/MapScreen";
 import { NearbyScreen } from "./screens/NearbyScreen";
 import { WorkScreen } from "./screens/WorkScreen";
@@ -197,8 +196,7 @@ export default function App() {
         overlay={transitOverlay ?? localMovementOverlay ?? settingsOverlay}
         notice={notice ? <div className={`toast toast--${notice.tone}`} role="status">{notice.text}</div> : null}
       >
-        {screen === "profile" ? <ProfileScreen session={session} /> : null}
-        {screen === "life" ? <LifeScreen session={session} onOpen={setScreen} /> : null}
+        {screen === "profile" ? <ProfileScreen session={session} onOpen={setScreen} /> : null}
         {screen === "map" ? (
           <MapScreen
             session={session} requestedLocationId={requestedLocationId} requestedVenueId={requestedVenueId}

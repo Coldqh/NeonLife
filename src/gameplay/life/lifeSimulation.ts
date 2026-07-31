@@ -100,6 +100,7 @@ import {
   completeCourierOrder,
   expireCourierOrders,
   getActiveCourierOrder,
+  reconcileCourierEmployment,
   refreshCourierBoard
 } from "../jobs/courier/courierSystem";
 import {
@@ -418,14 +419,6 @@ function progressLocalLife(session: GameSession, minutes: number, options: Progr
     relationChanges: options.relationChanges,
     worldEvents: options.worldEvents ?? (queued.events.length + pulse.events.length + generated.length)
   });
-  const courierState = refreshCourierBoard(
-    expireCourierOrders(session.jobs.courier, nextTimestamp),
-    session.world.meta.seed,
-    nextTimestamp,
-    session.world.locations,
-    peopleState.people,
-    session.economy.businesses
-  );
   const workState = advancePlayerWorkState(session.jobs.work, {
     seed: session.world.meta.seed,
     playerId: session.player.id,
@@ -433,6 +426,15 @@ function progressLocalLife(session: GameSession, minutes: number, options: Progr
     venues: urbanState.venueOperations.registry.map((entry) => entry.venue),
     venueOperations: urbanState.venueOperations
   });
+  const employedAsCourier = workState.contracts.some((contract) => contract.id === workState.activeContractId && contract.role === "courier" && (contract.status === "active" || contract.status === "warning"));
+  const courierState = reconcileCourierEmployment(refreshCourierBoard(
+    expireCourierOrders(session.jobs.courier, nextTimestamp),
+    session.world.meta.seed,
+    nextTimestamp,
+    session.world.locations,
+    peopleState.people,
+    session.economy.businesses
+  ), employedAsCourier);
   const buildingAccessState = advanceBuildingAccessState(session.buildingAccess, {
     timestamp: nextTimestamp,
     seed: session.world.meta.seed,
@@ -930,14 +932,6 @@ function progressWorldLife(session: GameSession, minutes: number, options: Progr
   const baselineFatigue = Math.max(0, minutes / 120);
   const baselineHunger = Math.max(0, minutes / 150);
   const housingDaysLeft = getHousingDaysLeft(session.life.housing, nextTimestamp);
-  const courierState = refreshCourierBoard(
-    expireCourierOrders(session.jobs.courier, nextTimestamp),
-    session.world.meta.seed,
-    nextTimestamp,
-    session.world.locations,
-    peopleState.people,
-    healthAdvance.economy.businesses
-  );
   const selectedPerson = getPerson(peopleState, session.world.primaryContactId)
     ?? getPerson(peopleState, peopleState.selectedPersonId);
   const worldEventCount = options.worldEvents ?? (queued.events.length + pulse.events.length + network.notices.length + economyAdvance.notices.length + populationAdvance.notices.length + infrastructureAdvance.notices.length + productionAdvance.notices.length + organizationAdvance.notices.length + governmentAdvance.notices.length + healthAdvance.notices.length + dataAdvance.notices.length + pressureAdvance.notices.length + crimeAdvance.newlyReported.length + streetAdvance.notices.length + socialAdvance.notices.length + playerCrimeAdvance.notices.length);
@@ -981,6 +975,15 @@ function progressWorldLife(session: GameSession, minutes: number, options: Progr
     venues: urbanState.venueOperations.registry.map((entry) => entry.venue),
     venueOperations: urbanState.venueOperations
   });
+  const employedAsCourier = workState.contracts.some((contract) => contract.id === workState.activeContractId && contract.role === "courier" && (contract.status === "active" || contract.status === "warning"));
+  const courierState = reconcileCourierEmployment(refreshCourierBoard(
+    expireCourierOrders(session.jobs.courier, nextTimestamp),
+    session.world.meta.seed,
+    nextTimestamp,
+    session.world.locations,
+    peopleState.people,
+    healthAdvance.economy.businesses
+  ), employedAsCourier);
   const buildingAccessState = advanceBuildingAccessState(session.buildingAccess, {
     timestamp: nextTimestamp,
     seed: session.world.meta.seed,
@@ -2238,6 +2241,8 @@ export function disposeStolenPhysicalVehicle(session: GameSession, vehicleId: st
 }
 
 export function acceptCourierOrder(session: GameSession, orderId: string): GameSession {
+  const courierContract = session.jobs.work.contracts.find((contract) => contract.id === session.jobs.work.activeContractId && contract.role === "courier" && (contract.status === "active" || contract.status === "warning"));
+  if (!courierContract) return session;
   const dispatch = currentPhysicalLocation(session);
   if (!dispatch || !isCourierDispatchLocation(dispatch) || !isPlayerInsideLocation(session, dispatch.id)) return session;
   const nextState = acceptCourierOrderState(session.jobs.courier, orderId, session.timestamp);
@@ -2261,7 +2266,7 @@ export function acceptCourierOrder(session: GameSession, orderId: string): GameS
     people,
     world: { ...session.world, primaryContactId: order.clientId },
     primaryContact: client ? toKnownNpc(client, session.world.locations, session.timestamp) : session.primaryContact,
-    player: { ...session.player, occupation: "FREELANCE COURIER" },
+    player: { ...session.player, occupation: courierContract.title },
     currentActivity: `Заказ принят: ${order.code}`,
     events: [
       createEvent(session, session.timestamp, "work", `Принят заказ ${order.code}.`, `${order.client} · ${pickup?.name} → ${dropoff?.name} · оплата ₵ ${order.payout}`, 2),
@@ -3166,7 +3171,9 @@ export function signPlayerEmploymentContract(session: GameSession, vacancyId: st
   }, 8, {
     category: "work",
     title: `Контракт подписан: ${target.venue.name}.`,
-    detail: `${contract?.title ?? target.vacancy.title} · ₵ ${contract?.wagePerHour ?? target.vacancy.wagePerHour}/ч · следующая смена ${contract ? new Date(contract.nextShiftAt).toISOString().slice(5, 16).replace("T", " · ") : "назначается"}.`,
+    detail: contract?.role === "courier"
+      ? `${contract.title} · оплата за выполненный заказ · свободный график.`
+      : `${contract?.title ?? target.vacancy.title} · ₵ ${contract?.wagePerHour ?? target.vacancy.wagePerHour}/ч · следующая смена ${contract ? new Date(contract.nextShiftAt).toISOString().slice(5, 16).replace("T", " · ") : "назначается"}.`,
     importance: 2,
     activity: `Оформление: ${target.venue.name}`,
     suppressTimeEvent: true
