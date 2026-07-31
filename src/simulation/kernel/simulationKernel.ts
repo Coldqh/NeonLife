@@ -13,6 +13,7 @@ import type { DataSurveillanceState } from "../data/types";
 import type { PhysicalVehiclesState } from "../vehicles/types";
 import type { WorldCoreBusinessState, WorldCoreEmploymentState, WorldCoreState } from "../worldCore/types";
 import type { BusinessEconomyState, BusinessLeaseState, UnifiedBusinessState } from "../business/types";
+import type { ProductInventoryState } from "../inventory/types";
 import type {
   KernelAccountState,
   KernelAssetState,
@@ -79,6 +80,7 @@ export interface KernelSyncInput {
   vehicles?: PhysicalVehiclesState;
   worldCore?: WorldCoreState;
   businessEconomy?: BusinessEconomyState;
+  productInventory?: ProductInventoryState;
   food: FoodState;
   drafts?: KernelTransactionDraft[];
 }
