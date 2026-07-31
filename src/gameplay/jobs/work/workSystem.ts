@@ -5,6 +5,7 @@ import type { VenueLedgerEntryState, VenueOperationState, VenueOperationsState }
 import type {
   PlayerWorkApplicationState,
   PlayerWorkContractState,
+  PlayerWorkDebtResult,
   PlayerWorkFinishResult,
   PlayerWorkInput,
   PlayerWorkInterviewInput,
@@ -24,6 +25,7 @@ const HOUR_MS = 60 * 60_000;
 const MAX_HISTORY_SHIFTS = 80;
 const MAX_TASKS = 360;
 const DEFAULT_WORK_DAYS = [1, 2, 3, 4, 5];
+const INTERVIEW_RETRY_MS = 3 * DAY_MS;
 
 interface RoleTemplate {
   role: PlayerWorkRole;
@@ -129,8 +131,11 @@ function vacancyFor(seed: string, timestamp: number, venue: VenueState, operatio
   if (!template || operation.status !== "operating") return null;
   const rng = new SeededRandom(`${seed}:player-work-vacancy:${venue.id}:v1`);
   const courier = template.role === "courier";
-  const pressure = operation.queue.waitingCount + Math.max(0, 4 - operation.staffPresent) * 2 + venue.demand / 18;
-  if (!courier && pressure < 5 && !rng.chance(.42)) return null;
+  const targetStaff = Math.max(1, Math.ceil(venue.demand / 34) + (operation.queue.waitingCount >= 5 ? 1 : 0));
+  const staffingShortage = Math.max(0, targetStaff - operation.staffPresent);
+  const operationalPressure = operation.queue.waitingCount + staffingShortage * 4;
+  // A vacancy is a real staffing need, not decorative board filler.
+  if (!courier && staffingShortage <= 0 && operationalPressure < 5) return null;
   const shiftStartHour = courier ? 0 : venue.category === "bar"
     ? Math.max(17, venue.openHour)
     : venue.openHour === 0 ? rng.pick([6, 8, 14, 16] as const) : Math.min(20, venue.openHour + rng.integer(0, 2));
@@ -272,8 +277,11 @@ export function advancePlayerWorkState(state: PlayerWorkState | undefined, input
 export function interviewPlayerForVacancy(state: PlayerWorkState, vacancyId: string, input: PlayerWorkInterviewInput): PlayerWorkState {
   const vacancy = state.vacancies.find((item) => item.id === vacancyId && item.status === "open");
   if (!vacancy || state.contracts.some((contract) => contract.status === "active" || contract.status === "warning")) return state;
-  const existing = state.applications.find((application) => application.vacancyId === vacancyId && application.status !== "withdrawn");
-  if (existing) return state;
+  const existing = state.applications
+    .filter((application) => application.vacancyId === vacancyId && application.status !== "withdrawn")
+    .sort((left, right) => right.interviewedAt - left.interviewedAt)[0];
+  if (existing?.status === "accepted") return state;
+  if (existing?.status === "rejected" && input.timestamp < existing.interviewedAt + INTERVIEW_RETRY_MS) return state;
   const rng = new SeededRandom(`${input.seed}:player-work-interview:${vacancyId}:${dayIndex(input.timestamp)}`);
   const skill = state.skills[vacancy.requiredSkill];
   const condition = input.playerHealth * .12 - input.playerFatigue * .1 - input.playerStress * .08;
@@ -292,9 +300,10 @@ export function interviewPlayerForVacancy(state: PlayerWorkState, vacancyId: str
         : `Управляющий предлагает контракт: ₵ ${vacancy.wagePerHour}/ч.`
       : `Отказ: требуется ${vacancy.requiredSkill} ${vacancy.minimumSkill}, результат собеседования ${score}.`
   };
+  const applications = state.applications.map((item) => item.id === existing?.id ? { ...item, status: "withdrawn" as const } : item);
   return {
     ...state,
-    applications: [...state.applications, application].slice(-80),
+    applications: [...applications, application].slice(-80),
     vacancies: state.vacancies.map((item) => item.id === vacancy.id ? { ...item, status: accepted ? "offered" : "open" } : item),
     lastUpdatedAt: input.timestamp
   };
@@ -347,6 +356,27 @@ export function startPlayerWorkShift(state: PlayerWorkState, contractId: string,
   if (!contract || state.activeShiftId || contract.role === "courier") return state;
   if (timestamp < contract.nextShiftAt - HOUR_MS || timestamp > contract.nextShiftAt + 3 * HOUR_MS) return state;
   const lateMinutes = Math.max(0, Math.round((timestamp - contract.nextShiftAt) / 60_000));
+  const warnings = lateMinutes >= 30 ? contract.warningCount + 1 : contract.warningCount;
+  if (warnings >= 3) {
+    return {
+      ...state,
+      activeContractId: state.activeContractId === contract.id ? undefined : state.activeContractId,
+      contracts: state.contracts.map((item) => item.id === contract.id ? {
+        ...item,
+        warningCount: warnings,
+        status: "dismissed" as const,
+        dismissedAt: timestamp,
+        dismissalReason: "Третье дисциплинарное нарушение"
+      } : item),
+      vacancies: state.vacancies.map((item) => item.id === contract.vacancyId ? {
+        ...item,
+        status: "open" as const,
+        postedAt: timestamp,
+        expiresAt: timestamp + 7 * DAY_MS
+      } : item),
+      lastUpdatedAt: timestamp
+    };
+  }
   const shift: PlayerWorkShiftState = {
     id: createStableEntityId("player-work-shift", `${contract.id}:${contract.nextShiftAt}`),
     contractId: contract.id,
@@ -365,7 +395,6 @@ export function startPlayerWorkShift(state: PlayerWorkState, contractId: string,
   };
   const tasks = tasksForShift(`${contract.id}:${contract.completedShifts}`, shift, contract.role);
   shift.taskIds = tasks.map((task) => task.id);
-  const warnings = lateMinutes >= 30 ? contract.warningCount + 1 : contract.warningCount;
   return {
     ...state,
     activeShiftId: shift.id,
@@ -547,6 +576,80 @@ export function finishPlayerWorkShift(state: PlayerWorkState, input: PlayerWorkI
     message: unpaid > 0
       ? `Смена закрыта: выплачено ₵ ${pay}, долг работодателя ₵ ${unpaid}.`
       : `Смена закрыта: выплачено ₵ ${pay}${promoted ? " · испытательный срок пройден" : ""}.`
+  };
+}
+
+export function resignPlayerWorkContract(state: PlayerWorkState, contractId: string, timestamp: number): PlayerWorkState {
+  const contract = state.contracts.find((item) => item.id === contractId && (item.status === "active" || item.status === "warning"));
+  if (!contract || state.activeShiftId) return state;
+  return {
+    ...state,
+    activeContractId: state.activeContractId === contract.id ? undefined : state.activeContractId,
+    contracts: state.contracts.map((item) => item.id === contract.id ? {
+      ...item,
+      status: "resigned" as const,
+      resignedAt: timestamp
+    } : item),
+    vacancies: state.vacancies.map((item) => item.id === contract.vacancyId ? {
+      ...item,
+      status: "open" as const,
+      postedAt: timestamp,
+      expiresAt: timestamp + 7 * DAY_MS
+    } : item),
+    lastUpdatedAt: timestamp
+  };
+}
+
+export function collectPlayerWorkDebt(
+  state: PlayerWorkState,
+  contractId: string,
+  input: PlayerWorkInput
+): PlayerWorkDebtResult | null {
+  const contract = state.contracts.find((item) => item.id === contractId && item.unpaidWages > 0);
+  const venue = input.venues.find((item) => item.id === contract?.venueId)
+    ?? input.venueOperations.registry.find((entry) => entry.venue.id === contract?.venueId)?.venue;
+  const operation = input.venueOperations.operations.find((item) => item.venueId === contract?.venueId);
+  if (!contract || !venue || !operation) return null;
+  const paid = Math.max(0, Math.min(contract.unpaidWages, Math.floor(operation.cash)));
+  if (paid <= 0) return null;
+  const remaining = contract.unpaidWages - paid;
+  const operations = input.venueOperations.operations.map((item) => item.venueId !== venue.id ? item : {
+    ...item,
+    cash: item.cash - paid,
+    expensesToday: item.expensesToday + paid,
+    lifetimeExpenses: item.lifetimeExpenses + paid
+  });
+  const ledgerEntry: VenueLedgerEntryState = {
+    id: createStableEntityId("venue-ledger", `${venue.id}:player-wage-debt:${contract.id}:${input.timestamp}`),
+    idempotencyKey: `${venue.id}:player-wage-debt:${contract.id}:${input.timestamp}`,
+    timestamp: input.timestamp + 1,
+    venueId: venue.id,
+    kind: "payroll",
+    debitEntityId: accountId(venue.id),
+    creditEntityId: input.playerId ?? "player",
+    amount: paid,
+    description: `${venue.name}: погашение долга по зарплате`,
+    postToKernel: false
+  };
+  return {
+    state: {
+      ...state,
+      contracts: state.contracts.map((item) => item.id === contract.id ? { ...item, unpaidWages: remaining } : item),
+      totalEarned: state.totalEarned + paid,
+      totalUnpaid: Math.max(0, state.totalUnpaid - paid),
+      lastUpdatedAt: input.timestamp
+    },
+    venueOperations: {
+      ...input.venueOperations,
+      operations,
+      ledger: [...input.venueOperations.ledger, ledgerEntry].slice(-1_200),
+      totals: {
+        ...input.venueOperations.totals,
+        expenses: operations.reduce((sum, item) => sum + item.lifetimeExpenses, 0)
+      }
+    },
+    paid,
+    remaining
   };
 }
 

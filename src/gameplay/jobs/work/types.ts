@@ -81,6 +81,7 @@ export interface PlayerWorkContractState {
   lastShiftAt?: number;
   dismissedAt?: number;
   dismissalReason?: string;
+  resignedAt?: number;
 }
 
 export interface PlayerWorkTaskState {
@@ -158,4 +159,11 @@ export interface PlayerWorkFinishResult {
   unpaid: number;
   remainingMinutes: number;
   message: string;
+}
+
+export interface PlayerWorkDebtResult {
+  state: PlayerWorkState;
+  venueOperations: VenueOperationsState;
+  paid: number;
+  remaining: number;
 }

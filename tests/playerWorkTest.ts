@@ -9,6 +9,7 @@ import {
   moveInsideBuilding,
   performPlayerWorkTask,
   progressLife,
+  resignPlayerEmploymentContract,
   signPlayerEmploymentContract,
   startPlayerEmploymentShift
 } from "../src/gameplay/life/lifeSimulation";
@@ -36,7 +37,7 @@ const buildingById = new Map(session.urban.buildings.map((building) => [building
 const unitById = new Map(session.urban.units.map((unit) => [unit.id, unit]));
 const venueById = new Map(session.urban.venues.map((venue) => [venue.id, venue]));
 const candidates = session.jobs.work.vacancies
-  .filter((vacancy) => vacancy.status === "open" && buildingById.has(vacancy.buildingId) && unitById.has(vacancy.unitId) && venueById.has(vacancy.venueId))
+  .filter((vacancy) => vacancy.status === "open" && buildingById.get(vacancy.buildingId)?.sectorId === session.localScene.playerPosition.sectorId && unitById.has(vacancy.unitId) && venueById.has(vacancy.venueId))
   .sort((left, right) => left.minimumSkill - right.minimumSkill || right.wagePerHour - left.wagePerHour);
 assert(candidates.length > 0, "no materialized player vacancies exist");
 
@@ -100,6 +101,11 @@ session = progressLife(session, Math.ceil((missTarget - session.timestamp) / 60_
 const warnedContract = session.jobs.work.contracts.find((item) => item.id === contract.id);
 assert((warnedContract?.warningCount ?? 0) === warningBefore + 1, "missed shift did not create warning");
 assert(warnedContract?.status === "warning", "contract was not marked warning after missed shift");
+
+session = resignPlayerEmploymentContract(session, contract.id);
+assert(!session.jobs.work.activeContractId, "resignation did not clear active contract");
+assert(session.jobs.work.contracts.find((item) => item.id === contract.id)?.status === "resigned", "contract was not marked resigned");
+assert(session.player.occupation === "UNEMPLOYED", "occupation was not cleared after resignation");
 
 console.log(JSON.stringify({
   venue: venue.name,

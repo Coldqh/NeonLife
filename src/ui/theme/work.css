@@ -125,3 +125,52 @@
   .work-vacancy-list article { grid-template-columns: 42px minmax(0, 1fr); }
   .work-vacancy-pay { grid-column: 2; justify-items: start; }
 }
+
+.work-contract-grid b.is-warning,
+.venue-work-contract b.is-warning { color: #ffb347; }
+.work-contract-alert,
+.venue-work-warning {
+  margin: -4px 0 14px !important;
+  padding: 10px 12px;
+  border-left: 2px solid #ffb347;
+  background: rgba(255, 179, 71, .08);
+  color: #ffd19a !important;
+  font-size: 11px;
+}
+.work-vacancy-pay small { color: rgba(255,255,255,.46); font-size: 9px; }
+.venue-work-offer p small { display: block; margin-top: 4px; color: rgba(255,255,255,.58); }
+.venue-work-debt {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 11px;
+  border: 1px solid rgba(255,179,71,.24);
+  background: rgba(255,179,71,.07);
+}
+.venue-work-debt span,
+.venue-work-debt small { display: block; color: var(--nl-muted); font-size: 9px; }
+.venue-work-debt strong { display: block; margin: 3px 0; color: #ffd19a; font-size: 18px; }
+.venue-work-debt button { padding: 9px 12px; border: 1px solid rgba(255,179,71,.35); color: #ffd19a; }
+.venue-work-debt button:disabled { opacity: .35; }
+.venue-work-resign { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.07); }
+.venue-work-resign p { flex-basis: 100%; margin: 0; color: var(--nl-muted); font-size: 11px; }
+.venue-work-resign button { padding: 8px 10px; border: 1px solid var(--nl-line); color: var(--nl-muted); }
+.venue-work-resign button.is-danger { border-color: rgba(255,75,98,.42); color: #ff8a9b; background: rgba(255,75,98,.08); }
+.work-history { border: 1px solid var(--nl-line); background: var(--nl-surface); }
+.work-history > header { padding: 14px 16px; border-bottom: 1px solid var(--nl-line); }
+.work-history > header span { color: var(--nl-accent); font-size: 10px; font-weight: 800; letter-spacing: .14em; }
+.work-history h2 { margin: 3px 0 0; }
+.work-history article { display: flex; justify-content: space-between; gap: 14px; padding: 12px 16px; border-bottom: 1px solid var(--nl-line); }
+.work-history article:last-child { border-bottom: 0; }
+.work-history strong,
+.work-history span { display: block; }
+.work-history span { margin-top: 3px; color: var(--nl-muted); font-size: 10px; }
+.work-history em { align-self: center; color: var(--nl-muted); font-size: 10px; font-style: normal; text-transform: uppercase; }
+.work-history em.is-danger { color: #ff8a9b; }
+
+@media (max-width: 720px) {
+  .venue-work-debt { grid-template-columns: 1fr; }
+  .venue-work-debt button { width: 100%; }
+}

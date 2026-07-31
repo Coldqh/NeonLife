@@ -105,9 +105,11 @@ import {
 } from "../jobs/courier/courierSystem";
 import {
   advancePlayerWorkState,
+  collectPlayerWorkDebt,
   completePlayerWorkTask,
   finishPlayerWorkShift,
   interviewPlayerForVacancy,
+  resignPlayerWorkContract,
   signPlayerWorkContract,
   startPlayerWorkShift,
   waitMinutesUntilShift
@@ -426,7 +428,9 @@ function progressLocalLife(session: GameSession, minutes: number, options: Progr
     venues: urbanState.venueOperations.registry.map((entry) => entry.venue),
     venueOperations: urbanState.venueOperations
   });
-  const employedAsCourier = workState.contracts.some((contract) => contract.id === workState.activeContractId && contract.role === "courier" && (contract.status === "active" || contract.status === "warning"));
+  const activeWorkContract = workState.contracts.find((contract) => contract.id === workState.activeContractId && (contract.status === "active" || contract.status === "warning"));
+  const playerWithWork = { ...nextPlayer, occupation: activeWorkContract?.title.toUpperCase() ?? "UNEMPLOYED" };
+  const employedAsCourier = activeWorkContract?.role === "courier";
   const courierState = reconcileCourierEmployment(refreshCourierBoard(
     expireCourierOrders(session.jobs.courier, nextTimestamp),
     session.world.meta.seed,
@@ -438,7 +442,7 @@ function progressLocalLife(session: GameSession, minutes: number, options: Progr
   const buildingAccessState = advanceBuildingAccessState(session.buildingAccess, {
     timestamp: nextTimestamp,
     seed: session.world.meta.seed,
-    player: nextPlayer,
+    player: playerWithWork,
     playerHomeLocationId: session.life.housing.locationId,
     locations: session.world.locations,
     population: crimeAdvance.population,
@@ -483,7 +487,7 @@ function progressLocalLife(session: GameSession, minutes: number, options: Progr
       currentLocationId: targetLocation?.id ?? localSceneState.playerPosition.locationId ?? session.life.currentLocationId
     },
     jobs: { ...session.jobs, courier: courierState, work: workState },
-    player: nextPlayer,
+    player: playerWithWork,
     events: [...generated, ...queued.events.reverse(), ...pulse.events.reverse(), ...session.events].slice(0, 100)
   };
 }
@@ -975,7 +979,9 @@ function progressWorldLife(session: GameSession, minutes: number, options: Progr
     venues: urbanState.venueOperations.registry.map((entry) => entry.venue),
     venueOperations: urbanState.venueOperations
   });
-  const employedAsCourier = workState.contracts.some((contract) => contract.id === workState.activeContractId && contract.role === "courier" && (contract.status === "active" || contract.status === "warning"));
+  const activeWorkContract = workState.contracts.find((contract) => contract.id === workState.activeContractId && (contract.status === "active" || contract.status === "warning"));
+  const playerWithWork = { ...nextPlayer, occupation: activeWorkContract?.title.toUpperCase() ?? "UNEMPLOYED" };
+  const employedAsCourier = activeWorkContract?.role === "courier";
   const courierState = reconcileCourierEmployment(refreshCourierBoard(
     expireCourierOrders(session.jobs.courier, nextTimestamp),
     session.world.meta.seed,
@@ -987,7 +993,7 @@ function progressWorldLife(session: GameSession, minutes: number, options: Progr
   const buildingAccessState = advanceBuildingAccessState(session.buildingAccess, {
     timestamp: nextTimestamp,
     seed: session.world.meta.seed,
-    player: nextPlayer,
+    player: playerWithWork,
     playerHomeLocationId: session.life.housing.locationId,
     locations: session.world.locations,
     population: populationState,
@@ -1092,7 +1098,7 @@ function progressWorldLife(session: GameSession, minutes: number, options: Progr
     districts: nextDistricts,
     locations: session.world.locations,
     organizations: nextOrganizations,
-    player: nextPlayer,
+    player: playerWithWork,
     population: crimeAdvance.population,
     economy: businessAdvance.economy,
     infrastructure: governmentAdvance.infrastructure,
@@ -1137,7 +1143,7 @@ function progressWorldLife(session: GameSession, minutes: number, options: Progr
   });
   const canonicalCredits = projectCanonicalCreditsFromKernel(kernel, {
     timestamp: nextTimestamp,
-    player: nextPlayer,
+    player: playerWithWork,
     organizations: nextOrganizations,
     population: inventoryProjection.population,
     economy: coreProjection.economy,
@@ -3211,6 +3217,19 @@ export function startPlayerEmploymentShift(session: GameSession, contractId: str
   const work = startPlayerWorkShift(session.jobs.work, contractId, session.timestamp);
   if (work === session.jobs.work) return session;
   const shift = work.shifts.find((item) => item.id === work.activeShiftId);
+  const updatedContract = work.contracts.find((item) => item.id === contract.id);
+  if (!shift && updatedContract?.status === "dismissed") {
+    return {
+      ...session,
+      jobs: { ...session.jobs, work, courier: reconcileCourierEmployment(session.jobs.courier, false) },
+      player: { ...session.player, occupation: "UNEMPLOYED" },
+      currentActivity: "Безработный",
+      events: [
+        createEvent(session, session.timestamp, "work", `Увольнение: ${contract.title}.`, updatedContract.dismissalReason ?? "Контракт расторгнут работодателем.", 3),
+        ...session.events
+      ].slice(0, 100)
+    };
+  }
   return {
     ...session,
     jobs: { ...session.jobs, work },
@@ -3281,6 +3300,52 @@ export function finishPlayerEmploymentShift(session: GameSession): GameSession {
     ...progressed,
     player: { ...progressed.player, occupation: contract?.title.toUpperCase() ?? progressed.player.occupation }
   };
+}
+
+export function resignPlayerEmploymentContract(session: GameSession, contractId: string): GameSession {
+  const contract = session.jobs.work.contracts.find((item) => item.id === contractId && (item.status === "active" || item.status === "warning"));
+  if (!contract || !venueAtPlayer(session, contract.venueId) || session.jobs.work.activeShiftId) return session;
+  const work = resignPlayerWorkContract(session.jobs.work, contractId, session.timestamp);
+  if (work === session.jobs.work) return session;
+  const courier = contract.role === "courier" ? reconcileCourierEmployment(session.jobs.courier, false) : session.jobs.courier;
+  return {
+    ...session,
+    jobs: { ...session.jobs, work, courier },
+    player: { ...session.player, occupation: "UNEMPLOYED" },
+    currentActivity: "Безработный",
+    events: [
+      createEvent(session, session.timestamp, "work", `Контракт расторгнут: ${contract.title}.`, contract.unpaidWages > 0 ? `Работодатель всё ещё должен ₵ ${contract.unpaidWages}.` : "Доступ к рабочим действиям закрыт.", 2),
+      ...session.events
+    ].slice(0, 100)
+  };
+}
+
+export function collectPlayerEmploymentDebt(session: GameSession, contractId: string): GameSession {
+  const contract = session.jobs.work.contracts.find((item) => item.id === contractId && item.unpaidWages > 0);
+  if (!contract || !venueAtPlayer(session, contract.venueId)) return session;
+  const result = collectPlayerWorkDebt(session.jobs.work, contractId, {
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    timestamp: session.timestamp,
+    venues: session.urban.venueOperations.registry.map((entry) => entry.venue),
+    venueOperations: session.urban.venueOperations
+  });
+  if (!result) return session;
+  return progressLife({
+    ...session,
+    jobs: { ...session.jobs, work: result.state },
+    urban: { ...session.urban, venueOperations: result.venueOperations }
+  }, 5, {
+    category: "finance",
+    title: `Выплачен долг по зарплате: ₵ ${result.paid}.`,
+    detail: result.remaining > 0 ? `Остаток долга ₵ ${result.remaining}.` : "Работодатель полностью рассчитался.",
+    importance: result.remaining > 0 ? 2 : 1,
+    balanceDelta: result.paid,
+    balanceCounterpartyEntityId: `venue-account:${contract.venueId}`,
+    balanceReason: "wage",
+    activity: "Получение долга по зарплате",
+    suppressTimeEvent: true
+  });
 }
 
 export function buyFoodAtCurrentLocation(session: GameSession, productId: string): GameSession {

@@ -12,6 +12,7 @@ import {
   declinePersonalRequest,
   discardSpoiled,
   completePersonalRequest,
+  collectPlayerEmploymentDebt,
   finishPlayerEmploymentShift,
   eatFoodFromStorage,
   enterPlayerHomeUnit,
@@ -23,6 +24,7 @@ import {
   leaveVenueQueue,
   performPlayerWorkTask,
   purchaseVenueOffer,
+  resignPlayerEmploymentContract,
   signPlayerEmploymentContract,
   startPlayerEmploymentShift,
   receiveClinicCare,
@@ -66,6 +68,8 @@ export type LocalLifeAction =
   | { kind: "start-work-shift"; contractId: string }
   | { kind: "perform-work-task"; taskId: string }
   | { kind: "finish-work-shift" }
+  | { kind: "collect-work-debt"; contractId: string }
+  | { kind: "resign-work-contract"; contractId: string }
   | { kind: "shoplift-venue-offer"; venueId: string; offerId: string }
   | { kind: "rob-venue-register"; venueId: string }
   | { kind: "assault-actor"; actorId: string }
@@ -110,6 +114,8 @@ function execute(session: GameSession, action: LocalLifeAction): GameSession {
     case "start-work-shift": return startPlayerEmploymentShift(session, action.contractId);
     case "perform-work-task": return performPlayerWorkTask(session, action.taskId);
     case "finish-work-shift": return finishPlayerEmploymentShift(session);
+    case "collect-work-debt": return collectPlayerEmploymentDebt(session, action.contractId);
+    case "resign-work-contract": return resignPlayerEmploymentContract(session, action.contractId);
     case "shoplift-venue-offer": return shopliftVenueOffer(session, action.venueId, action.offerId);
     case "rob-venue-register": return robVenueRegister(session, action.venueId);
     case "assault-actor": return assaultLocalActor(session, action.actorId);
@@ -190,6 +196,8 @@ function rejectionReason(session: GameSession, action: LocalLifeAction): string 
     case "start-work-shift": return "Нужно быть на рабочем месте в окно начала смены";
     case "perform-work-task": return "Эта задача недоступна или нарушена очередь выполнения";
     case "finish-work-shift": return "Сначала заверши все задачи смены";
+    case "collect-work-debt": return "Долг не погашен: работодатель без денег или ты не на рабочем месте";
+    case "resign-work-contract": return session.jobs.work.activeShiftId ? "Нельзя уволиться посреди смены" : "Расторгнуть контракт можно только на рабочем месте";
     case "shoplift-venue-offer": return "Товар недоступен для кражи или ты находишься слишком далеко";
     case "rob-venue-register": return "Касса недоступна или ты находишься не в заведении";
     case "assault-actor": return "Цель не находится рядом или уже недоступна";
@@ -227,6 +235,8 @@ function successMessage(action: LocalLifeAction, elapsedMinutes: number, moneyDe
     "start-work-shift": "Смена началась",
     "perform-work-task": "Рабочая задача выполнена",
     "finish-work-shift": "Смена закрыта",
+    "collect-work-debt": "Долг по зарплате получен",
+    "resign-work-contract": "Контракт расторгнут",
     "shoplift-venue-offer": "Попытка кражи завершена",
     "rob-venue-register": "Попытка ограбления завершена",
     "assault-actor": "Нападение завершено",
