@@ -937,7 +937,9 @@ function reconcileAccounts(
   accounts: KernelAccountState[],
   snapshot: KernelAccountState[],
   input: KernelSyncInput,
-  existingIds: Set<string>
+  existingIds: Set<string>,
+  trackedBeforeDrafts: Map<string, Set<KernelResource>>,
+  draftTouchedResources: Map<string, Set<KernelResource>>
 ): { accounts: KernelAccountState[]; transactions: KernelTransactionState[] } {
   let nextAccounts = [...accounts];
   const transactions: KernelTransactionState[] = [];
@@ -953,7 +955,6 @@ function reconcileAccounts(
   for (const target of snapshot) {
     if (protectedSystems.has(target.entityId)) continue;
     let index = accountIndex.get(target.entityId);
-    const accountWasMissing = index === undefined;
     if (index === undefined) {
       index = nextAccounts.length;
       nextAccounts.push(account(target.entityId, target.entityKind, [], input.timestamp));
@@ -962,17 +963,27 @@ function reconcileAccounts(
 
     const current = sanitizeAccountToSnapshot(nextAccounts[index], target, input.timestamp);
     nextAccounts[index] = current;
-    for (const targetBalance of target.balances) {
-      const resourceWasUntracked = !current.balances.some((entry) => entry.resource === targetBalance.resource);
-      if (!accountWasMissing && !resourceWasUntracked) continue;
-      const openingAmount = Math.round(targetBalance.amount * 100) / 100;
+    const tracked = trackedBeforeDrafts.get(target.entityId);
+    const targetByResource = new Map(target.balances.map((entry) => [entry.resource, entry.amount]));
+    const candidates = new Set<KernelResource>(targetByResource.keys());
+    for (const resource of draftTouchedResources.get(target.entityId) ?? []) candidates.add(resource);
+
+    for (const resource of candidates) {
+      if (tracked?.has(resource)) continue;
+      const targetAmount = targetByResource.get(resource) ?? 0;
+      const currentAmount = getBalance(current, resource);
+      // The snapshot is the authoritative end-of-tick state, while drafts were
+      // already applied above. Infer the opening balance from their difference.
+      // This also handles a newly introduced resource that was fully consumed in
+      // its first tick and therefore no longer appears in the final snapshot.
+      const openingAmount = Math.round((targetAmount - currentAmount) * 100) / 100;
       if (Math.abs(openingAmount) < 0.02) continue;
       const transaction = transactionFromDraft({
-        idempotencyKey: `${input.seed}:account-opening:${input.timestamp}:${target.entityId}:${targetBalance.resource}:${openingAmount}`,
+        idempotencyKey: `${input.seed}:account-opening:${input.timestamp}:${target.entityId}:${resource}:${openingAmount}`,
         timestamp: input.timestamp,
         debitEntityId: openingAmount > 0 ? clearing : target.entityId,
         creditEntityId: openingAmount > 0 ? target.entityId : clearing,
-        resource: targetBalance.resource,
+        resource,
         amount: Math.abs(openingAmount),
         reason: "account-opening",
         description: `Opened ${target.entityKind} account resource from authoritative domain state.`
@@ -1123,7 +1134,15 @@ export function normalizeSimulationKernel(value: unknown, input: KernelSyncInput
 export function advanceSimulationKernel(state: SimulationKernelState, input: KernelSyncInput): SimulationKernelState {
   const existingIds = new Set(state.transactions.map((item) => item.id));
   let accounts = compactLegacySyntheticAccounts(state.accounts, input);
+  const trackedBeforeDrafts = new Map(accounts.map((item) => [item.entityId, new Set(item.balances.map((entry) => entry.resource))]));
+  const draftTouchedResources = new Map<string, Set<KernelResource>>();
   const newTransactions: KernelTransactionState[] = [];
+
+  const markDraftResource = (entityId: string, resource: KernelResource): void => {
+    const resources = draftTouchedResources.get(entityId);
+    if (resources) resources.add(resource);
+    else draftTouchedResources.set(entityId, new Set([resource]));
+  };
 
   for (const rawDraft of input.drafts ?? []) {
     if (rawDraft.amount <= 0) continue;
@@ -1131,11 +1150,13 @@ export function advanceSimulationKernel(state: SimulationKernelState, input: Ker
     if (existingIds.has(transaction.id)) continue;
     existingIds.add(transaction.id);
     newTransactions.push(transaction);
+    markDraftResource(transaction.debitEntityId, transaction.resource);
+    markDraftResource(transaction.creditEntityId, transaction.resource);
   }
   if (newTransactions.length) accounts = applyTransactionsBatch(accounts, newTransactions, input.timestamp);
 
   const snapshot = snapshotAccounts(input);
-  const reconciled = reconcileAccounts(accounts, snapshot, input, existingIds);
+  const reconciled = reconcileAccounts(accounts, snapshot, input, existingIds, trackedBeforeDrafts, draftTouchedResources);
   accounts = reconciled.accounts;
   newTransactions.push(...reconciled.transactions);
 
