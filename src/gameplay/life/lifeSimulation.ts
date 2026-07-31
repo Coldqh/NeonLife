@@ -7,6 +7,7 @@ import { getFoodProduct } from "../../data/products/foodCatalog";
 import { advanceHumanNetwork, getPerson, recordPlayerAction, toKnownNpc } from "../../people/network/humanNetwork";
 import { advancePopulation, synchronizeActivePeopleFromPopulation } from "../../simulation/population/populationSystem";
 import { advanceSimulationKernel, kernelSystemEntityId } from "../../simulation/kernel/simulationKernel";
+import { projectCanonicalCreditsFromKernel } from "../../simulation/kernel/canonicalProjection";
 import type { KernelTransactionReason } from "../../simulation/kernel/types";
 import { advanceInfrastructure, applyInfrastructureToDistrictPulse } from "../../simulation/infrastructure/infrastructureSystem";
 import { advanceProductionAndLogistics } from "../../simulation/production/productionSystem";
@@ -52,7 +53,22 @@ import type { LocalMovementTargetState } from "../../simulation/localMovement/ty
 import { advanceStreetSceneState, applyStreetIncidentAction } from "../../simulation/streetScene/streetSceneSystem";
 import { advanceSocialState } from "../../simulation/social/socialSystem";
 import { advanceWorldCoreState, projectWorldCoreState, remapWorldCoreTransactions, synchronizeWorldCoreFromKernel, worldCoreManagedLocationIds } from "../../simulation/worldCore/worldCoreSystem";
-import { advanceProductInventoryState, projectProductInventoryState } from "../../simulation/inventory/inventorySystem";
+import {
+  advanceProductInventoryState,
+  applyPopulationInventoryCommands,
+  businessInventoryId,
+  commitProductionInventoryChanges,
+  consumeInventoryProduct,
+  destroyExpiredInventoryStacks,
+  ensureCanonicalInventory,
+  finalizeProductInventoryState,
+  findInventory,
+  getInventoryQuantity,
+  playerCarriedInventoryId,
+  playerStorageInventoryId,
+  projectProductInventoryState,
+  transferProduct
+} from "../../simulation/inventory/inventorySystem";
 import { advanceBusinessEconomyState, projectBusinessEconomyToWorldCore, synchronizeBusinessEconomyFromKernel } from "../../simulation/business/businessEconomySystem";
 import { advancePlayerCrimeState, recordPlayerCrimeAction, releasePlayerCustodyState } from "../../simulation/crime/playerCrimeSystem";
 import { joinVenueQueueState, leaveVenueQueueState, purchaseVenueOfferState, venueIsOpenAt } from "../../simulation/venues/venueOperationsSystem";
@@ -74,7 +90,7 @@ import {
   recordAccessDenied,
   setAccessDoorOpen
 } from "../../simulation/access/buildingAccessSystem";
-import { canPrepare, consumeFood, discardSpoiledFood, getCarriedMassGrams, purchaseFood, receiveFood, storeCarriedFoodAtHome as storeCarriedFoodInState } from "../food/foodSystem";
+import { canPrepare, getCarriedMassGrams } from "../food/foodSystem";
 import { calculateSleepRecovery, getHousingDaysLeft } from "../housing/housingSystem";
 import { getTravelOptions, isLocationOpen } from "../travel/travelSystem";
 import {
@@ -201,7 +217,7 @@ interface ProgressOptions {
 }
 
 
-const LOCAL_TICK_MAX_MINUTES = 9;
+const LOCAL_TICK_MAX_MINUTES = 59;
 const HOUR_MS = 60 * 60_000;
 
 function crossesHourBoundary(timestamp: number, minutes: number): boolean {
@@ -306,6 +322,9 @@ function progressLocalLife(session: GameSession, minutes: number, options: Progr
     population: session.population,
     organizations: session.world.organizations
   });
+  if (crimeAdvance.transactions.length > 0) {
+    return progressWorldLife(session, minutes, options);
+  }
   const crimeVehiclesState = synchronizeVehicleCrimeStatus(crimeAdvance.state, vehiclesState);
   const transitState = advanceTransitOperationsState(session.transit, {
     timestamp: nextTimestamp,
@@ -467,6 +486,40 @@ function progressLocalLife(session: GameSession, minutes: number, options: Progr
   };
 }
 
+function withCanonicalInventory(session: GameSession, productInventory = session.productInventory, timestamp = session.timestamp): GameSession {
+  const normalized = advanceProductInventoryState({
+    seed: session.world.meta.seed,
+    timestamp,
+    playerId: session.player.id,
+    worldCore: session.worldCore,
+    production: session.production,
+    urban: session.urban,
+    population: session.population,
+    food: session.life.food,
+    previous: finalizeProductInventoryState(productInventory, timestamp)
+  });
+  const projection = projectProductInventoryState(normalized, {
+    seed: session.world.meta.seed,
+    timestamp,
+    playerId: session.player.id,
+    worldCore: session.worldCore,
+    production: session.production,
+    urban: session.urban,
+    population: session.population,
+    food: session.life.food,
+    previous: normalized
+  });
+  return {
+    ...session,
+    productInventory: projection.state,
+    worldCore: projection.worldCore,
+    production: projection.production,
+    population: projection.population,
+    urban: projection.urban,
+    life: { ...session.life, food: projection.food }
+  };
+}
+
 export function progressLife(session: GameSession, minutes: number, options: ProgressOptions = {}): GameSession {
   const safeMinutes = Math.max(0, minutes);
   return canUseLocalTick(session, safeMinutes, options)
@@ -475,6 +528,7 @@ export function progressLife(session: GameSession, minutes: number, options: Pro
 }
 
 function progressWorldLife(session: GameSession, minutes: number, options: ProgressOptions = {}): GameSession {
+  session = withCanonicalInventory(session);
   const nextTimestamp = advanceGameTime(session.timestamp, minutes);
   const pulse = advanceDistrictPulse(session.district, nextTimestamp);
   const queued = processEventQueue(session, nextTimestamp);
@@ -980,7 +1034,7 @@ function progressWorldLife(session: GameSession, minutes: number, options: Progr
     kernel: session.kernel,
     previous: session.worldCore
   });
-  const preBusinessInventory = advanceProductInventoryState({
+  let preBusinessInventory = advanceProductInventoryState({
     seed: session.world.meta.seed,
     timestamp: nextTimestamp,
     playerId: session.player.id,
@@ -991,6 +1045,23 @@ function progressWorldLife(session: GameSession, minutes: number, options: Progr
     food: productionAdvance.food,
     previous: session.productInventory
   });
+  preBusinessInventory = applyPopulationInventoryCommands(
+    preBusinessInventory,
+    populationAdvance.inventoryCommands,
+    preKernelWorldCore,
+    session.world.meta.seed,
+    nextTimestamp
+  );
+  preBusinessInventory = commitProductionInventoryChanges(
+    preBusinessInventory,
+    session.world.meta.seed,
+    preKernelWorldCore,
+    session.production,
+    healthAdvance.production,
+    populationAdvance.food,
+    productionAdvance.food,
+    nextTimestamp
+  );
   const businessAdvance = advanceBusinessEconomyState({
     seed: session.world.meta.seed,
     timestamp: nextTimestamp,
@@ -1030,6 +1101,7 @@ function progressWorldLife(session: GameSession, minutes: number, options: Progr
     vehicles: crimeVehiclesState,
     worldCore: businessAdvance.worldCore,
     businessEconomy: businessAdvance.state,
+    productInventory: businessAdvance.productInventory,
     food: productionAdvance.food,
     drafts: kernelDrafts
   });
@@ -1060,6 +1132,19 @@ function progressWorldLife(session: GameSession, minutes: number, options: Progr
     food: productionAdvance.food,
     previous: businessAdvance.productInventory
   });
+  const canonicalCredits = projectCanonicalCreditsFromKernel(kernel, {
+    timestamp: nextTimestamp,
+    player: nextPlayer,
+    organizations: nextOrganizations,
+    population: inventoryProjection.population,
+    economy: coreProjection.economy,
+    production: inventoryProjection.production,
+    organizationEcosystem: organizationAdvance.state,
+    government: crimeAdvance.government,
+    health: healthAdvance.state,
+    urban: inventoryProjection.urban,
+    worldCore: inventoryProjection.worldCore
+  });
 
   return {
     ...session,
@@ -1069,7 +1154,7 @@ function progressWorldLife(session: GameSession, minutes: number, options: Progr
       meta: { ...session.world.meta, currentTimestamp: nextTimestamp },
       city: nextCity,
       districts: nextDistricts,
-      organizations: nextOrganizations,
+      organizations: canonicalCredits.organizations,
       activeDistrictId: targetDistrict?.id ?? session.world.activeDistrictId,
       primaryContactId: selectedPerson?.id ?? session.world.primaryContactId
     },
@@ -1078,20 +1163,20 @@ function progressWorldLife(session: GameSession, minutes: number, options: Progr
       : session.primaryContact,
     people: peopleState,
     pressure,
-    economy: coreProjection.economy,
-    population: inventoryProjection.population,
+    economy: canonicalCredits.economy,
+    population: canonicalCredits.population,
     kernel,
     worldCore: inventoryProjection.worldCore,
     productInventory: inventoryProjection.state,
     businessEconomy,
     infrastructure: governmentAdvance.infrastructure,
-    production: inventoryProjection.production,
-    organizationEcosystem: organizationAdvance.state,
-    government: crimeAdvance.government,
-    health: healthAdvance.state,
+    production: canonicalCredits.production,
+    organizationEcosystem: canonicalCredits.organizationEcosystem,
+    government: canonicalCredits.government,
+    health: canonicalCredits.health,
     data: crimeAdvance.data,
     metropolitan: metropolitanState,
-    urban: inventoryProjection.urban,
+    urban: canonicalCredits.urban,
     streets: streetsState,
     mobility: mobilityState,
     localScene: localSceneState,
@@ -1117,7 +1202,7 @@ function progressWorldLife(session: GameSession, minutes: number, options: Progr
       courier: courierState,
       work: coreProjection.work
     },
-    player: nextPlayer,
+    player: canonicalCredits.player,
     events: [...generated, ...queued.events.reverse(), ...pulse.events.reverse(), ...session.events].slice(0, 100)
   };
 }
@@ -2461,30 +2546,16 @@ function adjustPersonLiquidity(
   const resident = session.population.residents.find((item) => item.activePersonId === personId);
   if (!resident || !Number.isFinite(delta) || delta === 0) return null;
   const household = session.population.households.find((item) => item.id === resident.householdId);
-  let residentSavings = Math.max(0, resident.savings);
-  let householdBalance = Math.max(0, household?.balance ?? 0);
-
+  const balanceOf = (entityId: string): number => session.kernel.accounts
+    .find((account) => account.entityId === entityId)?.balances
+    .find((entry) => entry.resource === "credits")?.amount ?? 0;
   if (delta < 0) {
-    let remaining = Math.abs(delta);
-    if (residentSavings + householdBalance < remaining) return null;
-    const fromSavings = Math.min(residentSavings, remaining);
-    residentSavings -= fromSavings;
-    remaining -= fromSavings;
-    householdBalance -= remaining;
-  } else {
-    residentSavings += delta;
+    const required = Math.abs(delta);
+    if (balanceOf(resident.id) >= required) return { accountEntityId: resident.id, population: session.population };
+    if (household && balanceOf(household.id) >= required) return { accountEntityId: household.id, population: session.population };
+    return null;
   }
-
-  return {
-    accountEntityId: resident.id,
-    population: {
-      ...session.population,
-      residents: session.population.residents.map((item) => item.id === resident.id ? { ...item, savings: residentSavings } : item),
-      households: household
-        ? session.population.households.map((item) => item.id === household.id ? { ...item, balance: householdBalance } : item)
-        : session.population.households
-    }
-  };
+  return { accountEntityId: resident.id, population: session.population };
 }
 
 export function payPlayerObligation(session: GameSession, obligationId: string): GameSession {
@@ -2705,10 +2776,46 @@ export function purchaseVenueOffer(session: GameSession, venueId: string, offerI
   const vehicleId = offer.kind === "vehicle-service" ? serviceVehicle?.id : session.vehicles.player.currentVehicleId ?? session.vehicles.player.ownedVehicleIds[0];
   if (offer.kind === "vehicle-service" && !vehicleId) return session;
 
+  session = withCanonicalInventory(session);
+  let productInventory = session.productInventory;
+  if (offer.productId) {
+    const businessId = session.worldCore.aliasToBusinessId[venue.id] ?? session.worldCore.aliasToBusinessId[`venue-account:${venue.id}`];
+    if (!businessId) return session;
+    if (offer.kind === "food-goods") {
+      productInventory = ensureCanonicalInventory(productInventory, session.player.id, "player", "carried", session.timestamp, session.life.currentLocationId, session.life.food.carryingCapacityGrams, 8_000);
+      const inventorySale = transferProduct(
+        productInventory,
+        businessInventoryId(businessId),
+        playerCarriedInventoryId(session.player.id),
+        offer.productId,
+        1,
+        session.timestamp,
+        "player-purchase",
+        offer.currentPrice
+      );
+      if (inventorySale.transferred !== 1) return session;
+      productInventory = inventorySale.state;
+    } else {
+      const inventorySale = consumeInventoryProduct(
+        productInventory,
+        businessInventoryId(businessId),
+        offer.productId,
+        1,
+        session.timestamp,
+        "retail-sale",
+        offer.currentPrice,
+        session.player.id
+      );
+      if (inventorySale.consumed !== 1) return session;
+      productInventory = inventorySale.state;
+    }
+  }
+
   const purchase = purchaseVenueOfferState(session.urban.venueOperations, venue.id, offer.id, session.timestamp, session.player.id);
   if (!purchase) return session;
   const counterparty = `venue-account:${venue.id}`;
-  const progressed = progressLife({ ...session, urban: { ...session.urban, venueOperations: purchase.state } }, Math.max(1, offer.durationMinutes), {
+  const inventorySession = withCanonicalInventory({ ...session, productInventory, urban: { ...session.urban, venueOperations: purchase.state } }, productInventory);
+  const progressed = progressLife(inventorySession, Math.max(1, offer.durationMinutes), {
     category: offer.kind === "medical" || offer.kind === "cyberware" ? "health" : "finance",
     title: `${offer.name}: услуга завершена.`,
     detail: `${venue.name} · −₵ ${purchase.price} · остаток ${Math.max(0, offer.stock - 1)}.`,
@@ -2724,10 +2831,7 @@ export function purchaseVenueOffer(session: GameSession, venueId: string, offerI
   });
 
   let food = progressed.life.food;
-  if (offer.kind === "food-goods" && offer.productId) {
-    const received = receiveFood(food, progressed.world.meta.seed, offer.productId, 1, progressed.timestamp, "carried");
-    if (received) food = received.state;
-  } else if (offer.kind === "meal") {
+  if (offer.kind === "meal") {
     food = { ...food, lastMealAt: progressed.timestamp, lastMealProductId: offer.productId ?? null };
   }
 
@@ -2812,6 +2916,7 @@ function recordCrimeAtPlayer(session: GameSession, input: {
 }
 
 export function shopliftVenueOffer(session: GameSession, venueId: string, offerId: string): GameSession {
+  session = withCanonicalInventory(session);
   if (session.playerCrime.custody?.status === "detained") return session;
   const venue = venueAtPlayer(session, venueId);
   const operation = venue ? session.urban.venueOperations.operations.find((item) => item.venueId === venue.id) : undefined;
@@ -2824,7 +2929,22 @@ export function shopliftVenueOffer(session: GameSession, venueId: string, offerI
   const witnesses = visibleCrimeWitnessCount(session);
   const rng = new SeededRandom(`${session.world.meta.seed}:shoplift:${venue.id}:${offer.id}:${Math.floor(session.timestamp / 60_000)}`);
   const successChance = clamp(84 - venue.security * .52 - witnesses * 7);
-  const success = rng.chance(successChance / 100);
+  let success = rng.chance(successChance / 100);
+  let productInventory = session.productInventory;
+  if (success && offer.productId) {
+    const businessId = session.worldCore.aliasToBusinessId[venue.id] ?? session.worldCore.aliasToBusinessId[`venue-account:${venue.id}`];
+    if (!businessId) success = false;
+    else if (offer.kind === "food-goods") {
+      productInventory = ensureCanonicalInventory(productInventory, session.player.id, "player", "carried", session.timestamp, session.life.currentLocationId, session.life.food.carryingCapacityGrams, 8_000);
+      const stolen = transferProduct(productInventory, businessInventoryId(businessId), playerCarriedInventoryId(session.player.id), offer.productId, 1, session.timestamp, "player-purchase", 0);
+      success = stolen.transferred === 1;
+      productInventory = stolen.state;
+    } else {
+      const stolen = consumeInventoryProduct(productInventory, businessInventoryId(businessId), offer.productId, 1, session.timestamp, "retail-sale", 0, session.player.id);
+      success = stolen.consumed === 1;
+      productInventory = stolen.state;
+    }
+  }
   const urban = success ? {
     ...session.urban,
     venueOperations: {
@@ -2835,12 +2955,8 @@ export function shopliftVenueOffer(session: GameSession, venueId: string, offerI
       })
     }
   } : session.urban;
-  let food = session.life.food;
-  if (success && offer.kind === "food-goods" && offer.productId) {
-    const received = receiveFood(food, session.world.meta.seed, offer.productId, 1, session.timestamp, "carried");
-    if (received) food = received.state;
-  }
-  const playerCrime = recordCrimeAtPlayer({ ...session, urban }, {
+  const inventorySession = withCanonicalInventory({ ...session, productInventory, urban }, productInventory);
+  const playerCrime = recordCrimeAtPlayer(inventorySession, {
     kind: "shoplifting",
     venueId: venue.id,
     success,
@@ -2856,7 +2972,7 @@ export function shopliftVenueOffer(session: GameSession, venueId: string, offerI
       evidenceStrength: clamp(35 + venue.security * .35 + witnesses * 6)
     } : undefined
   });
-  return progressLife({ ...session, urban, playerCrime, life: { ...session.life, food } }, 3, {
+  return progressLife({ ...inventorySession, playerCrime }, 3, {
     category: "personal",
     title: success ? `Украдено: ${offer.name}.` : `Кража сорвалась: ${venue.name}.`,
     detail: `${venue.name} · свидетели ${witnesses} · риск опознания ${Math.round(100 - successChance)}%.`,
@@ -3155,16 +3271,21 @@ export function finishPlayerEmploymentShift(session: GameSession): GameSession {
 }
 
 export function buyFoodAtCurrentLocation(session: GameSession, productId: string): GameSession {
+  session = withCanonicalInventory(session);
   const exactLocationId = getPlayerExactLocationId(session);
   const location = session.world.locations.find((item) => item.id === exactLocationId);
   if (!location || !isPlayerInsideLocation(session, location.id) || !isLocationOpen(location, session.timestamp)) return session;
   const product = getFoodProduct(productId);
   const business = getBusinessAtLocation(session.economy, location.id);
+  const canonicalBusiness = session.worldCore.businesses.find((item) => item.locationId === location.id);
   const price = localPrice(product.price, business);
-  if (!businessCanServe(business) || session.player.balance < price) return session;
-  const purchase = purchaseFood(session.life.food, session.world.meta.seed, location.id, productId, 1, session.timestamp);
-  if (!purchase) return session;
-  const progressed = progressLife(session, 4, {
+  if (!canonicalBusiness || !businessCanServe(business) || session.player.balance < price) return session;
+  let inventory = ensureCanonicalInventory(session.productInventory, session.player.id, "player", "carried", session.timestamp, location.id, session.life.food.carryingCapacityGrams, 8_000);
+  const purchase = transferProduct(inventory, businessInventoryId(canonicalBusiness.id), playerCarriedInventoryId(session.player.id), productId, 1, session.timestamp, "player-purchase", price);
+  if (purchase.transferred !== 1) return session;
+  inventory = purchase.state;
+  const prepared = withCanonicalInventory({ ...session, productInventory: inventory }, inventory);
+  const progressed = progressLife(prepared, 4, {
     category: "finance",
     title: `Куплено: ${product.name}.`,
     detail: `${location.name} · −₵ ${price} · товар добавлен в переносимый груз · срок хранения ${product.shelfLifeHours} ч.`,
@@ -3172,30 +3293,28 @@ export function buyFoodAtCurrentLocation(session: GameSession, productId: string
     balanceCounterpartyEntityId: business?.organizationId ?? business?.id,
     activity: `Покупки: ${location.name}`
   });
-  return {
-    ...progressed,
-    life: {
-      ...progressed.life,
-      food: purchase.state
-    },
-    economy: registerBusinessSale(progressed.economy, location.id, price)
-  };
+  return { ...progressed, economy: registerBusinessSale(progressed.economy, location.id, price) };
 }
 
 export function orderFoodToHome(session: GameSession, productId: string): GameSession {
+  session = withCanonicalInventory(session);
   if (session.pressure.housingStatus !== "active") return session;
   const market = session.world.locations.find((location) => location.type === "market");
   if (!market) return session;
   const product = getFoodProduct(productId);
   const business = getBusinessAtLocation(session.economy, market.id);
+  const canonicalBusiness = session.worldCore.businesses.find((item) => item.locationId === market.id);
   const deliveryFee = 14 + Math.max(0, Math.round((business?.priceIndex ?? 100) / 25) - 4);
   const productPrice = localPrice(product.price, business);
   const totalCost = productPrice + deliveryFee;
-  if (!businessCanServe(business) || session.player.balance < totalCost) return session;
+  if (!canonicalBusiness || !businessCanServe(business) || session.player.balance < totalCost) return session;
   const deliveryTimestamp = session.timestamp + 25 * 60_000;
-  const purchase = purchaseFood(session.life.food, session.world.meta.seed, market.id, productId, 1, deliveryTimestamp, "storage");
-  if (!purchase) return session;
-  const progressed = progressLife(session, 25, {
+  let inventory = ensureCanonicalInventory(session.productInventory, session.player.id, "player", "home-storage", deliveryTimestamp, session.life.housing.locationId);
+  const purchase = transferProduct(inventory, businessInventoryId(canonicalBusiness.id), playerStorageInventoryId(session.player.id), productId, 1, deliveryTimestamp, "player-purchase", productPrice);
+  if (purchase.transferred !== 1) return session;
+  inventory = purchase.state;
+  const prepared = withCanonicalInventory({ ...session, productInventory: inventory }, inventory);
+  const progressed = progressLife(prepared, 25, {
     category: "finance",
     title: `Доставка получена: ${product.name}.`,
     detail: `${market.name} → ${session.world.locations.find((location) => location.id === session.life.housing.locationId)?.name ?? "HOME"} · товар ₵ ${productPrice} · доставка ₵ ${deliveryFee}`,
@@ -3203,23 +3322,33 @@ export function orderFoodToHome(session: GameSession, productId: string): GameSe
     stressDelta: -1,
     activity: "Заказ продуктов через городскую сеть"
   });
-  return {
-    ...progressed,
-    life: {
-      ...progressed.life,
-      food: purchase.state
-    },
-    economy: registerBusinessSale(progressed.economy, market.id, productPrice)
-  };
+  return { ...progressed, economy: registerBusinessSale(progressed.economy, market.id, productPrice) };
 }
 
 export function eatFoodFromStorage(session: GameSession, productId: string): GameSession {
+  session = withCanonicalInventory(session);
   const product = getFoodProduct(productId);
   const atHome = isPlayerInsideHome(session);
   if (!canPrepare(product.requirement, session.life.food.appliances, atHome)) return session;
-  const consumed = consumeFood(session.life.food, productId, session.timestamp, atHome ? "any" : "carried");
-  if (!consumed) return session;
-  const progressed = progressLife(session, Math.max(1, product.preparationMinutes), {
+  const sourceIds = atHome
+    ? [playerCarriedInventoryId(session.player.id), playerStorageInventoryId(session.player.id)]
+    : [playerCarriedInventoryId(session.player.id)];
+  let productInventory = session.productInventory;
+  let consumedUnits = 0;
+  for (const sourceId of sourceIds) {
+    if (getInventoryQuantity(productInventory, sourceId, productId, session.timestamp) <= 0) continue;
+    const consumed = consumeInventoryProduct(productInventory, sourceId, productId, 1, session.timestamp, "consumption", 0, session.player.id);
+    productInventory = consumed.state;
+    consumedUnits = consumed.consumed;
+    if (consumedUnits) break;
+  }
+  if (!consumedUnits) return session;
+  const prepared = withCanonicalInventory({
+    ...session,
+    productInventory,
+    life: { ...session.life, food: { ...session.life.food, lastMealAt: session.timestamp, lastMealProductId: productId } }
+  }, productInventory);
+  return progressLife(prepared, Math.max(1, product.preparationMinutes), {
     category: "health",
     title: `Съедено: ${product.name}.`,
     detail: `${product.code} · голод −${product.hungerRelief}${product.requirement !== "none" ? ` · подготовка ${product.preparationMinutes} мин.` : ""}`,
@@ -3229,25 +3358,35 @@ export function eatFoodFromStorage(session: GameSession, productId: string): Gam
     hungerDelta: -product.hungerRelief,
     activity: atHome ? "Приём пищи дома" : "Приём пищи"
   });
-  return {
-    ...progressed,
-    life: {
-      ...progressed.life,
-      food: {
-        ...consumed.state,
-        lastMealAt: progressed.timestamp
-      }
-    }
-  };
 }
 
 export function storeCarriedFoodAtHome(session: GameSession): GameSession {
+  session = withCanonicalInventory(session);
   if (!isPlayerInsideHome(session)) return session;
-  const transfer = storeCarriedFoodInState(session.life.food, session.life.housing.storageCapacity);
-  if (!transfer.moved) return session;
-  return progressLife({ ...session, life: { ...session.life, food: transfer.state } }, 3, {
+  const carriedId = playerCarriedInventoryId(session.player.id);
+  const storageId = playerStorageInventoryId(session.player.id);
+  const carried = findInventory(session.productInventory, session.player.id, "carried");
+  const stored = findInventory(session.productInventory, session.player.id, "home-storage");
+  if (!carried?.stacks.length) return session;
+  const occupied = stored?.stacks.reduce((sum, stack) => sum + (stack.status === "available" ? stack.quantity : 0), 0) ?? 0;
+  let free = Math.max(0, session.life.housing.storageCapacity - occupied);
+  if (free <= 0) return session;
+  let productInventory = ensureCanonicalInventory(session.productInventory, session.player.id, "player", "home-storage", session.timestamp, session.life.housing.locationId);
+  let moved = 0;
+  const products = [...new Set(carried.stacks.filter((stack) => stack.status === "available").map((stack) => stack.productId))];
+  for (const productId of products) {
+    if (free <= 0) break;
+    const available = getInventoryQuantity(productInventory, carriedId, productId, session.timestamp);
+    const transfer = transferProduct(productInventory, carriedId, storageId, productId, Math.min(free, available), session.timestamp, "storage");
+    productInventory = transfer.state;
+    moved += transfer.transferred;
+    free -= transfer.transferred;
+  }
+  if (!moved) return session;
+  const prepared = withCanonicalInventory({ ...session, productInventory }, productInventory);
+  return progressLife(prepared, 3, {
     category: "personal",
-    title: `Запас убран в пищевой шкаф: ${transfer.moved} ед.`,
+    title: `Запас убран в пищевой шкаф: ${moved} ед.`,
     detail: `Домашнее хранение · вместимость ${session.life.housing.storageCapacity} ед.`,
     importance: 1,
     activity: "Разбор продуктов дома"
@@ -3255,14 +3394,19 @@ export function storeCarriedFoodAtHome(session: GameSession): GameSession {
 }
 
 export function discardSpoiled(session: GameSession): GameSession {
-  const result = discardSpoiledFood(session.life.food, session.timestamp);
-  if (!result.discarded) return session;
-  return {
+  session = withCanonicalInventory(session);
+  const result = destroyExpiredInventoryStacks(session.productInventory, [playerCarriedInventoryId(session.player.id), playerStorageInventoryId(session.player.id)], session.timestamp);
+  if (!result.destroyed) return session;
+  const prepared = withCanonicalInventory({
     ...session,
-    life: { ...session.life, food: result.state },
+    productInventory: result.state,
+    life: { ...session.life, food: { ...session.life.food, discardedUnits: session.life.food.discardedUnits + result.destroyed } }
+  }, result.state);
+  return {
+    ...prepared,
     events: [
-      createEvent(session, session.timestamp, "health", `Утилизировано испорченных порций: ${result.discarded}.`, "Домашний пищевой запас очищен.", 2),
-      ...session.events
+      createEvent(prepared, prepared.timestamp, "health", `Утилизировано испорченных порций: ${result.destroyed}.`, "Домашний пищевой запас очищен.", 2),
+      ...prepared.events
     ].slice(0, 100)
   };
 }

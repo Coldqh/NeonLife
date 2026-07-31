@@ -40,8 +40,11 @@ assert(session.population.residents.every((resident) => typeof resident.digitalA
 assert(session.kernel.assets.some((asset) => asset.kind === "surveillance-node"), "surveillance nodes are absent from Kernel assets");
 assert(session.kernel.contracts.some((contract) => contract.kind === "data-access"), "data grants are absent from Kernel contracts");
 assert(session.data.records.every((record) => record.retentionUntilDay >= session.data.dayIndex - 1), "expired records remain active");
-assert(maximumReconciliations <= 350, `daily reconciliation exploded to ${maximumReconciliations} transactions`);
-assert(batchReconciliations <= 500, `annual batch reconciliation exploded to ${batchReconciliations} transactions`);
+assert(maximumReconciliations === 0, `daily reconciliation exploded to ${maximumReconciliations} transactions`);
+assert(batchReconciliations === 0, `annual batch reconciliation exploded to ${batchReconciliations} transactions`);
+assert(session.productInventory.integrity.healthy, `annual inventory integrity failed: ${session.productInventory.integrity.warnings.join(" | ")}`);
+assert(Object.keys(session.productInventory.adapterQuantities).length === 0, "annual simulation restored legacy inventory quantity adapters");
+assert(Object.keys(session.productInventory.adapterBindings).length === 0, "annual simulation restored legacy inventory bindings");
 
 
 const invalidAllowed = session.data.accessEvents.filter((event) => {

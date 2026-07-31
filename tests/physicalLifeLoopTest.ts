@@ -15,6 +15,7 @@ import {
 } from "../src/gameplay/life/lifeSimulation";
 import { getActiveCourierOrder } from "../src/gameplay/jobs/courier/courierSystem";
 import { getPlayerHomeBuilding, isPlayerInsideHome } from "../src/gameplay/life/playerPresence";
+import { getInventoryQuantity, playerCarriedInventoryId, playerStorageInventoryId } from "../src/simulation/inventory/inventorySystem";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -51,6 +52,13 @@ assert(localTick.economy === localTickSource.economy, "zero-minute action recalc
 assert(localTick.worldCore === localTickSource.worldCore, "zero-minute action rebuilt World Core");
 assert(localTick.productInventory === localTickSource.productInventory, "zero-minute action rebuilt product inventory");
 assert(localTick.kernel === localTickSource.kernel, "zero-minute action rebuilt the Kernel ledger");
+const twelveMinuteLocalTick = progressLife(localTickSource, 12, { activity: "Короткий переход", suppressTimeEvent: true });
+assert(twelveMinuteLocalTick.economy === localTickSource.economy, "sub-hour action recalculated the city economy");
+assert(twelveMinuteLocalTick.productInventory === localTickSource.productInventory, "sub-hour action rebuilt product inventory");
+assert(twelveMinuteLocalTick.kernel === localTickSource.kernel, "sub-hour action rebuilt the Kernel ledger");
+const hourBoundaryTick = progressLife(twelveMinuteLocalTick, 12, { activity: "Переход через час", suppressTimeEvent: true });
+assert(hourBoundaryTick.economy !== twelveMinuteLocalTick.economy, "hour boundary failed to run the city economy");
+assert(hourBoundaryTick.productInventory !== twelveMinuteLocalTick.productInventory, "hour boundary failed to advance product inventory");
 
 const seed = "physical-life-loop";
 let session = createWorldSession(seed);
@@ -72,9 +80,13 @@ assert(shop, "open food shop missing");
 session = insideLocation(session, shop.id);
 const storageBefore = session.life.food.storage.reduce((sum, stack) => sum + stack.quantity, 0);
 const carriedBefore = session.life.food.carried.reduce((sum, stack) => sum + stack.quantity, 0);
+const canonicalCarriedBefore = getInventoryQuantity(session.productInventory, playerCarriedInventoryId(session.player.id), "kernel-9-brick", session.timestamp);
+const canonicalStorageBefore = getInventoryQuantity(session.productInventory, playerStorageInventoryId(session.player.id), "kernel-9-brick", session.timestamp);
 session = buyFoodAtCurrentLocation(session, "kernel-9-brick");
 assert(session.life.food.carried.reduce((sum, stack) => sum + stack.quantity, 0) === carriedBefore + 1, "purchase did not enter carried inventory");
 assert(session.life.food.storage.reduce((sum, stack) => sum + stack.quantity, 0) === storageBefore, "purchase teleported into home storage");
+assert(getInventoryQuantity(session.productInventory, playerCarriedInventoryId(session.player.id), "kernel-9-brick", session.timestamp) === canonicalCarriedBefore + 1, "purchase did not update canonical carried inventory immediately");
+assert(getInventoryQuantity(session.productInventory, playerStorageInventoryId(session.player.id), "kernel-9-brick", session.timestamp) === canonicalStorageBefore, "purchase changed canonical home storage");
 
 session = insideLocation(session, session.life.housing.locationId);
 session = enterPlayerHomeUnit(session);
@@ -82,9 +94,13 @@ assert(isPlayerInsideHome(session), "player could not return to own unit");
 session = storeCarriedFoodAtHome(session);
 assert(session.life.food.carried.length === 0, "carried food was not stored at home");
 assert(session.life.food.storage.reduce((sum, stack) => sum + stack.quantity, 0) >= storageBefore + 1, "home storage did not receive carried food");
+assert(getInventoryQuantity(session.productInventory, playerCarriedInventoryId(session.player.id), "kernel-9-brick", session.timestamp) === 0, "store action left canonical carried stock behind");
+assert(getInventoryQuantity(session.productInventory, playerStorageInventoryId(session.player.id), "kernel-9-brick", session.timestamp) >= canonicalStorageBefore + canonicalCarriedBefore + 1, "store action did not update canonical home storage");
 const hungerBeforeMeal = session.player.condition.hunger;
+const canonicalMealBefore = getInventoryQuantity(session.productInventory, playerStorageInventoryId(session.player.id), "kernel-9-brick", session.timestamp);
 session = eatFoodFromStorage(session, "kernel-9-brick");
 assert(session.player.condition.hunger < hungerBeforeMeal, "home meal did not reduce hunger");
+assert(getInventoryQuantity(session.productInventory, playerStorageInventoryId(session.player.id), "kernel-9-brick", session.timestamp) === canonicalMealBefore - 1, "meal did not consume canonical storage");
 
 const dispatch = session.world.locations.find((item) => item.code.startsWith("MSH/"));
 assert(dispatch, "courier dispatch missing");
@@ -159,6 +175,39 @@ assert(migrated?.schemaVersion === SAVE_SCHEMA_VERSION, `save was not migrated t
 assert(Array.isArray(migrated.payload.life.food.carried), "migration did not create carried food inventory");
 assert(migrated.payload.life.food.carryingCapacityGrams === 6_500, "migration did not create carrying capacity");
 assert(migrated.payload.jobs.courier.carriedCargo?.orderId === legacyOrder.id, "migration did not reconstruct carried courier cargo");
+
+const transitional = createWorldSession("physical-life-schema-41");
+const transitionProduct = "kernel-9-brick";
+const transitionStack = { id: "legacy-unsynced-stack", productId: transitionProduct, quantity: 1, purchasedAt: transitional.timestamp, expiresAt: transitional.timestamp + 24 * 60 * 60_000 };
+const transitionalEnvelope = {
+  slotId: "slot-1" as const,
+  schemaVersion: 41,
+  createdAt: new Date(transitional.timestamp).toISOString(),
+  updatedAt: new Date(transitional.timestamp).toISOString(),
+  checksum: "legacy",
+  payload: {
+    ...transitional,
+    schemaVersion: 41,
+    life: { ...transitional.life, food: { ...transitional.life.food, carried: [...transitional.life.food.carried, transitionStack] } },
+    productInventory: {
+      ...transitional.productInventory,
+      adapterQuantities: { ...transitional.productInventory.adapterQuantities, [`player:carried:${transitionProduct}`]: 0 },
+      adapterBindings: {
+        ...transitional.productInventory.adapterBindings,
+        [`player:carried:${transitionProduct}`]: {
+          inventoryId: playerCarriedInventoryId(transitional.player.id),
+          ownerEntityId: transitional.player.id,
+          ownerKind: "player" as const,
+          compartment: "carried",
+          productId: transitionProduct
+        }
+      }
+    }
+  }
+};
+const transitionalMigrated = migrateEnvelope(transitionalEnvelope, "slot-1");
+assert(transitionalMigrated?.schemaVersion === SAVE_SCHEMA_VERSION, "schema 41 inventory migration failed");
+assert(getInventoryQuantity(transitionalMigrated.payload.productInventory, playerCarriedInventoryId(transitional.player.id), transitionProduct, transitional.timestamp) === 1, "schema 41 unsynchronized player item was lost");
 
 console.log(JSON.stringify({
   insideHome: isPlayerInsideHome(enterPlayerHomeUnit(insideLocation(session, session.life.housing.locationId))),

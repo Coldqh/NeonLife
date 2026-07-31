@@ -22,6 +22,7 @@ import type {
   HouseholdStatus,
   OrganizationBudgetDelta,
   PopulationAdvanceResult,
+  PopulationInventoryCommand,
   PopulationNotice,
   PopulationState,
   PopulationTransactionTotals,
@@ -432,16 +433,64 @@ function pantryUnits(pantry: HouseholdPantryItem[]): number {
   return pantry.reduce((sum, item) => sum + item.units, 0);
 }
 
-function consumePantry(pantry: HouseholdPantryItem[], units: number): { pantry: HouseholdPantryItem[]; consumed: number } {
+function consumePantry(pantry: HouseholdPantryItem[], units: number): { pantry: HouseholdPantryItem[]; consumed: number; items: HouseholdPantryItem[] } {
   const next = pantry.map((item) => ({ ...item }));
+  const items: HouseholdPantryItem[] = [];
   let remaining = units;
   for (const item of next) {
     if (remaining <= 0) break;
     const used = Math.min(item.units, remaining);
+    if (used > 0) items.push({ productId: item.productId, units: used });
     item.units -= used;
     remaining -= used;
   }
-  return { pantry: next.filter((item) => item.units > 0), consumed: units - remaining };
+  return { pantry: next.filter((item) => item.units > 0), consumed: units - remaining, items };
+}
+
+function householdPantryQuantities(households: HouseholdState[]): Map<string, { householdId: string; productId: string; quantity: number }> {
+  const result = new Map<string, { householdId: string; productId: string; quantity: number }>();
+  for (const household of households) {
+    for (const item of household.pantry) {
+      const key = `${household.id}|${item.productId}`;
+      result.set(key, { householdId: household.id, productId: item.productId, quantity: Math.max(0, item.units) });
+    }
+  }
+  return result;
+}
+
+function lifecyclePantryCommands(before: HouseholdState[], after: HouseholdState[], timestamp: number): PopulationInventoryCommand[] {
+  const beforeQuantities = householdPantryQuantities(before);
+  const afterQuantities = householdPantryQuantities(after);
+  const products = new Set<string>();
+  for (const item of beforeQuantities.values()) products.add(item.productId);
+  for (const item of afterQuantities.values()) products.add(item.productId);
+  const commands: PopulationInventoryCommand[] = [];
+
+  for (const productId of products) {
+    const losses = [...beforeQuantities.values()]
+      .filter((item) => item.productId === productId)
+      .map((item) => ({ householdId: item.householdId, quantity: Math.max(0, item.quantity - (afterQuantities.get(`${item.householdId}|${productId}`)?.quantity ?? 0)) }))
+      .filter((item) => item.quantity > 0);
+    const gains = [...afterQuantities.values()]
+      .filter((item) => item.productId === productId)
+      .map((item) => ({ householdId: item.householdId, quantity: Math.max(0, item.quantity - (beforeQuantities.get(`${item.householdId}|${productId}`)?.quantity ?? 0)) }))
+      .filter((item) => item.quantity > 0);
+
+    for (const gain of gains) {
+      let remaining = gain.quantity;
+      for (const loss of losses) {
+        if (remaining <= 0) break;
+        const moved = Math.min(remaining, loss.quantity);
+        if (moved <= 0) continue;
+        commands.push({ kind: "transfer", sourceHouseholdId: loss.householdId, targetHouseholdId: gain.householdId, productId, quantity: moved, timestamp });
+        loss.quantity -= moved;
+        remaining -= moved;
+      }
+      if (remaining > 0) commands.push({ kind: "import", householdId: gain.householdId, productId, quantity: remaining, timestamp });
+    }
+    for (const loss of losses) if (loss.quantity > 0) commands.push({ kind: "consume", householdId: loss.householdId, productId, quantity: loss.quantity, timestamp });
+  }
+  return commands;
 }
 
 function addPantryUnit(pantry: HouseholdPantryItem[], productId: string): HouseholdPantryItem[] {
@@ -636,7 +685,7 @@ export function advancePopulation(
   economy: LocalEconomyState,
   foodState: FoodState
 ): PopulationAdvanceResult {
-  if (timestamp <= state.lastUpdatedAt) return { state, economy, food: foodState, notices: [], organizationBudgetDeltas: [], transactions: [] };
+  if (timestamp <= state.lastUpdatedAt) return { state, economy, food: foodState, notices: [], organizationBudgetDeltas: [], transactions: [], inventoryCommands: [] };
   const targetDay = Math.floor(timestamp / DAY_MS);
   let dayIndex = Math.max(state.dayIndex, Math.floor(state.lastUpdatedAt / DAY_MS));
   const normalizedLifecycle = normalizePopulationLifecycleState(state.lifecycle, seed, dayIndex, state.residents, state.households, districts, locations);
@@ -651,6 +700,7 @@ export function advancePopulation(
   const notices: PopulationNotice[] = [];
   const organizationBudgetDeltas: OrganizationBudgetDelta[] = [];
   const transactions: KernelTransactionDraft[] = [];
+  const inventoryCommands: PopulationInventoryCommand[] = [];
   const totals = { ...state.totals };
   const organizationBudgets = new Map(organizations.map((organization) => [organization.id, organization.budget]));
 
@@ -717,6 +767,7 @@ export function advancePopulation(
       household.spendingMode = spendingMode(household.balance, household.debt, members.length);
       const consumed = consumePantry(household.pantry, dailyFoodNeed);
       household.pantry = consumed.pantry;
+      for (const item of consumed.items) inventoryCommands.push({ kind: "consume", householdId: household.id, productId: item.productId, quantity: item.units, timestamp: dayIndex * DAY_MS });
       if (consumed.consumed > 0) transactions.push({
         idempotencyKey: `${seed}:day:${dayIndex}:food-consumed-stock:${household.id}`,
         timestamp: dayIndex * DAY_MS,
@@ -737,8 +788,10 @@ export function advancePopulation(
         food = purchase.food;
         foodSpent = purchase.spent;
         purchases = purchase.purchases;
+        for (const item of purchases) inventoryCommands.push({ kind: "purchase", householdId: household.id, locationId: item.locationId, productId: item.productId, quantity: item.units, unitPrice: item.units > 0 ? item.paid / item.units : 0, timestamp: dayIndex * DAY_MS });
         const afterPurchase = consumePantry(household.pantry, unmet);
         household.pantry = afterPurchase.pantry;
+        for (const item of afterPurchase.items) inventoryCommands.push({ kind: "consume", householdId: household.id, productId: item.productId, quantity: item.units, timestamp: dayIndex * DAY_MS });
         unmet -= afterPurchase.consumed;
         if (afterPurchase.consumed > 0) transactions.push({
           idempotencyKey: `${seed}:day:${dayIndex}:food-consumed-purchase:${household.id}`,
@@ -976,6 +1029,7 @@ export function advancePopulation(
     businesses = laborAdvance.businesses;
     notices.push(...laborAdvance.notices);
 
+    const householdsBeforeLifecycle = households.map((household) => ({ ...household, pantry: household.pantry.map((item) => ({ ...item })) }));
     const lifecycleAdvance = advancePopulationLifecycleDay({
       state: lifecycle,
       dayIndex,
@@ -991,6 +1045,7 @@ export function advancePopulation(
     lifecycle = lifecycleAdvance.state;
     residents = lifecycleAdvance.residents;
     households = lifecycleAdvance.households;
+    inventoryCommands.push(...lifecyclePantryCommands(householdsBeforeLifecycle, households, dayIndex * DAY_MS));
     employments = lifecycleAdvance.employments;
     housing = lifecycleAdvance.housing;
     notices.push(...lifecycleAdvance.notices);
@@ -1007,7 +1062,7 @@ export function advancePopulation(
 
   const nextState: PopulationState = { ...state, residents, households, employments, housing, laborMarket, lifecycle, totals, lastUpdatedAt: timestamp, dayIndex, simulatedDays: state.simulatedDays + Math.max(0, targetDay - state.dayIndex), cohorts: [] };
   nextState.cohorts = recomputeCohorts(nextState, districts);
-  return { state: nextState, economy: { ...economy, businesses }, food, notices: notices.slice(0, 10), organizationBudgetDeltas, transactions };
+  return { state: nextState, economy: { ...economy, businesses }, food, notices: notices.slice(0, 10), organizationBudgetDeltas, transactions, inventoryCommands };
 }
 
 export function synchronizeActivePeopleFromPopulation(network: HumanNetworkState, population: PopulationState): HumanNetworkState {

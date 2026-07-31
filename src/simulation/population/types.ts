@@ -196,6 +196,12 @@ export interface OrganizationBudgetDelta {
   delta: number;
 }
 
+export type PopulationInventoryCommand =
+  | { kind: "purchase"; householdId: EntityId; locationId: EntityId; productId: string; quantity: number; unitPrice: number; timestamp: number }
+  | { kind: "consume"; householdId: EntityId; productId: string; quantity: number; timestamp: number }
+  | { kind: "transfer"; sourceHouseholdId: EntityId; targetHouseholdId: EntityId; productId: string; quantity: number; timestamp: number }
+  | { kind: "import"; householdId: EntityId; productId: string; quantity: number; timestamp: number };
+
 export interface PopulationAdvanceResult {
   state: PopulationState;
   economy: LocalEconomyState;
@@ -203,4 +209,5 @@ export interface PopulationAdvanceResult {
   notices: PopulationNotice[];
   organizationBudgetDeltas: OrganizationBudgetDelta[];
   transactions: KernelTransactionDraft[];
+  inventoryCommands: PopulationInventoryCommand[];
 }

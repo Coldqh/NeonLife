@@ -15,6 +15,8 @@ import {
 import { localMovementTargetForPoint } from "../src/simulation/localMovement/localMovementSystem";
 import { getSectorStreetTopology } from "../src/simulation/streets/streetTopologySystem";
 import { kernelSystemEntityId } from "../src/simulation/kernel/simulationKernel";
+import { businessInventoryId, facilityInventoryId, getInventoryQuantity, householdInventoryId, playerCarriedInventoryId } from "../src/simulation/inventory/inventorySystem";
+import { productForLegacyResource } from "../src/data/products/productCatalog";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -22,6 +24,10 @@ function assert(condition: unknown, message: string): asserts condition {
 
 function close(left: number, right: number, epsilon = 0.0001): boolean {
   return Math.abs(left - right) <= epsilon;
+}
+
+function totalKernelCredits(session: ReturnType<typeof createWorldSession>): number {
+  return session.kernel.accounts.reduce((sum, account) => sum + (account.balances.find((entry) => entry.resource === "credits")?.amount ?? 0), 0);
 }
 
 const seed = "world-integrity-regression";
@@ -69,6 +75,7 @@ const needsSeed = `${seed}:needs`;
 const needsCreated = createWorldSession(needsSeed);
 const initialDayIndex = needsCreated.kernel.clock.dayIndex;
 const initialAccountCount = needsCreated.kernel.accounts.length;
+const initialKernelCredits = totalKernelCredits(needsCreated);
 const oneChunk = progressLife(needsCreated, 120, { suppressTimeEvent: true });
 let manyChunks = createWorldSession(needsSeed);
 for (let step = 0; step < 10; step += 1) manyChunks = progressLife(manyChunks, 12, { suppressTimeEvent: true });
@@ -81,8 +88,83 @@ assert(oneChunk.kernel.integrity.healthy && manyChunks.kernel.integrity.healthy,
 assert(oneChunk.kernel.accounts.length - initialAccountCount <= 2, "day boundary leaked synthetic kernel accounts");
 assert(manyChunks.kernel.accounts.length - initialAccountCount <= 2, "chunked day boundary leaked synthetic kernel accounts");
 assert(!manyChunks.kernel.accounts.some((account) => account.entityId.startsWith("consumer-pool:") || account.entityId.startsWith("workforce-pool:")), "raw synthetic pool account survived kernel compaction");
-assert(oneChunk.kernel.integrity.reconciliationTransactions <= 50, "day boundary produced excessive domain reconciliation");
-assert(manyChunks.kernel.integrity.reconciliationTransactions <= 50, "chunked day boundary produced excessive domain reconciliation");
+assert(oneChunk.kernel.integrity.reconciliationTransactions === 0, "day boundary produced domain reconciliation");
+assert(manyChunks.kernel.integrity.reconciliationTransactions === 0, "chunked day boundary produced domain reconciliation");
+assert(close(totalKernelCredits(oneChunk), initialKernelCredits), "single-step day boundary created or destroyed credits");
+assert(close(totalKernelCredits(manyChunks), initialKernelCredits), "chunked day boundary created or destroyed credits");
+
+const canonicalBase = createWorldSession(`${seed}:canonical-economy`);
+const canonicalFixture = canonicalBase.worldCore.businesses.map((business) => {
+  if (!business.legacyBusinessId || !business.locationId) return null;
+  const productId = Object.keys(canonicalBase.life.food.shopStocks[business.locationId] ?? {})[0];
+  if (!productId) return null;
+  const inventory = canonicalBase.productInventory.inventories.find((item) => item.id === businessInventoryId(business.id));
+  if (!inventory || getInventoryQuantity(canonicalBase.productInventory, inventory.id, productId) <= 0) return null;
+  return { business, inventory, productId, locationId: business.locationId, legacyBusinessId: business.legacyBusinessId };
+}).find((fixture): fixture is NonNullable<typeof fixture> => Boolean(fixture));
+assert(canonicalFixture, "canonical business fixture is missing");
+const { business: canonicalBusiness, inventory: canonicalInventory, productId: canonicalProductId, locationId: canonicalLocationId, legacyBusinessId: canonicalLegacyBusinessId } = canonicalFixture;
+const canonicalQuantityBefore = getInventoryQuantity(canonicalBase.productInventory, canonicalInventory.id, canonicalProductId);
+const legacyBusiness = canonicalBase.economy.businesses.find((business) => business.id === canonicalLegacyBusinessId);
+assert(legacyBusiness, "legacy business projection is missing");
+const corruptedProjection = {
+  ...canonicalBase,
+  economy: {
+    ...canonicalBase.economy,
+    businesses: canonicalBase.economy.businesses.map((business) => business.id === legacyBusiness.id ? { ...business, cash: business.cash + 999_999, stock: 100 } : business)
+  },
+  life: {
+    ...canonicalBase.life,
+    food: {
+      ...canonicalBase.life.food,
+      shopStocks: {
+        ...canonicalBase.life.food.shopStocks,
+        [canonicalLocationId]: {
+          ...(canonicalBase.life.food.shopStocks[canonicalLocationId] ?? {}),
+          [canonicalProductId]: canonicalQuantityBefore + 9_999
+        }
+      }
+    }
+  }
+};
+const canonicalRecovered = progressLife(corruptedProjection, 20, { suppressTimeEvent: true, trackBalance: false });
+const recoveredKernelCash = canonicalRecovered.kernel.accounts.find((account) => account.entityId === canonicalBusiness.id)?.balances.find((entry) => entry.resource === "credits")?.amount;
+const recoveredLegacy = canonicalRecovered.economy.businesses.find((business) => business.id === legacyBusiness.id);
+assert(recoveredKernelCash !== undefined && recoveredLegacy?.cash === recoveredKernelCash, "legacy business cash overrode the ledger");
+assert(getInventoryQuantity(canonicalRecovered.productInventory, canonicalInventory.id, canonicalProductId) === canonicalQuantityBefore, "legacy shop stock overrode ProductInventory");
+assert(canonicalRecovered.life.food.shopStocks[canonicalLocationId]?.[canonicalProductId] === canonicalQuantityBefore, "shop stock projection did not return to canonical quantity");
+assert(canonicalRecovered.kernel.integrity.reconciliationTransactions === 0, "canonical projection repair created a reconciliation transaction");
+
+const readModelBase = createWorldSession(`${seed}:canonical-physical-inventory`);
+const readModelHousehold = readModelBase.population.households.find((household) => household.pantry.length > 0);
+const readModelFacility = readModelBase.production.facilities.find((facility) => facility.inventory.length > 0);
+assert(readModelHousehold && readModelFacility, "canonical physical inventory fixtures are missing");
+const householdProductId = readModelHousehold.pantry[0].productId;
+const facilityResource = readModelFacility.inventory[0].resource;
+const facilityProductId = productForLegacyResource(facilityResource, `${readModelFacility.name}:${readModelFacility.kind}`).id;
+const fakePlayerStack = { id: "corrupt-player-stack", productId: "kernel-9-brick", quantity: 999, purchasedAt: readModelBase.timestamp, expiresAt: readModelBase.timestamp + 24 * 60 * 60_000 };
+const corruptedPhysicalProjection = {
+  ...readModelBase,
+  life: { ...readModelBase.life, food: { ...readModelBase.life.food, carried: [...readModelBase.life.food.carried, fakePlayerStack] } },
+  population: {
+    ...readModelBase.population,
+    households: readModelBase.population.households.map((household) => household.id === readModelHousehold.id
+      ? { ...household, pantry: household.pantry.map((item) => item.productId === householdProductId ? { ...item, units: item.units + 999 } : item), foodUnits: household.foodUnits + 999 }
+      : household)
+  },
+  production: {
+    ...readModelBase.production,
+    facilities: readModelBase.production.facilities.map((facility) => facility.id === readModelFacility.id
+      ? { ...facility, inventory: facility.inventory.map((item) => item.resource === facilityResource ? { ...item, amount: item.amount + 999 } : item) }
+      : facility)
+  }
+};
+const physicalControl = progressLife(readModelBase, 20, { suppressTimeEvent: true, trackBalance: false });
+const physicalRecovered = progressLife(corruptedPhysicalProjection, 20, { suppressTimeEvent: true, trackBalance: false });
+assert(getInventoryQuantity(physicalRecovered.productInventory, playerCarriedInventoryId(readModelBase.player.id), "kernel-9-brick") === getInventoryQuantity(physicalControl.productInventory, playerCarriedInventoryId(readModelBase.player.id), "kernel-9-brick"), "legacy player inventory overrode canonical inventory");
+assert(getInventoryQuantity(physicalRecovered.productInventory, householdInventoryId(readModelHousehold.id), householdProductId) === getInventoryQuantity(physicalControl.productInventory, householdInventoryId(readModelHousehold.id), householdProductId), "legacy household pantry overrode canonical inventory");
+assert(getInventoryQuantity(physicalRecovered.productInventory, facilityInventoryId(readModelFacility.id), facilityProductId) === getInventoryQuantity(physicalControl.productInventory, facilityInventoryId(readModelFacility.id), facilityProductId), "legacy production inventory overrode canonical inventory");
+assert(Object.keys(physicalRecovered.productInventory.adapterQuantities).length === 0 && Object.keys(physicalRecovered.productInventory.adapterBindings).length === 0, "transitional inventory adapters survived a canonical tick");
 
 const legacyKernelBase = createWorldSession(`${seed}:legacy-kernel`);
 const consumptionId = kernelSystemEntityId(legacyKernelBase.world.meta.seed, "consumption");
@@ -163,21 +245,23 @@ const loanReady = {
   people: {
     ...loanBase.people,
     people: loanBase.people.people.map((person) => person.id === creditor.id ? { ...person, trustToPlayer: 80, money: 500 } : person)
-  },
-  population: {
-    ...loanBase.population,
-    residents: loanBase.population.residents.map((resident) => resident.id === creditorResident.id ? { ...resident, savings: 1_000 } : resident)
   }
 };
-const moneyBeforeLoan = loanReady.player.balance + 1_000 + creditorHousehold.balance;
+const loanCreditBalance = (entityId: string, source = loanReady) => source.kernel.accounts
+  .find((account) => account.entityId === entityId)?.balances
+  .find((entry) => entry.resource === "credits")?.amount ?? 0;
+const moneyBeforeLoan = loanCreditBalance(loanReady.player.id) + loanCreditBalance(creditorResident.id) + loanCreditBalance(creditorHousehold.id);
 const borrowed = requestEmergencyLoan(loanReady, creditor.id);
 const borrowedResident = borrowed.population.residents.find((resident) => resident.id === creditorResident.id);
 const borrowedHousehold = borrowed.population.households.find((household) => household.id === creditorHousehold.id);
 assert(borrowedResident && borrowedHousehold, "creditor finance state disappeared after loan");
 const personalDebt = borrowed.pressure.obligations.find((obligation) => obligation.type === "personal" && obligation.creditorPersonId === creditor.id && obligation.status === "active");
 assert(personalDebt, "personal loan obligation was not created");
-const moneyAfterLoan = borrowed.player.balance + borrowedResident.savings + borrowedHousehold.balance;
+const moneyAfterLoan = borrowed.kernel.accounts
+  .filter((account) => [borrowed.player.id, creditorResident.id, creditorHousehold.id].includes(account.entityId))
+  .reduce((sum, account) => sum + (account.balances.find((entry) => entry.resource === "credits")?.amount ?? 0), 0);
 assert(close(moneyBeforeLoan, moneyAfterLoan), "personal loan created or destroyed money");
+assert(close(borrowedResident.savings, borrowed.kernel.accounts.find((account) => account.entityId === creditorResident.id)?.balances.find((entry) => entry.resource === "credits")?.amount ?? 0), "resident savings are not projected from the ledger");
 const repaid = payPlayerObligation(borrowed, personalDebt.id);
 const repaidResident = repaid.population.residents.find((resident) => resident.id === creditorResident.id);
 assert(repaidResident && close(repaidResident.savings, borrowedResident.savings + personalDebt.amount), "personal repayment did not credit canonical resident funds");

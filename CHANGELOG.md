@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.48.0 — Physical Inventory
+
+- made `ProductInventory` authoritative for player carried items, home storage, household pantries and production facilities during normal runtime;
+- replaced household pantry feedback with ordered purchase, consumption, transfer and import commands emitted by the population simulation;
+- committed production, logistics and shop-stock deltas as canonical batch transfers, production/import batches or physical consumption before rebuilding compatibility views;
+- made player purchase, delivery, eating, home storage, disposal and shoplifting actions mutate exact canonical batches immediately;
+- stopped `FoodState`, household pantry fields and facility resource arrays from importing goods back after bootstrap;
+- added a one-time schema 41 to 42 migration that preserves legitimate unsynchronized legacy player, household and facility stock, then clears transitional adapter state;
+- expanded the fast local runtime to all sub-hour actions that do not cross an hour boundary or create financial work, while preserving full hourly simulation;
+- optimized large population inventory command batches to avoid repeated whole-inventory scans during annual simulations;
+- added regressions for physical player stock, schema migration, corrupt legacy inventory read models and local-versus-hour-boundary scheduling;
+- kept daily, monthly and annual Kernel reconciliation counts at zero across all 27 domain suites.
+
+## 0.47.0 — Canonical Economy
+
+- made Simulation Kernel accounts the only persisted source of credit balances; player, resident, household, organization, facility, business and venue cash fields are now refreshed as read models;
+- made Product Inventory authoritative for business and venue stock after bootstrap, removing feedback from legacy shop and venue adapters;
+- projected canonical credits during world creation, runtime advancement and save migration;
+- replaced per-domain credit repair with account opening and lifecycle account closure, eliminating newly generated `domain-reconciliation` transactions;
+- made venue purchases consume exact canonical product batches before recording the sale;
+- prevented local ticks from swallowing financial drafts by escalating any money-producing local event to the full Kernel pipeline;
+- removed direct insurance settlement writes to resident savings and organization budgets;
+- migrated saves to schema 41 and added corruption regressions proving legacy business cash and shop stock cannot overwrite canonical state;
+- raised the domain-runner timeout, guaranteed test-output cleanup and required zero reconciliations in daily, monthly, annual and vehicle-crime regressions.
+
 ## 0.46.0 — Player Loop & Runtime Split
 
 - split short local actions from the full city simulation pipeline so zero-minute and sub-hour physical actions no longer rebuild the economy, World Core, inventory and Kernel;

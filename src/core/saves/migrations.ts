@@ -17,6 +17,7 @@ import { normalizeLaborMarketState } from "../../simulation/labor/laborMarket";
 import { normalizePopulationLifecycleState } from "../../simulation/lifecycle/lifecycleSystem";
 import type { PopulationLifecycleState } from "../../simulation/lifecycle/types";
 import { advanceSimulationKernel, normalizeSimulationKernel } from "../../simulation/kernel/simulationKernel";
+import { projectCanonicalCreditsFromKernel } from "../../simulation/kernel/canonicalProjection";
 import { normalizeInfrastructureState } from "../../simulation/infrastructure/infrastructureSystem";
 import { normalizeProductionState } from "../../simulation/production/productionSystem";
 import { normalizeOrganizationEcosystem } from "../../simulation/organizations/organizationSystem";
@@ -35,7 +36,7 @@ import { normalizePlayerCrimeState } from "../../simulation/crime/playerCrimeSys
 import { normalizeStreetSceneState } from "../../simulation/streetScene/streetSceneSystem";
 import { normalizeSocialState } from "../../simulation/social/socialSystem";
 import { normalizeWorldCoreState, projectWorldCoreState, synchronizeWorldCoreFromKernel } from "../../simulation/worldCore/worldCoreSystem";
-import { normalizeProductInventoryState, projectProductInventoryState } from "../../simulation/inventory/inventorySystem";
+import { importLegacyTransitionalInventory, normalizeProductInventoryState, projectProductInventoryState } from "../../simulation/inventory/inventorySystem";
 import { normalizeBusinessEconomyState, projectBusinessEconomyToWorldCore, synchronizeBusinessEconomyFromKernel } from "../../simulation/business/businessEconomySystem";
 import { alignUrbanFabricToStreetTopology, normalizeStreetTopologyState, snapPhysicalVehicleParkingToStreetTopology, snapTransitStopsToStreetTopology } from "../../simulation/streets/streetTopologySystem";
 import { createInitialDistrictPulse } from "../../world/city/districtPulse";
@@ -740,7 +741,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     work,
     kernel: baseKernel
   });
-  const productInventoryBase = normalizeProductInventoryState(payload.productInventory, {
+  let productInventoryBase = normalizeProductInventoryState(payload.productInventory, {
     seed,
     timestamp,
     playerId: playerState.id,
@@ -750,6 +751,19 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     population,
     food: foodState
   });
+  if (schemaVersion < 42) {
+    productInventoryBase = importLegacyTransitionalInventory({
+      seed,
+      timestamp,
+      playerId: playerState.id,
+      worldCore: preKernelWorldCore,
+      production,
+      urban,
+      population,
+      food: foodState,
+      previous: productInventoryBase
+    });
+  }
   const businessBase = normalizeBusinessEconomyState(payload.businessEconomy, {
     seed,
     timestamp,
@@ -786,6 +800,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     vehicles,
     worldCore: businessBase.worldCore,
     businessEconomy: businessBase.state,
+    productInventory: businessBase.productInventory,
     food: foodState
   });
   let worldCore = synchronizeWorldCoreFromKernel(businessBase.worldCore, kernel);
@@ -815,6 +830,19 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     food: foodState,
     previous: businessBase.productInventory
   });
+  const canonicalCredits = projectCanonicalCreditsFromKernel(kernel, {
+    timestamp,
+    player: playerState,
+    organizations,
+    population: inventoryProjection.population,
+    economy: coreProjection.economy,
+    production: inventoryProjection.production,
+    organizationEcosystem,
+    government,
+    health,
+    urban: inventoryProjection.urban,
+    worldCore: inventoryProjection.worldCore
+  });
 
   const { situations: _discardedSituations, ...payloadWithoutSituations } = payload;
   const migratedPayload = {
@@ -822,23 +850,24 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     schemaVersion: SAVE_SCHEMA_VERSION,
     events: migratedEvents,
     eventQueue: migratedQueue,
+    player: canonicalCredits.player,
     primaryContact,
     people,
     pressure,
-    economy: coreProjection.economy,
-    population: inventoryProjection.population,
+    economy: canonicalCredits.economy,
+    population: canonicalCredits.population,
     kernel,
     worldCore: inventoryProjection.worldCore,
     productInventory: inventoryProjection.state,
     businessEconomy,
     infrastructure,
-    production: inventoryProjection.production,
-    organizationEcosystem,
-    government,
-    health,
+    production: canonicalCredits.production,
+    organizationEcosystem: canonicalCredits.organizationEcosystem,
+    government: canonicalCredits.government,
+    health: canonicalCredits.health,
     data,
     metropolitan: mobilitySynchronizedMetropolitan,
-    urban: inventoryProjection.urban,
+    urban: canonicalCredits.urban,
     streets,
     mobility,
     localScene,
@@ -854,7 +883,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
       ...world,
       primaryContactId: selectedPerson?.id ?? String(world.primaryContactId ?? "person-missing"),
       locations,
-      organizations,
+      organizations: canonicalCredits.organizations,
       districts: districts.map((district) => ({
         ...district,
         population: Math.round(inventoryProjection.population.lifecycle.representedPopulationByDistrict[district.id] ?? district.population)

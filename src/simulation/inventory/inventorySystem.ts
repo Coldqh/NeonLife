@@ -3,7 +3,7 @@ import { FOOD_CATALOG } from "../../data/products/foodCatalog";
 import { PRODUCT_CATALOG, PRODUCT_CATALOG_VERSION, getProduct, productForLegacyResource } from "../../data/products/productCatalog";
 import type { ProductDefinition } from "../../data/products/types";
 import type { FoodStack, FoodState } from "../../gameplay/food/foodSystem";
-import type { HouseholdState, PopulationState } from "../population/types";
+import type { HouseholdState, PopulationInventoryCommand, PopulationState } from "../population/types";
 import type { ProductionFacilityState, ProductionResource, ProductionState } from "../production/types";
 import type { UrbanFabricState } from "../urban/types";
 import type { VenueOperationState } from "../venues/types";
@@ -474,7 +474,7 @@ function canonicalBusinessForVenue(worldCore: WorldCoreState, venueId: string): 
   return canonicalId ? worldCore.businesses.find((business) => business.id === canonicalId) : undefined;
 }
 
-function adapterTargets(input: ProductInventoryInput): AdapterTarget[] {
+function adapterTargets(input: ProductInventoryInput, includeBusinessCompatibility = true): AdapterTarget[] {
   const targets: AdapterTarget[] = [];
   const pushFoodStacks = (stacks: FoodStack[], compartment: "carried" | "home-storage") => {
     const grouped = new Map<string, FoodStack[]>();
@@ -489,23 +489,25 @@ function adapterTargets(input: ProductInventoryInput): AdapterTarget[] {
   pushFoodStacks(input.food.carried, "carried");
   pushFoodStacks(input.food.storage, "home-storage");
 
-  const venueProductKeys = new Set<string>();
-  for (const operation of input.urban.venueOperations.operations) {
-    const business = canonicalBusinessForVenue(input.worldCore, operation.venueId);
-    if (!business) continue;
-    for (const offer of operation.offers) {
-      if (!offer.productId || !PRODUCT_CATALOG.some((product) => product.id === offer.productId)) continue;
-      venueProductKeys.add(`${business.id}|${offer.productId}`);
-      targets.push({ key: `venue:${offer.id}`, inventoryId: businessInventoryId(business.id), ownerEntityId: business.id, ownerKind: "business", compartment: "stockroom", locationId: business.locationId, productId: offer.productId, quantity: Math.max(0, offer.stock), unitCost: Math.max(1, Math.round(offer.currentPrice * .42)), origin: "migration" });
+  if (includeBusinessCompatibility) {
+    const venueProductKeys = new Set<string>();
+    for (const operation of input.urban.venueOperations.operations) {
+      const business = canonicalBusinessForVenue(input.worldCore, operation.venueId);
+      if (!business) continue;
+      for (const offer of operation.offers) {
+        if (!offer.productId || !PRODUCT_CATALOG.some((product) => product.id === offer.productId)) continue;
+        venueProductKeys.add(`${business.id}|${offer.productId}`);
+        targets.push({ key: `venue:${offer.id}`, inventoryId: businessInventoryId(business.id), ownerEntityId: business.id, ownerKind: "business", compartment: "stockroom", locationId: business.locationId, productId: offer.productId, quantity: Math.max(0, offer.stock), unitCost: Math.max(1, Math.round(offer.currentPrice * .42)), origin: "migration" });
+      }
     }
-  }
 
-  for (const [locationId, stock] of Object.entries(input.food.shopStocks)) {
-    const business = canonicalBusinessForLocation(input.worldCore, locationId);
-    if (!business) continue;
-    for (const [productId, quantity] of Object.entries(stock)) {
-      if (!PRODUCT_CATALOG.some((product) => product.id === productId) || venueProductKeys.has(`${business.id}|${productId}`)) continue;
-      targets.push({ key: `shop:${locationId}:${productId}`, inventoryId: businessInventoryId(business.id), ownerEntityId: business.id, ownerKind: "business", compartment: "stockroom", locationId, productId, quantity, origin: "migration" });
+    for (const [locationId, stock] of Object.entries(input.food.shopStocks)) {
+      const business = canonicalBusinessForLocation(input.worldCore, locationId);
+      if (!business) continue;
+      for (const [productId, quantity] of Object.entries(stock)) {
+        if (!PRODUCT_CATALOG.some((product) => product.id === productId) || venueProductKeys.has(`${business.id}|${productId}`)) continue;
+        targets.push({ key: `shop:${locationId}:${productId}`, inventoryId: businessInventoryId(business.id), ownerEntityId: business.id, ownerKind: "business", compartment: "stockroom", locationId, productId, quantity, origin: "migration" });
+      }
     }
   }
 
@@ -656,7 +658,7 @@ export function normalizeProductInventoryState(value: unknown, input: ProductInv
   return advanceProductInventoryState({ ...input, previous: normalized });
 }
 
-export function advanceProductInventoryState(input: ProductInventoryInput): ProductInventoryState {
+export function importLegacyTransitionalInventory(input: ProductInventoryInput): ProductInventoryState {
   if (!input.previous) return createProductInventoryState(input);
   let state: ProductInventoryState = {
     ...input.previous,
@@ -668,26 +670,351 @@ export function advanceProductInventoryState(input: ProductInventoryInput): Prod
     adapterBindings: { ...input.previous.adapterBindings },
     catalogVersion: PRODUCT_CATALOG_VERSION
   };
-  const targets = adapterTargets(input);
+  const targets = adapterTargets(input, false);
   const nextKeys = new Set(targets.map((target) => target.key));
   for (const target of targets) {
-    state = applyAdapterDelta(state, input, target, state.adapterQuantities[target.key] ?? 0);
+    const previousQuantity = state.adapterQuantities[target.key]
+      ?? getInventoryQuantity(state, target.inventoryId, target.productId, input.timestamp);
+    state = applyAdapterDelta(state, input, target, previousQuantity);
     state.adapterQuantities[target.key] = target.quantity;
-    state.adapterBindings[target.key] = { inventoryId: target.inventoryId, ownerEntityId: target.ownerEntityId, ownerKind: target.ownerKind, compartment: target.compartment, locationId: target.locationId, productId: target.productId };
+    state.adapterBindings[target.key] = {
+      inventoryId: target.inventoryId,
+      ownerEntityId: target.ownerEntityId,
+      ownerKind: target.ownerKind,
+      compartment: target.compartment,
+      locationId: target.locationId,
+      productId: target.productId
+    };
   }
   for (const key of Object.keys(state.adapterQuantities)) {
-    if (nextKeys.has(key)) continue;
+    if (nextKeys.has(key) || key.startsWith("venue:") || key.startsWith("shop:")) continue;
     const binding = state.adapterBindings[key];
     if (!binding) continue;
-    const zeroTarget: AdapterTarget = { key, ...binding, quantity: 0, origin: "reconciliation" };
-    state = applyAdapterDelta(state, input, zeroTarget, state.adapterQuantities[key] ?? 0);
-    delete state.adapterQuantities[key];
-    delete state.adapterBindings[key];
+    const target: AdapterTarget = { key, ...binding, quantity: 0, origin: "migration" };
+    state = applyAdapterDelta(state, input, target, state.adapterQuantities[key] ?? 0);
   }
+  state.adapterQuantities = {};
+  state.adapterBindings = {};
   state = expireStacks(state, input.timestamp);
   state.totals = totals(state);
   state.integrity = integrity(state, input.timestamp);
   return state;
+}
+
+export function advanceProductInventoryState(input: ProductInventoryInput): ProductInventoryState {
+  if (!input.previous) return createProductInventoryState(input);
+  let state: ProductInventoryState = {
+    ...input.previous,
+    batches: input.previous.batches.map((item) => ({ ...item })),
+    inventories: input.previous.inventories.map((inventory) => ({ ...inventory, stacks: inventory.stacks.map((stack) => ({ ...stack })) })),
+    transfers: input.previous.transfers.map((item) => ({ ...item })),
+    recalls: input.previous.recalls.map((item) => ({ ...item })),
+    adapterQuantities: {},
+    adapterBindings: {},
+    catalogVersion: PRODUCT_CATALOG_VERSION
+  };
+  // Legacy food, household and production fields are read models. They seed a
+  // missing inventory during bootstrap only; normal ticks never import them back.
+  state = expireStacks(state, input.timestamp);
+  state.totals = totals(state);
+  state.integrity = integrity(state, input.timestamp);
+  return state;
+}
+
+export function applyPopulationInventoryCommands(
+  state: ProductInventoryState,
+  commands: PopulationInventoryCommand[],
+  worldCore: WorldCoreState,
+  seed: string,
+  timestamp: number
+): ProductInventoryState {
+  if (!commands.length) return finalizeProductInventoryState(state, timestamp);
+  const batches = state.batches.map((batch) => ({ ...batch }));
+  const batchById = new Map(batches.map((batch) => [batch.id, batch]));
+  const inventories = state.inventories.map((inventory) => ({ ...inventory, stacks: inventory.stacks.map((stack) => ({ ...stack })) }));
+  const inventoryById = new Map(inventories.map((inventory) => [inventory.id, inventory]));
+  const transfers = state.transfers.map((transfer) => ({ ...transfer }));
+  const imports = new Map<string, { householdId: string; productId: string; quantity: number; timestamp: number }>();
+  let sequence = state.sequence;
+
+  const ensure = (ownerEntityId: string, ownerKind: InventoryOwnerKind, compartment: string, at: number): InventoryState => {
+    const id = inventoryId(ownerEntityId, compartment);
+    const current = inventoryById.get(id);
+    if (current) return current;
+    const created: InventoryState = { id, ownerEntityId, ownerKind, compartment, stacks: [], lastUpdatedAt: at };
+    inventories.push(created);
+    inventoryById.set(id, created);
+    return created;
+  };
+
+  const take = (source: InventoryState | undefined, productId: string, quantity: number, at: number, decrementBatch: boolean) => {
+    if (!source || quantity <= 0) return [] as Array<{ batchId: string; quantity: number; unitCost: number; quality: number; condition: number; expiresAt?: number }>;
+    let remaining = quantity;
+    const removed: Array<{ batchId: string; quantity: number; unitCost: number; quality: number; condition: number; expiresAt?: number }> = [];
+    const candidates = source.stacks
+      .filter((stack) => stack.productId === productId && stack.status === "available" && (stack.expiresAt === undefined || stack.expiresAt > at))
+      .sort((left, right) => (left.expiresAt ?? Number.MAX_SAFE_INTEGER) - (right.expiresAt ?? Number.MAX_SAFE_INTEGER) || left.acquiredAt - right.acquiredAt);
+    for (const stack of candidates) {
+      if (remaining <= 0) break;
+      const available = Math.max(0, stack.quantity - stack.reservedQuantity);
+      const used = Math.min(available, remaining);
+      if (used <= 0) continue;
+      stack.quantity -= used;
+      remaining -= used;
+      removed.push({ batchId: stack.batchId, quantity: used, unitCost: stack.unitCost, quality: stack.quality, condition: stack.condition, expiresAt: stack.expiresAt });
+      if (decrementBatch) {
+        const batch = batchById.get(stack.batchId);
+        if (batch) batch.quantityRemaining = Math.max(0, batch.quantityRemaining - used);
+      }
+    }
+    source.stacks = source.stacks.filter((stack) => stack.quantity > 0);
+    source.lastUpdatedAt = at;
+    return removed;
+  };
+
+  const move = (sourceId: string, target: InventoryState, productId: string, quantity: number, at: number, reason: ProductTransferReason, unitPrice = 0): number => {
+    const source = inventoryById.get(sourceId);
+    const removed = take(source, productId, quantity, at, false);
+    let moved = 0;
+    for (const item of removed) {
+      moved += item.quantity;
+      sequence += 1;
+      const existing = target.stacks.find((stack) => stack.batchId === item.batchId && stack.productId === productId && stack.status === "available");
+      if (existing) {
+        existing.quantity += item.quantity;
+        existing.acquiredAt = at;
+      } else {
+        target.stacks.push({
+          id: stackId(target.id, item.batchId, sequence),
+          inventoryId: target.id,
+          productId,
+          batchId: item.batchId,
+          quantity: item.quantity,
+          reservedQuantity: 0,
+          unitCost: item.unitCost,
+          quality: item.quality,
+          condition: item.condition,
+          acquiredAt: at,
+          expiresAt: item.expiresAt,
+          status: item.expiresAt !== undefined && item.expiresAt <= at ? "expired" : "available"
+        });
+      }
+      transfers.push({
+        id: createStableEntityId("product-transfer", `${sourceId}:${target.id}:${item.batchId}:${at}:${sequence}`),
+        productId,
+        batchId: item.batchId,
+        sourceInventoryId: sourceId,
+        targetInventoryId: target.id,
+        quantity: item.quantity,
+        unitPrice,
+        totalValue: round(item.quantity * unitPrice),
+        reason,
+        createdAt: at,
+        completedAt: at
+      });
+    }
+    target.lastUpdatedAt = at;
+    return moved;
+  };
+
+  const consume = (householdId: string, productId: string, quantity: number, at: number): number => {
+    const sourceId = householdInventoryId(householdId);
+    const removed = take(inventoryById.get(sourceId), productId, quantity, at, true);
+    let consumed = 0;
+    for (const item of removed) {
+      consumed += item.quantity;
+      sequence += 1;
+      transfers.push({
+        id: createStableEntityId("product-transfer", `${sourceId}:${householdId}:consumed:${item.batchId}:${at}:${sequence}`),
+        productId,
+        batchId: item.batchId,
+        sourceInventoryId: sourceId,
+        targetInventoryId: inventoryId(householdId, "consumed"),
+        quantity: item.quantity,
+        unitPrice: 0,
+        totalValue: 0,
+        reason: "consumption",
+        createdAt: at,
+        completedAt: at
+      });
+    }
+    return consumed;
+  };
+
+  for (const command of commands) {
+    const at = Math.min(timestamp, command.timestamp);
+    if (command.kind === "purchase") {
+      const business = canonicalBusinessForLocation(worldCore, command.locationId);
+      if (!business) continue;
+      const target = ensure(command.householdId, "household", "pantry", at);
+      move(businessInventoryId(business.id), target, command.productId, command.quantity, at, "household-purchase", command.unitPrice);
+    } else if (command.kind === "consume") {
+      consume(command.householdId, command.productId, command.quantity, at);
+    } else if (command.kind === "transfer") {
+      const target = ensure(command.targetHouseholdId, "household", "pantry", at);
+      move(householdInventoryId(command.sourceHouseholdId), target, command.productId, command.quantity, at, "storage");
+    } else {
+      const key = `${command.householdId}|${command.productId}`;
+      const current = imports.get(key);
+      imports.set(key, { householdId: command.householdId, productId: command.productId, quantity: (current?.quantity ?? 0) + command.quantity, timestamp: Math.max(current?.timestamp ?? 0, at) });
+    }
+  }
+
+  let next: ProductInventoryState = {
+    ...state,
+    batches,
+    inventories,
+    transfers: transfers.slice(-MAX_TRANSFERS),
+    adapterQuantities: {},
+    adapterBindings: {},
+    sequence,
+    lastUpdatedAt: timestamp
+  };
+  for (const item of imports.values()) {
+    next = stockCanonicalInventory(next, seed, item.householdId, "household", "pantry", item.productId, item.quantity, item.timestamp, { origin: "import", producerEntityId: kernelSystemInventoryOwner(seed, "external-trade") });
+  }
+  return finalizeProductInventoryState(next, timestamp);
+}
+
+type SimulationInventoryOwner = {
+  inventoryId: string;
+  ownerEntityId: string;
+  ownerKind: InventoryOwnerKind;
+  compartment: string;
+  locationId?: string;
+  productId: string;
+  quantity: number;
+  gainOrigin: ProductBatchOrigin;
+};
+
+function kernelSystemInventoryOwner(seed: string, name: string): string {
+  return createStableEntityId("inventory-source", `${seed}:${name}`);
+}
+
+function productionInventorySnapshot(production: ProductionState, food: FoodState, worldCore: WorldCoreState): SimulationInventoryOwner[] {
+  const entries: SimulationInventoryOwner[] = [];
+  for (const facility of production.facilities) {
+    for (const item of facility.inventory) {
+      const product = productForLegacyResource(item.resource, `${facility.name}:${facility.kind}`);
+      entries.push({
+        inventoryId: facilityInventoryId(facility.id),
+        ownerEntityId: facility.id,
+        ownerKind: "facility",
+        compartment: "warehouse",
+        locationId: facility.locationId,
+        productId: product.id,
+        quantity: Math.max(0, Math.round(item.amount)),
+        gainOrigin: facility.kind === "import-terminal" ? "import" : "production"
+      });
+    }
+  }
+  for (const [locationId, stock] of Object.entries(food.shopStocks)) {
+    const business = canonicalBusinessForLocation(worldCore, locationId);
+    if (!business) continue;
+    for (const [productId, quantity] of Object.entries(stock)) {
+      if (!PRODUCT_CATALOG.some((product) => product.id === productId)) continue;
+      entries.push({
+        inventoryId: businessInventoryId(business.id),
+        ownerEntityId: business.id,
+        ownerKind: "business",
+        compartment: "stockroom",
+        locationId,
+        productId,
+        quantity: Math.max(0, Math.round(quantity)),
+        gainOrigin: "production"
+      });
+    }
+  }
+  return entries;
+}
+
+export function commitProductionInventoryChanges(
+  state: ProductInventoryState,
+  seed: string,
+  worldCore: WorldCoreState,
+  beforeProduction: ProductionState,
+  afterProduction: ProductionState,
+  beforeFood: FoodState,
+  afterFood: FoodState,
+  timestamp: number
+): ProductInventoryState {
+  const before = productionInventorySnapshot(beforeProduction, beforeFood, worldCore);
+  const after = productionInventorySnapshot(afterProduction, afterFood, worldCore);
+  const beforeByKey = new Map(before.map((item) => [`${item.inventoryId}|${item.productId}`, item]));
+  const afterByKey = new Map(after.map((item) => [`${item.inventoryId}|${item.productId}`, item]));
+  const keys = new Set([...beforeByKey.keys(), ...afterByKey.keys()]);
+  const lossesByProduct = new Map<string, Array<SimulationInventoryOwner & { remaining: number }>>();
+  const gainsByProduct = new Map<string, Array<SimulationInventoryOwner & { remaining: number }>>();
+  let next = state;
+
+  for (const key of keys) {
+    const previous = beforeByKey.get(key);
+    const current = afterByKey.get(key);
+    const template = current ?? previous;
+    if (!template) continue;
+    next = ensureCanonicalInventory(next, template.ownerEntityId, template.ownerKind, template.compartment, timestamp, template.locationId);
+    const delta = (current?.quantity ?? 0) - (previous?.quantity ?? 0);
+    if (delta < 0) {
+      const list = lossesByProduct.get(template.productId) ?? [];
+      list.push({ ...template, remaining: Math.abs(delta) });
+      lossesByProduct.set(template.productId, list);
+    } else if (delta > 0) {
+      const list = gainsByProduct.get(template.productId) ?? [];
+      list.push({ ...template, remaining: delta });
+      gainsByProduct.set(template.productId, list);
+    }
+  }
+
+  const products = new Set([...lossesByProduct.keys(), ...gainsByProduct.keys()]);
+  for (const productId of products) {
+    const losses = lossesByProduct.get(productId) ?? [];
+    const gains = gainsByProduct.get(productId) ?? [];
+    for (const gain of gains) {
+      for (const loss of losses) {
+        if (gain.remaining <= 0) break;
+        if (loss.remaining <= 0) continue;
+        const requested = Math.min(gain.remaining, loss.remaining);
+        const transfer = transferProduct(next, loss.inventoryId, gain.inventoryId, productId, requested, timestamp, "shipment");
+        next = transfer.state;
+        gain.remaining -= transfer.transferred;
+        loss.remaining -= transfer.transferred;
+      }
+      if (gain.remaining > 0) {
+        next = stockCanonicalInventory(next, seed, gain.ownerEntityId, gain.ownerKind, gain.compartment, productId, gain.remaining, timestamp, { locationId: gain.locationId, origin: gain.gainOrigin, producerEntityId: gain.ownerEntityId });
+        gain.remaining = 0;
+      }
+    }
+    for (const loss of losses) {
+      if (loss.remaining <= 0) continue;
+      const consumed = consumeInventoryProduct(next, loss.inventoryId, productId, loss.remaining, timestamp, loss.ownerKind === "business" ? "market-consumption" : "consumption", 0, loss.ownerEntityId);
+      next = consumed.state;
+      loss.remaining -= consumed.consumed;
+    }
+  }
+  return finalizeProductInventoryState(next, timestamp);
+}
+
+export function destroyExpiredInventoryStacks(
+  state: ProductInventoryState,
+  inventoryIds: string[],
+  timestamp: number
+): { state: ProductInventoryState; destroyed: number } {
+  const targets = new Set(inventoryIds);
+  let destroyed = 0;
+  const inventories = state.inventories.map((inventory) => {
+    if (!targets.has(inventory.id)) return inventory;
+    return {
+      ...inventory,
+      stacks: inventory.stacks.map((stack) => {
+        const expired = stack.status === "expired" || (stack.expiresAt !== undefined && stack.expiresAt <= timestamp);
+        if (!expired || stack.status === "destroyed") return stack;
+        destroyed += stack.quantity;
+        return { ...stack, status: "destroyed" as const, condition: 0 };
+      }),
+      lastUpdatedAt: timestamp
+    };
+  });
+  return { state: finalizeProductInventoryState({ ...state, inventories, lastUpdatedAt: timestamp }, timestamp), destroyed };
 }
 
 function foodStacksFor(inventory: InventoryState | undefined): FoodStack[] {
@@ -762,11 +1089,7 @@ export function projectProductInventoryState(state: ProductInventoryState, input
   const population = projectHouseholds(state, input.population, input.timestamp);
   const production = projectProduction(state, input.production, input.timestamp);
   const urban = projectVenueOperations(state, input.urban, worldCore, input.timestamp);
-  const projectedInput: ProductInventoryInput = { ...input, worldCore, food, population, production, urban };
-  const projectedTargets = adapterTargets(projectedInput);
-  const adapterQuantities = Object.fromEntries(projectedTargets.map((target) => [target.key, target.quantity]));
-  const adapterBindings = Object.fromEntries(projectedTargets.map((target) => [target.key, { inventoryId: target.inventoryId, ownerEntityId: target.ownerEntityId, ownerKind: target.ownerKind, compartment: target.compartment, locationId: target.locationId, productId: target.productId }]));
-  const projectedState = { ...state, adapterQuantities, adapterBindings, totals: totals(state), integrity: integrity(state, input.timestamp), lastUpdatedAt: input.timestamp };
+  const projectedState = { ...state, adapterQuantities: {}, adapterBindings: {}, totals: totals(state), integrity: integrity(state, input.timestamp), lastUpdatedAt: input.timestamp };
   return { state: projectedState, food, population, production, urban, worldCore };
 }
 
