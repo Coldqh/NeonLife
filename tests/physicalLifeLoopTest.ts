@@ -8,6 +8,7 @@ import {
   eatFoodFromStorage,
   enterPlayerHomeUnit,
   pickupCourierOrder,
+  progressLife,
   receiveClinicCare,
   sleepAtHome,
   storeCarriedFoodAtHome
@@ -40,6 +41,16 @@ function insideLocation<T extends ReturnType<typeof createWorldSession>>(session
     }
   } as T;
 }
+
+
+const localTickSource = createWorldSession("local-runtime-split");
+const localTickStartedAt = performance.now();
+const localTick = progressLife(localTickSource, 0, { activity: "Осмотр места", suppressTimeEvent: true });
+const localTickDurationMs = performance.now() - localTickStartedAt;
+assert(localTick.economy === localTickSource.economy, "zero-minute action recalculated the city economy");
+assert(localTick.worldCore === localTickSource.worldCore, "zero-minute action rebuilt World Core");
+assert(localTick.productInventory === localTickSource.productInventory, "zero-minute action rebuilt product inventory");
+assert(localTick.kernel === localTickSource.kernel, "zero-minute action rebuilt the Kernel ledger");
 
 const seed = "physical-life-loop";
 let session = createWorldSession(seed);
@@ -77,8 +88,10 @@ assert(session.player.condition.hunger < hungerBeforeMeal, "home meal did not re
 
 const dispatch = session.world.locations.find((item) => item.code.startsWith("MSH/"));
 assert(dispatch, "courier dispatch missing");
-const available = session.jobs.courier.orders.find((order) => order.status === "available");
-assert(available, "courier order missing");
+const availableOrders = session.jobs.courier.orders.filter((order) => order.status === "available");
+assert(availableOrders.length > 0, "courier order missing");
+assert(availableOrders.every((order) => order.deadlineAt - session.timestamp >= 150 * 60_000), "courier board generated an impossible short deadline");
+const available = availableOrders[0];
 const rejectedRemoteAccept = acceptCourierOrder(session, available.id);
 assert(rejectedRemoteAccept === session, "courier order was accepted away from dispatch");
 session = insideLocation(session, dispatch.id);
@@ -153,5 +166,6 @@ console.log(JSON.stringify({
   storedFood: session.life.food.storage.reduce((sum, stack) => sum + stack.quantity, 0),
   deliveries: session.jobs.courier.completedDeliveries,
   clinicHealth: session.player.condition.health,
-  migratedSchema: migrated.schemaVersion
+  migratedSchema: migrated.schemaVersion,
+  localTickDurationMs: Math.round(localTickDurationMs)
 }, null, 2));

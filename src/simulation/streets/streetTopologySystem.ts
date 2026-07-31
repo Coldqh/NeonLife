@@ -22,7 +22,7 @@ import type {
   StreetTopologyTotalsState
 } from "./types";
 
-const TOPOLOGY_VERSION = 2;
+const TOPOLOGY_VERSION = 3;
 const CACHE_LIMIT = 64;
 const CANDIDATE_OFFSETS = [125, 250, 375, 500, 625, 750, 875] as const;
 const STREET_NAMES = [
@@ -155,7 +155,7 @@ function lineName(
   const globalAxisM = Math.round((orientation === "horizontal" ? sector.bounds.yM : sector.bounds.xM) + offsetM);
   const rng = new SeededRandom(`${citySeed}:continuous-street:${orientation}:${globalAxisM}:v${TOPOLOGY_VERSION}`);
   const base = STREET_NAMES[rng.integer(0, STREET_NAMES.length - 1)];
-  if (catalog.pattern === "industrial-spine" && rng.chance(.42)) return base.replace("улица", "тракт").replace("аллея", "проезд");
+  if (rng.chance(.18)) return base.replace("улица", "тракт").replace("аллея", "проезд");
   return base;
 }
 
@@ -642,7 +642,8 @@ export function normalizeStreetTopologyState(value: unknown, input: StreetTopolo
 }
 
 export function getSectorStreetTopology(state: StreetTopologyState, input: StreetTopologyInput, sectorId: string): MaterializedSectorStreetTopologyState {
-  return state.materializedSectors.find((topology) => topology.sectorId === sectorId) ?? materializeTopology(state, { ...input, preferredSectorId: sectorId }, sectorId);
+  const cached = state.materializedSectors.find((topology) => topology.sectorId === sectorId);
+  return cached ? applyDeltas(cached, state) : materializeTopology(state, { ...input, preferredSectorId: sectorId }, sectorId);
 }
 
 export function alignUrbanFabricToStreetTopology(urban: UrbanFabricState, streets: StreetTopologyState, input: StreetTopologyInput): UrbanFabricState {

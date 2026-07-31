@@ -1,3 +1,4 @@
+import { SAVE_SCHEMA_VERSION } from "../src/core/saves/types";
 import { createStableEntityId } from "../src/core/ids/entityId";
 import { createMetropolitanState, normalizeMetropolitanState } from "../src/simulation/spatial/metropolitanSystem";
 import type { DistrictState } from "../src/world/state/types";
@@ -11,8 +12,8 @@ const seed = "real-city-map-foundation";
 const session = createWorldSession(seed);
 const metro = session.metropolitan;
 
-assert(session.schemaVersion === 29, "new world schema is not 29");
-assert(metro.version === 2, "metropolitan schema was not upgraded");
+assert(session.schemaVersion === SAVE_SCHEMA_VERSION, "new world schema is outdated");
+assert(metro.version === 3, "metropolitan schema was not upgraded");
 assert(metro.sectors.length === 1_512, "city sector count changed");
 assert(metro.mapDistricts.length >= 10, "map district layer is too coarse");
 assert(new Set(metro.mapDistricts.map((district) => district.name)).size === metro.mapDistricts.length, "map district names are not unique");
@@ -93,7 +94,7 @@ const normalized = normalizeMetropolitanState(legacy, {
   recentEventCount: session.events.length,
   recentObservationCount: session.data.observations.length
 });
-assert(normalized.version === 2, "legacy metropolitan state was not upgraded");
+assert(normalized.version === 3, "legacy metropolitan state was not upgraded");
 assert(normalized.mapDistricts.length >= 10, "legacy state did not receive map districts");
 assert(normalized.sectors.map((sector) => sector.id).join("|") === metro.sectors.map((sector) => sector.id).join("|"), "migration changed stable sector ids");
 assert(normalized.locations.map((location) => location.locationId).join("|") === metro.locations.map((location) => location.locationId).join("|"), "migration changed location placement ids");

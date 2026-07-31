@@ -2,11 +2,11 @@ import { Icon, type IconName } from "../../ui/components/Icons";
 import type { GameScreen } from "../shared/types";
 
 const items: Array<{ id: GameScreen; label: string; icon: IconName }> = [
-  { id: "profile", label: "Профиль", icon: "people" },
   { id: "map", label: "Карта", icon: "city" },
+  { id: "nearby", label: "Рядом", icon: "network" },
+  { id: "life", label: "Жизнь", icon: "life" },
   { id: "work", label: "Работа", icon: "work" },
-  { id: "crime", label: "Розыск", icon: "alert" },
-  { id: "nearby", label: "Рядом", icon: "network" }
+  { id: "profile", label: "Ещё", icon: "people" }
 ];
 
 export function PrimaryNavigation({ screen, onChange }: { screen: GameScreen; onChange: (screen: GameScreen) => void }) {

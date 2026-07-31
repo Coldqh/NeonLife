@@ -120,7 +120,7 @@ function vacancyFor(seed: string, timestamp: number, venue: VenueState, operatio
   const shiftStartHour = venue.category === "bar"
     ? Math.max(17, venue.openHour)
     : venue.openHour === 0 ? rng.pick([6, 8, 14, 16] as const) : Math.min(20, venue.openHour + rng.integer(0, 2));
-  const minimumSkill = clamp(template.baseMinimumSkill + venue.quality / 15 + venue.priceTier * 2 + rng.integer(-4, 4), 12, 48);
+  const minimumSkill = Math.round(clamp(template.baseMinimumSkill + venue.quality / 15 + venue.priceTier * 2 + rng.integer(-4, 4), 12, 48));
   const wagePerHour = Math.max(8, Math.round(template.baseWage + venue.priceTier * 2.2 + venue.quality / 22 + rng.integer(-1, 3)));
   return {
     id: createStableEntityId("player-work-vacancy", `${venue.id}:${template.role}`),

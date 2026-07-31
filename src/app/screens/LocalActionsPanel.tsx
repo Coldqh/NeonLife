@@ -14,6 +14,7 @@ import {
   isPlayerInsideLocation
 } from "../../gameplay/life/playerPresence";
 import type { LocalLifeAction } from "../actions/localLifeActions";
+import { formatGameShortDateTime, formatGameTime } from "../../core/time/gameTime";
 
 function stacksByProduct(stacks: FoodStack[], timestamp: number): Array<{ productId: string; quantity: number; freshness: string }> {
   const grouped = new Map<string, { quantity: number; freshness: string }>();
@@ -93,7 +94,7 @@ export function LocalActionsPanel({
           </div>
           <div className="local-action-list">
             {obligations.map((obligation) => (
-              <article key={obligation.id}><div><strong>{obligation.creditorName}</strong><span>{obligation.code} · срок {new Date(obligation.dueAt).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</span></div><button type="button" disabled={session.player.balance < obligation.amount} onClick={() => onAction({ kind: "pay-obligation", obligationId: obligation.id })}>Оплатить ₵ {obligation.amount}</button></article>
+              <article key={obligation.id}><div><strong>{obligation.creditorName}</strong><span>{obligation.code} · срок {formatGameShortDateTime(obligation.dueAt)}</span></div><button type="button" disabled={session.player.balance < obligation.amount} onClick={() => onAction({ kind: "pay-obligation", obligationId: obligation.id })}>Оплатить ₵ {obligation.amount}</button></article>
             ))}
           </div>
         </section>
@@ -133,7 +134,7 @@ export function LocalActionsPanel({
         ) : <div className="local-action-buttons"><button type="button" disabled={!dispatch} onClick={() => dispatch && onRouteTo(dispatch.id)}>Ехать в диспетчерскую</button></div> : (
           <div className="courier-active">
             <strong>{activeOrder.code} · {orderStage(activeOrder.status)}</strong>
-            <span>{activeOrder.cargoName} · срок {new Date(activeOrder.deadlineAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</span>
+            <span>{activeOrder.cargoName} · срок {formatGameTime(activeOrder.deadlineAt)}</span>
             {session.jobs.courier.carriedCargo ? <p>Груз: {session.jobs.courier.carriedCargo.weightKg} кг · состояние {session.jobs.courier.carriedCargo.condition}%</p> : null}
             <div className="local-action-buttons">
               {activeOrder.status === "accepted" ? <><button type="button" onClick={() => onRouteTo(activeOrder.pickupLocationId)}>Маршрут к грузу</button><button type="button" disabled={!isPlayerInsideLocation(session, activeOrder.pickupLocationId)} onClick={() => onAction({ kind: "pickup-courier" })}>Забрать груз</button></> : null}

@@ -6,6 +6,7 @@ import { defaultUiSettings, type UiSettings } from "../ui/theme/settings";
 import { VersionGate } from "../ui/components/VersionGate";
 import { GameShell } from "./shell/GameShell";
 import { ProfileScreen } from "./screens/ProfileScreen";
+import { LifeScreen } from "./screens/LifeScreen";
 import { MapScreen } from "./screens/MapScreen";
 import { NearbyScreen } from "./screens/NearbyScreen";
 import { WorkScreen } from "./screens/WorkScreen";
@@ -80,11 +81,15 @@ export default function App() {
     if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
     noticeTimer.current = window.setTimeout(() => setNotice(null), 2400);
   }
-
   function advance(minutes: number, source: string): void {
     setSession((current) => progressLife(current, minutes, { activity: source }));
   }
-
+  function runLocalLifeAction(action: Parameters<typeof applyLocalLifeAction>[1]): void {
+    if (!session) return;
+    const result = applyLocalLifeAction(session, action);
+    setSession(result.session);
+    notify(result.message, result.tone);
+  }
   function selectPerson(personId: string): void {
     setSession((current) => {
       const person = getPerson(current.people, personId);
@@ -92,24 +97,20 @@ export default function App() {
       return {
         ...current,
         people: { ...current.people, selectedPersonId: personId },
-        world: { ...current.world, primaryContactId: personId },
         primaryContact: toKnownNpc(person, current.world.locations, current.timestamp)
       };
     });
   }
-
   function routeToLocation(locationId: string): void {
     setRequestedLocationId(locationId);
     setRequestedVenueId(undefined);
     setScreen("map");
   }
-
   function openVenueOnMap(venueId: string): void {
     setRequestedVenueId(venueId);
     setRequestedLocationId(undefined);
     setScreen("map");
   }
-
   function walkTo(target: LocalMovementTargetState): void {
     if (!session || session.transit.player.journey || session.localMovement) return;
     const next = startLocalMovement(session, target);
@@ -120,7 +121,6 @@ export default function App() {
     setSession(next);
     setScreen("map");
   }
-
   function travel(locationId: string): void {
     if (!session || session.transit.player.journey || session.localMovement) return;
     if (session.localScene.playerPosition.state === "inside") {
@@ -198,6 +198,7 @@ export default function App() {
         notice={notice ? <div className={`toast toast--${notice.tone}`} role="status">{notice.text}</div> : null}
       >
         {screen === "profile" ? <ProfileScreen session={session} /> : null}
+        {screen === "life" ? <LifeScreen session={session} onOpen={setScreen} /> : null}
         {screen === "map" ? (
           <MapScreen
             session={session} requestedLocationId={requestedLocationId} requestedVenueId={requestedVenueId}
@@ -208,14 +209,14 @@ export default function App() {
             onMoveBuildingFloor={(floor, method) => setSession((current) => moveInsideBuilding(current, floor, method))}
             onEnterBuildingUnit={(unitId) => setSession((current) => enterBuildingUnit(current, unitId))} onLeaveBuildingUnit={() => setSession((current) => leaveBuildingUnit(current))}
             onEnterInteriorRoom={(roomId) => setSession((current) => enterInteriorRoom(current, roomId))} onLeaveInteriorRoom={() => setSession((current) => leaveInteriorRoom(current))}
-            onLifeAction={(action) => setSession((current) => applyLocalLifeAction(current, action))}
+            onLifeAction={runLocalLifeAction}
             onEnterVehicle={(vehicleId) => setSession((current) => enterPhysicalVehicle(current, vehicleId))}
             onLeaveVehicle={() => setSession((current) => leavePhysicalVehicle(current))}
             onStreetIncidentAction={(incidentId, action) => setSession((current) => actOnStreetIncident(current, incidentId, action))}
           />
         ) : null}
         {screen === "work" ? <WorkScreen session={session} onOpenVenue={openVenueOnMap} /> : null}
-        {screen === "crime" ? <CrimeScreen session={session} onAction={(action) => setSession((current) => applyLocalLifeAction(current, action))} /> : null}
+        {screen === "crime" ? <CrimeScreen session={session} onAction={runLocalLifeAction} /> : null}
         {screen === "nearby" ? (
           <NearbyScreen
             session={session}
@@ -226,7 +227,7 @@ export default function App() {
             onLeaveBuilding={() => setSession((current) => leaveLocalBuilding(current))}
             onLeaveVehicle={() => setSession((current) => leavePhysicalVehicle(current))}
             onRouteTo={routeToLocation}
-            onLifeAction={(action) => setSession((current) => applyLocalLifeAction(current, action))}
+            onLifeAction={runLocalLifeAction}
             onStartConversation={(personId) => setSession((current) => beginConversation(current, personId))} onConversationAction={(action) => setSession((current) => continueConversation(current, action))}
             onEndConversation={() => setSession((current) => endConversation(current))} onAdvance={advance} notify={notify}
           />

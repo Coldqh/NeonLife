@@ -1,5 +1,6 @@
 import type { GameSession } from "../../world/state/types";
 import type { LocalLifeAction } from "../actions/localLifeActions";
+import { formatGameShortDateTime } from "../../core/time/gameTime";
 
 const CRIME_LABELS = {
   shoplifting: "Кража товара",
@@ -8,9 +9,7 @@ const CRIME_LABELS = {
   assault: "Нападение"
 } as const;
 
-function timeLabel(timestamp: number): string {
-  return new Date(timestamp).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-}
+const timeLabel = formatGameShortDateTime;
 
 function responseLabel(status: GameSession["playerCrime"]["policeResponses"][number]["status"]): string {
   if (status === "dispatched") return "Вызван";

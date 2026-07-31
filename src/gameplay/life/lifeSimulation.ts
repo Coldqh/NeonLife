@@ -200,7 +200,281 @@ interface ProgressOptions {
   balanceReason?: KernelTransactionReason;
 }
 
+
+const LOCAL_TICK_MAX_MINUTES = 9;
+const HOUR_MS = 60 * 60_000;
+
+function crossesHourBoundary(timestamp: number, minutes: number): boolean {
+  return Math.floor(timestamp / HOUR_MS) !== Math.floor(advanceGameTime(timestamp, minutes) / HOUR_MS);
+}
+
+function canUseLocalTick(session: GameSession, minutes: number, options: ProgressOptions): boolean {
+  if (minutes < 0 || minutes > LOCAL_TICK_MAX_MINUTES) return false;
+  if (crossesHourBoundary(session.timestamp, minutes)) return false;
+  if (session.kernel.accounts.some((account) => account.entityId.startsWith("consumer-pool:") || account.entityId.startsWith("workforce-pool:"))) return false;
+  // Monetary and delivery operations must still pass through the full canonical
+  // economy / inventory / kernel projection until those domains expose atomic commands.
+  if ((options.balanceDelta ?? 0) !== 0 || options.deliveryCompleted || options.requestsCompleted) return false;
+  return true;
+}
+
+function progressLocalLife(session: GameSession, minutes: number, options: ProgressOptions): GameSession {
+  const nextTimestamp = advanceGameTime(session.timestamp, minutes);
+  const queued = processEventQueue(session, nextTimestamp);
+  const pulse = advanceDistrictPulse(session.district, nextTimestamp);
+  let peopleState = session.people;
+  const pressureAdvance = advancePressureState(session.pressure, nextTimestamp, session.world.meta.seed, peopleState.people);
+  for (const notice of pressureAdvance.notices) {
+    if (!notice.personId || !notice.memorySummary) continue;
+    peopleState = recordPlayerAction(
+      peopleState,
+      session.world.meta.seed,
+      notice.personId,
+      nextTimestamp,
+      notice.memorySummary,
+      {
+        trust: notice.trustDelta,
+        respect: notice.respectDelta,
+        irritation: notice.irritationDelta,
+        importance: notice.importance * 28,
+        emotionalValue: notice.importance === 3 ? -42 : -18
+      }
+    );
+  }
+
+  const requestedTarget = options.targetLocationId
+    ? session.world.locations.find((location) => location.id === options.targetLocationId)
+    : undefined;
+  const evictionTarget = pressureAdvance.evicted
+    ? session.world.locations.find((location) => location.type === "transport")
+    : undefined;
+  const targetLocation = evictionTarget ?? requestedTarget;
+  const targetDistrict = targetLocation
+    ? session.world.districts.find((district) => district.id === targetLocation.districtId)
+    : undefined;
+
+  let urbanState = session.urban;
+  if (options.playerPosition?.buildingId) {
+    urbanState = ensureBuildingAccessDetail(
+      urbanState,
+      session.world.meta.seed,
+      nextTimestamp,
+      options.playerPosition.buildingId,
+      session.player.id,
+      session.life.housing.locationId
+    );
+    if (options.playerPosition.unitId) {
+      urbanState = ensureUnitInteriorDetail(urbanState, session.world.meta.seed, nextTimestamp, options.playerPosition.unitId);
+    }
+  }
+
+  const provisionalLocalScene = advanceLocalSceneState(session.localScene, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    activeLocationId: session.life.currentLocationId,
+    targetLocationId: targetLocation?.id,
+    locations: session.world.locations,
+    people: peopleState,
+    population: session.population,
+    metropolitan: session.metropolitan,
+    urban: urbanState,
+    mobility: session.mobility,
+    playerPosition: options.playerPosition
+  });
+  const advancedVehicles = advancePhysicalVehiclesState(session.vehicles, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    activeLocationId: session.life.currentLocationId,
+    targetLocationId: targetLocation?.id,
+    playerPosition: provisionalLocalScene.playerPosition,
+    metropolitan: session.metropolitan,
+    urban: urbanState,
+    mobility: session.mobility,
+    population: session.population,
+    organizations: session.world.organizations,
+    command: options.vehicleCommand
+  });
+  const vehiclesState = refreshPhysicalVehicleSpatialPresentation(advancedVehicles, provisionalLocalScene.playerPosition, nextTimestamp);
+  const crimeAdvance = advanceVehicleCrimeState(session.vehicleCrime, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    data: session.data,
+    government: session.government,
+    vehicles: vehiclesState,
+    population: session.population,
+    organizations: session.world.organizations
+  });
+  const crimeVehiclesState = synchronizeVehicleCrimeStatus(crimeAdvance.state, vehiclesState);
+  const transitState = advanceTransitOperationsState(session.transit, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    activeLocationId: session.life.currentLocationId,
+    playerPosition: provisionalLocalScene.playerPosition,
+    locations: session.world.locations,
+    districts: session.world.districts,
+    people: peopleState,
+    population: crimeAdvance.population,
+    metropolitan: session.metropolitan,
+    mobility: session.mobility,
+    physicalVehicles: crimeVehiclesState,
+    command: options.transitCommand
+  });
+  const localSceneState = advanceLocalSceneState(provisionalLocalScene, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    activeLocationId: session.life.currentLocationId,
+    targetLocationId: targetLocation?.id,
+    locations: session.world.locations,
+    people: peopleState,
+    population: crimeAdvance.population,
+    metropolitan: session.metropolitan,
+    urban: urbanState,
+    mobility: session.mobility,
+    playerPosition: transitState.player.position
+  });
+  const streetAdvance = advanceStreetSceneState(session.streetScene, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    metropolitan: session.metropolitan,
+    urban: urbanState,
+    streets: session.streets,
+    localScene: localSceneState,
+    vehicles: crimeVehiclesState
+  });
+  const socialAdvance = advanceSocialState(session.social, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    people: peopleState,
+    locations: session.world.locations,
+    localScene: localSceneState,
+    streetScene: streetAdvance.state
+  });
+  peopleState = socialAdvance.people;
+  const playerCrimeAdvance = advancePlayerCrimeState(session.playerCrime, {
+    seed: session.world.meta.seed,
+    timestamp: nextTimestamp,
+    playerId: session.player.id,
+    playerPosition: localSceneState.playerPosition,
+    localScene: localSceneState,
+    streetScene: streetAdvance.state,
+    data: crimeAdvance.data,
+    urban: urbanState,
+    districts: session.world.districts,
+    organizations: crimeAdvance.organizations
+  });
+
+  const generated: WorldEvent[] = [];
+  if (options.title && options.category) {
+    generated.push(createEvent(session, nextTimestamp, options.category, options.title, options.detail, options.importance ?? 1));
+  }
+  for (const notice of pressureAdvance.notices) generated.push(createEvent(session, nextTimestamp, notice.category, notice.title, notice.detail, notice.importance));
+  for (const notice of crimeAdvance.newlyReported) {
+    generated.push(createEvent(session, nextTimestamp, "local", notice.status === "investigating" ? "Открыто дело об угоне машины." : "Владелец заявил об угоне.", `${notice.observedPlate} · улики ${notice.evidence}%`, notice.status === "investigating" ? 3 : 2));
+  }
+  for (const notice of streetAdvance.notices) generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
+  for (const notice of socialAdvance.notices) generated.push(createEvent(session, nextTimestamp, "contact", notice.title, notice.detail, notice.importance));
+  for (const notice of playerCrimeAdvance.notices) generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
+
+  const housingDaysLeft = getHousingDaysLeft(session.life.housing, nextTimestamp);
+  const nextPlayer = {
+    ...session.player,
+    housingDaysLeft,
+    district: targetDistrict?.name ?? session.player.district,
+    sector: targetDistrict?.code ?? session.player.sector,
+    condition: {
+      health: clamp(session.player.condition.health + (options.healthDelta ?? 0)),
+      fatigue: clamp(session.player.condition.fatigue + Math.max(0, minutes / 120) + (options.fatigueDelta ?? 0)),
+      stress: clamp(session.player.condition.stress + (options.stressDelta ?? 0)),
+      hunger: clamp(session.player.condition.hunger + Math.max(0, minutes / 150) + (options.hungerDelta ?? 0))
+    }
+  };
+  const pressure = trackPressureMetrics(pressureAdvance.state, {
+    balanceDelta: options.trackBalance === false ? 0 : options.balanceDelta,
+    deliveries: options.deliveryCompleted ? 1 : 0,
+    requestsCompleted: options.requestsCompleted,
+    relationChanges: options.relationChanges,
+    worldEvents: options.worldEvents ?? (queued.events.length + pulse.events.length + generated.length)
+  });
+  const courierState = refreshCourierBoard(
+    expireCourierOrders(session.jobs.courier, nextTimestamp),
+    session.world.meta.seed,
+    nextTimestamp,
+    session.world.locations,
+    peopleState.people,
+    session.economy.businesses
+  );
+  const workState = advancePlayerWorkState(session.jobs.work, {
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    timestamp: nextTimestamp,
+    venues: urbanState.venueOperations.registry.map((entry) => entry.venue),
+    venueOperations: urbanState.venueOperations
+  });
+  const buildingAccessState = advanceBuildingAccessState(session.buildingAccess, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    player: nextPlayer,
+    playerHomeLocationId: session.life.housing.locationId,
+    locations: session.world.locations,
+    population: crimeAdvance.population,
+    urban: urbanState,
+    localScene: localSceneState
+  });
+  const selectedPerson = getPerson(peopleState, session.world.primaryContactId)
+    ?? getPerson(peopleState, peopleState.selectedPersonId);
+
+  return {
+    ...session,
+    timestamp: nextTimestamp,
+    world: {
+      ...session.world,
+      meta: { ...session.world.meta, currentTimestamp: nextTimestamp },
+      organizations: crimeAdvance.organizations,
+      activeDistrictId: targetDistrict?.id ?? session.world.activeDistrictId,
+      primaryContactId: selectedPerson?.id ?? session.world.primaryContactId
+    },
+    primaryContact: selectedPerson ? toKnownNpc(selectedPerson, session.world.locations, nextTimestamp) : session.primaryContact,
+    people: peopleState,
+    pressure,
+    population: crimeAdvance.population,
+    government: crimeAdvance.government,
+    data: crimeAdvance.data,
+    urban: urbanState,
+    localScene: localSceneState,
+    streetScene: streetAdvance.state,
+    social: socialAdvance.state,
+    buildingAccess: buildingAccessState,
+    vehicles: crimeVehiclesState,
+    transit: transitState,
+    vehicleCrime: crimeAdvance.state,
+    playerCrime: playerCrimeAdvance.state,
+    district: pulse.state,
+    eventQueue: queued.queue,
+    currentActivity: pressureAdvance.evicted
+      ? `Без постоянного жилья · ${targetLocation?.name ?? "TRANSIT NODE"}`
+      : options.activity ?? session.currentActivity,
+    life: {
+      ...session.life,
+      currentLocationId: targetLocation?.id ?? localSceneState.playerPosition.locationId ?? session.life.currentLocationId
+    },
+    jobs: { ...session.jobs, courier: courierState, work: workState },
+    player: nextPlayer,
+    events: [...generated, ...queued.events.reverse(), ...pulse.events.reverse(), ...session.events].slice(0, 100)
+  };
+}
+
 export function progressLife(session: GameSession, minutes: number, options: ProgressOptions = {}): GameSession {
+  const safeMinutes = Math.max(0, minutes);
+  return canUseLocalTick(session, safeMinutes, options)
+    ? progressLocalLife(session, safeMinutes, options)
+    : progressWorldLife(session, safeMinutes, options);
+}
+
+function progressWorldLife(session: GameSession, minutes: number, options: ProgressOptions = {}): GameSession {
   const nextTimestamp = advanceGameTime(session.timestamp, minutes);
   const pulse = advanceDistrictPulse(session.district, nextTimestamp);
   const queued = processEventQueue(session, nextTimestamp);

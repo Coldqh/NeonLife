@@ -1,3 +1,4 @@
+import { SAVE_SCHEMA_VERSION } from "../src/core/saves/types";
 import { createWorldSession } from "../src/world/generation/createWorld";
 import { progressLife } from "../src/gameplay/life/lifeSimulation";
 import { migrateEnvelope } from "../src/core/saves/migrations";
@@ -11,7 +12,7 @@ const DAY_MS = 24 * 60 * 60_000;
 const seed = "HEALTH-CYBERWARE-VALIDATION-20";
 let session = createWorldSession(seed);
 
-assert(session.schemaVersion === 29, "new world schema mismatch");
+assert(session.schemaVersion === SAVE_SCHEMA_VERSION, "new world schema mismatch");
 assert(session.health.facilities.length >= 5, "clinical network missing");
 assert(session.health.cyberwareModels.length >= 8, "cyberware catalog missing");
 assert(session.health.policies.length === session.population.households.length, "insurance coverage not initialized for every household");
@@ -104,7 +105,7 @@ const migrated = migrateEnvelope({
   payload: legacyPayload
 }, "slot-1");
 assert(migrated, "migration returned null");
-assert(migrated.schemaVersion === 29, "migration schema mismatch");
+assert(migrated.schemaVersion === SAVE_SCHEMA_VERSION, "migration schema mismatch");
 assert(migrated.payload.health.version === 1, "health state not created during migration");
 assert(migrated.payload.data.version === 1, "data state not created during migration");
 assert(migrated.payload.health.facilities.length >= 5, "clinical facilities not restored during migration");

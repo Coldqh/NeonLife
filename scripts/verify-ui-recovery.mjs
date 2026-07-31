@@ -33,7 +33,7 @@ const reconcile = read("src/gameplay/transit/reconcileTransitJourney.ts");
 check("old desktop shell removed", !exists("src/app/layout/NeonShell.tsx"));
 check("old mobile shell removed", !exists("src/app/mobile/MobileExperience.tsx"));
 check("app starts on map", app.includes('useState<GameScreen>("map")'));
-check("five primary screens", ["profile", "map", "work", "crime", "nearby"].every((name) => nav.includes(`id: "${name}"`)) && !nav.includes('id: "home"'));
+check("five primary screens", ["profile", "map", "work", "life", "nearby"].every((name) => nav.includes(`id: "${name}"`)) && !nav.includes('id: "home"'));
 check("map hides generic header", shell.includes('screen === "map" ? null : <GameHeader'));
 check("map owns its fullscreen HUD", map.includes("<MapTopBar") && mapTopBar.includes("GLOBAL_LAYERS") && mapTopBar.includes("LOCAL_LAYERS"));
 check("map nav is not a special raised button", !shellCss.includes("primary-nav__map"));

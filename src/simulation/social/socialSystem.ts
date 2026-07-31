@@ -6,6 +6,7 @@ import type { StreetSceneState } from "../streetScene/types";
 import type { LocationState } from "../../world/state/types";
 import type {
   ConversationAction,
+  ConversationOutcome,
   ConversationLineState,
   ConversationState,
   KnowledgeEntryState,
@@ -197,18 +198,32 @@ export function beginConversationState(state: SocialState, seed: string, person:
   return { ...state, activeConversation: { ...conversation, transcript: [line(seed, conversation, "npc", greeting, timestamp, conversation.mood === "irritated" ? "angry" : "neutral")] } };
 }
 
-function npcReply(identity: SocialIdentityState, person: PersonState, action: ConversationAction, knowledge: KnowledgeEntryState | undefined, subjectName?: string): { text: string; tone: ConversationLineState["tone"] } {
+export function evaluateConversationOutcome(
+  state: SocialState,
+  seed: string,
+  person: PersonState,
+  action: ConversationAction
+): ConversationOutcome {
+  const identity = state.identities.find((item) => item.personId === person.id) ?? identityFor(seed, person);
+  return {
+    helpAccepted: action === "ask-help" ? person.trustToPlayer >= 35 : undefined,
+    moneyAccepted: action === "offer-money" ? identity.greed >= 45 || person.problem.severity >= 60 : undefined,
+    lieBelieved: action === "lie" ? identity.openness + person.trustToPlayer >= 85 : undefined
+  };
+}
+
+function npcReply(identity: SocialIdentityState, person: PersonState, action: ConversationAction, knowledge: KnowledgeEntryState | undefined, subjectName?: string, outcome: ConversationOutcome = {}): { text: string; tone: ConversationLineState["tone"] } {
   if (action === "ask-incident") return knowledge ? { text: knowledge.summary, tone: identity.temperament === "nervous" ? "afraid" : "neutral" } : { text: identity.voice === "blunt" ? "Не видел." : "Я об этом ничего не знаю.", tone: "neutral" };
   if (action === "ask-place") return knowledge ? { text: knowledge.summary, tone: "neutral" } : { text: "Не знаю, что там сейчас происходит.", tone: "neutral" };
   if (action === "ask-person") return knowledge ? { text: knowledge.summary, tone: "neutral" } : { text: `${subjectName ?? "Этот человек"} мне не знаком.`, tone: "neutral" };
-  if (action === "ask-help") return person.trustToPlayer >= 35 ? { text: "Скажи конкретно, что нужно. Если смогу — помогу.", tone: "warm" } : { text: "Мы недостаточно знакомы.", tone: "cold" };
-  if (action === "offer-money") return identity.greed >= 45 || person.problem.severity >= 60 ? { text: "Ладно. Это пригодится.", tone: "warm" } : { text: "Оставь себе.", tone: "neutral" };
+  if (action === "ask-help") return outcome.helpAccepted ? { text: "Скажи конкретно, что нужно. Если смогу — помогу.", tone: "warm" } : { text: "Мы недостаточно знакомы.", tone: "cold" };
+  if (action === "offer-money") return outcome.moneyAccepted ? { text: "Ладно. Это пригодится.", tone: "warm" } : { text: "Оставь себе.", tone: "neutral" };
   if (action === "threaten") return identity.courage >= 55 ? { text: "Ещё раз так скажешь — разговор закончится плохо.", tone: "angry" } : { text: "Понял. Только отойди.", tone: "afraid" };
-  if (action === "lie") return identity.openness >= 50 ? { text: "Допустим. Я проверю.", tone: "neutral" } : { text: "Не верю.", tone: "cold" };
+  if (action === "lie") return outcome.lieBelieved ? { text: "Допустим. Я проверю.", tone: "neutral" } : { text: "Не верю.", tone: "cold" };
   return { text: "Говори.", tone: "neutral" };
 }
 
-export function continueConversationState(state: SocialState, seed: string, person: PersonState, action: ConversationAction, timestamp: number, subjectName?: string): { state: SocialState; response: string } {
+export function continueConversationState(state: SocialState, seed: string, person: PersonState, action: ConversationAction, timestamp: number, subjectName?: string, suppliedOutcome?: ConversationOutcome): { state: SocialState; response: string } {
   const conversation = state.activeConversation;
   if (!conversation || conversation.personId !== person.id || action === "end") return { state: { ...state, activeConversation: undefined }, response: "Разговор закончен." };
   const identity = state.identities.find((item) => item.personId === person.id) ?? identityFor(seed, person);
@@ -216,7 +231,8 @@ export function continueConversationState(state: SocialState, seed: string, pers
   const shareable = state.knowledge.filter((item) => item.holderPersonId === person.id && item.secrecy <= disclosure && (!item.expiresAt || item.expiresAt > timestamp));
   const knowledge = action === "ask-incident" ? shareable.find((item) => item.subject === "incident") : action === "ask-place" ? shareable.find((item) => item.subject === "place") : action === "ask-person" ? shareable.find((item) => item.subject === "person" && item.subjectId !== person.id) : undefined;
   const playerText: Record<ConversationAction, string> = { greet: "Привет.", "ask-incident": "Что ты знаешь о происшествиях рядом?", "ask-place": "Что знаешь об этом месте?", "ask-person": `Что знаешь о ${subjectName ?? "людях здесь"}?`, "ask-help": "Мне нужна помощь.", "offer-money": "Возьми деньги.", threaten: "Лучше отвечай.", lie: "Мне сказали, что всё уже решено.", end: "Пока." };
-  const reply = npcReply(identity, person, action, knowledge, subjectName);
+  const outcome = suppliedOutcome ?? evaluateConversationOutcome(state, seed, person, action);
+  const reply = npcReply(identity, person, action, knowledge, subjectName, outcome);
   const nextConversation: ConversationState = { ...conversation, turn: conversation.turn + 1, lastTurnAt: timestamp, topic: action === "ask-incident" ? "incident" : action === "ask-place" ? "place" : action === "ask-person" ? "person" : conversation.topic, mood: action === "threaten" ? (identity.courage >= 55 ? "irritated" : "afraid") : conversation.mood };
   nextConversation.transcript = [...conversation.transcript, line(seed, nextConversation, "player", playerText[action], timestamp, "neutral"), line(seed, nextConversation, "npc", reply.text, timestamp, reply.tone)].slice(-18);
   return { state: { ...state, activeConversation: nextConversation }, response: reply.text };

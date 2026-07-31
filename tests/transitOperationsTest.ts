@@ -1,3 +1,4 @@
+import { SAVE_SCHEMA_VERSION } from "../src/core/saves/types";
 import { migrateEnvelope } from "../src/core/saves/migrations";
 import {
   alightTransitVehicle,
@@ -40,7 +41,7 @@ function transitInput(session: ReturnType<typeof createWorldSession>) {
 const seed = "TRANSIT-OPERATIONS-28";
 let session = createWorldSession(seed);
 
-assert(session.schemaVersion === 29, "new world schema is not 29");
+assert(session.schemaVersion === SAVE_SCHEMA_VERSION, "new world schema is outdated");
 assert(session.transit.version === 1, "transit operations version mismatch");
 assert(!session.transit.player.journey, "fresh world unexpectedly starts in transit");
 assert(session.transit.stops.length >= 30, "too few physical stops");
@@ -162,7 +163,7 @@ const migrated = migrateEnvelope({
   payload: legacy
 }, "slot-1");
 assert(migrated, "migration returned null");
-assert(migrated.schemaVersion === 29, "migration schema mismatch");
+assert(migrated.schemaVersion === SAVE_SCHEMA_VERSION, "migration schema mismatch");
 assert(migrated.payload.transit.version === 1, "migration did not create transit operations");
 assert(migrated.payload.transit.routes.length > 0, "migration created empty transit routes");
 

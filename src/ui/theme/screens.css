@@ -258,3 +258,55 @@
   .property-list i { width: 38px; height: 38px; }
   .property-list em { grid-column: 2; }
 }
+
+.life-screen { max-width: 1040px; padding-bottom: 48px; }
+.life-heading { align-items: flex-end; }
+.life-balance { min-width: 190px; display: grid; justify-items: end; gap: 2px; }
+.life-balance span { color: var(--nl-muted); font-size: 11px; letter-spacing: .08em; }
+.life-balance strong { font-size: 24px; line-height: 30px; }
+.life-balance small { color: var(--nl-muted); font-size: 12px; }
+.life-priority { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 17px; border: 1px solid var(--nl-line); border-radius: 16px; background: var(--nl-surface); }
+.life-priority__icon { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 13px; background: var(--nl-surface-3); color: var(--nl-accent); }
+.life-priority span, .life-panel header span { color: var(--nl-accent); font-size: 11px; line-height: 16px; letter-spacing: .08em; }
+.life-priority h2 { margin-top: 2px; font-size: 20px; line-height: 26px; }
+.life-priority p { margin-top: 3px; color: var(--nl-muted); font-size: 13px; line-height: 19px; }
+.life-priority > button, .life-panel > button { min-height: 39px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 13px; border: 1px solid var(--nl-line); border-radius: 10px; background: var(--nl-surface-3); color: var(--nl-text); font-size: 12px; font-weight: 650; }
+.life-priority--danger { border-color: rgba(255, 75, 92, .44); background: linear-gradient(120deg, rgba(96, 18, 31, .38), var(--nl-surface)); }
+.life-priority--warn { border-color: rgba(255, 180, 58, .35); }
+.life-priority--good .life-priority__icon { color: var(--nl-green); }
+.life-condition { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.life-condition article { padding: 13px; border-radius: 13px; background: var(--nl-surface); }
+.life-condition span { color: var(--nl-muted); font-size: 12px; }
+.life-condition strong { display: block; margin-top: 3px; font-size: 19px; }
+.life-condition i { height: 4px; display: block; margin-top: 10px; overflow: hidden; border-radius: 5px; background: var(--nl-surface-3); }
+.life-condition i b { height: 100%; display: block; border-radius: inherit; background: var(--nl-green); }
+.life-condition article.is-warning i b { background: var(--nl-yellow); }
+.life-condition article.is-danger i b { background: var(--nl-accent); }
+.life-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.life-panel { min-width: 0; padding: 16px; border-radius: 15px; background: var(--nl-surface); }
+.life-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.life-panel > header h2 { margin-top: 1px; font-size: 17px; line-height: 23px; }
+.life-panel > header > strong { color: var(--nl-muted); font-size: 12px; font-weight: 650; }
+.life-list { display: grid; gap: 7px; margin-top: 12px; }
+.life-list article { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 11px; border-radius: 10px; background: var(--nl-surface-2); }
+.life-list article.is-danger { border: 1px solid rgba(255, 75, 92, .34); }
+.life-list article div { min-width: 0; }
+.life-list strong, .life-list span { display: block; overflow-wrap: anywhere; }
+.life-list strong { font-size: 13px; line-height: 18px; }
+.life-list span, .life-list > p, .life-empty { margin-top: 2px; color: var(--nl-muted); font-size: 11px; line-height: 16px; }
+.life-list em { flex: 0 0 auto; color: var(--nl-text); font-size: 12px; font-style: normal; font-weight: 650; }
+.life-panel > button { width: 100%; margin-top: 12px; }
+.life-focus { display: grid; gap: 3px; margin-top: 12px; padding: 11px; border-radius: 11px; background: var(--nl-surface-2); }
+.life-focus strong { font-size: 14px; }
+.life-focus span, .life-focus p { color: var(--nl-muted); font-size: 12px; line-height: 17px; }
+.life-events { margin-top: 12px; }
+.life-events .life-list article { align-items: flex-start; }
+@media (max-width: 720px) {
+  .life-heading { align-items: flex-start; }
+  .life-balance { width: 100%; justify-items: start; }
+  .life-priority { grid-template-columns: 42px minmax(0, 1fr); }
+  .life-priority__icon { width: 42px; height: 42px; }
+  .life-priority > button { grid-column: 1 / -1; width: 100%; }
+  .life-condition { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .life-grid { grid-template-columns: 1fr; }
+}

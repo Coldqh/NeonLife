@@ -1,10 +1,9 @@
 import { roleLabel, skillLabel } from "../../gameplay/jobs/work/workSystem";
 import type { GameSession } from "../../world/state/types";
 import type { LocalLifeAction } from "../actions/localLifeActions";
+import { formatGameMonthDayTime } from "../../core/time/gameTime";
 
-function clock(timestamp: number): string {
-  return new Date(timestamp).toISOString().slice(5, 16).replace("T", " · ");
-}
+const clock = formatGameMonthDayTime;
 
 export function VenueWorkPanel({ session, venueId, onAction }: { session: GameSession; venueId: string; onAction: (action: LocalLifeAction) => void }) {
   const work = session.jobs.work;

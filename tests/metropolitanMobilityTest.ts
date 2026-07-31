@@ -1,3 +1,4 @@
+import { SAVE_SCHEMA_VERSION } from "../src/core/saves/types";
 import { migrateEnvelope } from "../src/core/saves/migrations";
 import { progressLife } from "../src/gameplay/life/lifeSimulation";
 import { getTravelOptions } from "../src/gameplay/travel/travelSystem";
@@ -13,7 +14,7 @@ const seed = "METROPOLITAN-MOBILITY-24";
 let session = createWorldSession(seed);
 const initial = session.mobility;
 
-assert(session.schemaVersion === 29, "new world schema is not 29");
+assert(session.schemaVersion === SAVE_SCHEMA_VERSION, "new world schema is outdated");
 assert(initial.version === 1, "mobility state version mismatch");
 assert(initial.sectorFlows.length === session.metropolitan.sectors.length, "not every sector has a mobility flow");
 assert(initial.parking.length === session.metropolitan.sectors.length, "not every sector has physical parking");
@@ -86,7 +87,7 @@ const migrated = migrateEnvelope({
   payload: legacy
 }, "slot-1");
 assert(migrated, "migration returned null");
-assert(migrated.schemaVersion === 29, "migration schema mismatch");
+assert(migrated.schemaVersion === SAVE_SCHEMA_VERSION, "migration schema mismatch");
 assert(migrated.payload.mobility.version === 1, "migration did not create mobility state");
 assert(migrated.payload.mobility.sectorFlows.length === migrated.payload.metropolitan.sectors.length, "migration lost sector mobility flows");
 assert(migrated.payload.mobility.routes.length > 0, "migration lost route network");

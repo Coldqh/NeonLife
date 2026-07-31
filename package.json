@@ -1,7 +1,7 @@
 {
   "name": "neon-life",
   "private": true,
-  "version": "0.45.0",
+  "version": "0.46.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -16,7 +16,7 @@
     "test:recovery": "node scripts/verify-map-profile-recovery.mjs",
     "test:movement": "node scripts/verify-local-movement.mjs",
     "test:movement:domain": "node scripts/run-local-movement-domain-test.mjs",
-    "test": "npm run typecheck && npm run test:ui && npm run test:integrity && npm run test:life && npm run test:building && npm run test:street && npm run test:social && npm run test:fabric && npm run test:venue && npm run test:work && npm run test:crime && npm run test:world-core && npm run test:inventory && npm run test:business",
+    "test": "npm run typecheck && npm run test:ui && npm run test:domain",
     "test:integrity": "node scripts/run-world-integrity-domain-test.mjs",
     "test:life": "node scripts/run-physical-life-domain-test.mjs",
     "test:map-ui": "node scripts/verify-city-map-overhaul.mjs",
@@ -36,7 +36,8 @@
     "test:crime": "node scripts/run-player-crime-domain-test.mjs",
     "test:world-core": "node scripts/run-world-core-consolidation-test.mjs",
     "test:inventory": "node scripts/run-product-inventory-domain-test.mjs",
-    "test:business": "node scripts/run-unified-business-economy-test.mjs"
+    "test:business": "node scripts/run-unified-business-economy-test.mjs",
+    "test:domain": "node scripts/run-all-domain-tests.mjs"
   },
   "dependencies": {
     "react": "18.3.1",

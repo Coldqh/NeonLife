@@ -21,6 +21,10 @@ const colocated = progressLife({
   people: {
     ...created.people,
     people: created.people.people.map((item) => item.id === person.id ? { ...item, trustToPlayer: 60, irritationToPlayer: 0 } : item)
+  },
+  social: {
+    ...created.social,
+    identities: created.social.identities.map((identity) => identity.personId === person.id ? { ...identity, greed: 100 } : identity)
   }
 }, 0, { playerPosition, suppressTimeEvent: true });
 const readyActor = colocated.localScene.actors.find((item) => item.activePersonId === person.id);
@@ -41,6 +45,25 @@ const gifted = continueConversation(asked, "offer-money");
 const residentAfterGift = gifted.population.residents.find((item) => item.activePersonId === person.id);
 assert(gifted.player.balance === balanceBeforeGift - 25, "conversation gift did not debit player");
 assert(residentBeforeGift && residentAfterGift && residentAfterGift.savings === residentBeforeGift.savings + 25, "conversation gift did not credit canonical resident money");
+
+const refusingPerson = ready.people.people.find((item) => item.id === person.id);
+assert(refusingPerson, "refusal test person missing");
+const refusingReady = {
+  ...ready,
+  people: {
+    ...ready.people,
+    people: ready.people.people.map((item) => item.id === person.id ? { ...item, problem: { ...item.problem, severity: 0 } } : item)
+  },
+  social: {
+    ...ready.social,
+    identities: ready.social.identities.map((identity) => identity.personId === person.id ? { ...identity, greed: 0 } : identity)
+  }
+};
+const refusingStarted = beginConversation(refusingReady, person.id);
+const refusingBalance = refusingStarted.player.balance;
+const refused = continueConversation(refusingStarted, "offer-money");
+assert(refused.player.balance === refusingBalance, "refused money was still debited");
+assert(refused.social.activeConversation?.transcript.at(-1)?.text === "Оставь себе.", "refusal transcript does not match transaction result");
 
 const threatened = continueConversation(gifted, "threaten");
 const threatenedPerson = threatened.people.people.find((item) => item.id === person.id);

@@ -1,3 +1,4 @@
+import { SAVE_SCHEMA_VERSION } from "../src/core/saves/types";
 import { migrateEnvelope } from "../src/core/saves/migrations";
 import { progressLife } from "../src/gameplay/life/lifeSimulation";
 import { getTravelOptions } from "../src/gameplay/travel/travelSystem";
@@ -12,7 +13,7 @@ const seed = "LOCAL-SCENE-25";
 let session = createWorldSession(seed);
 const initial = session.localScene;
 
-assert(session.schemaVersion === 29, "new world schema is not 29");
+assert(session.schemaVersion === SAVE_SCHEMA_VERSION, "new world schema is outdated");
 assert(initial.version === 1, "local scene version mismatch");
 assert(initial.focusSectorId === initial.playerPosition.sectorId, "player focus sector mismatch");
 assert(session.metropolitan.streaming.activeSectorIds.includes(initial.focusSectorId), "player is outside active streaming window");
@@ -80,7 +81,7 @@ const migrated = migrateEnvelope({
   payload: legacy
 }, "slot-1");
 assert(migrated, "migration returned null");
-assert(migrated.schemaVersion === 29, "migration schema mismatch");
+assert(migrated.schemaVersion === SAVE_SCHEMA_VERSION, "migration schema mismatch");
 assert(migrated.payload.localScene.version === 1, "migration did not create local scene");
 assert(migrated.payload.localScene.playerPosition.locationId === migrated.payload.life.currentLocationId, "migration lost player spatial position");
 assert(migrated.payload.localScene.actors.length > 0, "migration created empty local scene");

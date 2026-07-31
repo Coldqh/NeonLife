@@ -1,4 +1,9 @@
 import type { GameSession } from "../../world/state/types";
+import { getFoodProduct } from "../../data/products/foodCatalog";
+import { getBusinessAtLocation, localPrice } from "../../gameplay/economy/localEconomy";
+import { getActiveCourierOrder } from "../../gameplay/jobs/courier/courierSystem";
+import { isLocationOpen } from "../../gameplay/travel/travelSystem";
+import { currentPhysicalLocation, isPlayerInsideHome, isPlayerInsideLocation } from "../../gameplay/life/playerPresence";
 import {
   acceptCourierOrder,
   buyFoodAtCurrentLocation,
@@ -30,6 +35,7 @@ import {
   storeCarriedFoodAtHome,
   waitForPlayerWorkShift
 } from "../../gameplay/life/lifeSimulation";
+import type { NoticeTone } from "../shared/types";
 
 export type LocalLifeAction =
   | { kind: "enter-home-unit" }
@@ -62,7 +68,16 @@ export type LocalLifeAction =
   | { kind: "hotwire-vehicle"; vehicleId: string }
   | { kind: "resolve-custody"; method: "pay" | "serve" };
 
-export function applyLocalLifeAction(session: GameSession, action: LocalLifeAction): GameSession {
+export interface LocalLifeCommandResult {
+  session: GameSession;
+  ok: boolean;
+  message: string;
+  tone: NoticeTone;
+  elapsedMinutes: number;
+  moneyDelta: number;
+}
+
+function execute(session: GameSession, action: LocalLifeAction): GameSession {
   switch (action.kind) {
     case "enter-home-unit": return enterPlayerHomeUnit(session);
     case "leave-home-unit": return leaveBuildingUnit(session);
@@ -94,4 +109,118 @@ export function applyLocalLifeAction(session: GameSession, action: LocalLifeActi
     case "hotwire-vehicle": return hotwirePhysicalVehicle(session, action.vehicleId);
     case "resolve-custody": return resolvePlayerCustody(session, action.method);
   }
+}
+
+function rejectionReason(session: GameSession, action: LocalLifeAction): string {
+  const location = currentPhysicalLocation(session);
+  switch (action.kind) {
+    case "enter-home-unit":
+      return session.pressure.housingStatus === "evicted" ? "Доступ к жилью отозван" : "Нужно находиться внутри своего жилого блока";
+    case "leave-home-unit": return "Ты не находишься внутри отдельного помещения";
+    case "buy-food": {
+      if (!location || !isPlayerInsideLocation(session, location.id)) return "Сначала войди в торговую точку";
+      if (!isLocationOpen(location, session.timestamp)) return "Торговая точка закрыта";
+      const product = getFoodProduct(action.productId);
+      const price = localPrice(product.price, getBusinessAtLocation(session.economy, location.id));
+      if (session.player.balance < price) return `Не хватает ₵ ${price - session.player.balance}`;
+      return "Товара нет в физическом остатке или сумка переполнена";
+    }
+    case "eat-food": return "Еду нельзя приготовить здесь или подходящей порции нет";
+    case "store-food": return isPlayerInsideHome(session) ? "В сумке нечего убирать" : "Пищевой шкаф доступен только дома";
+    case "discard-spoiled": return "Испорченных продуктов нет";
+    case "sleep-home": return "Спать дома можно только внутри своего помещения";
+    case "sleep-outside": return session.localScene.playerPosition.state === "outside" ? "Сейчас нельзя лечь спать" : "Сначала выйди на улицу";
+    case "accept-courier": {
+      const order = session.jobs.courier.orders.find((item) => item.id === action.orderId);
+      if (session.jobs.courier.activeOrderId) return "Сначала закончи текущую доставку";
+      if (!order || order.status !== "available") return "Заказ уже недоступен";
+      if (order.deadlineAt <= session.timestamp) return "Срок заказа уже истёк";
+      if (order.weightKg > session.jobs.courier.cargoCapacityKg) return "Груз тяжелее доступной грузоподъёмности";
+      return "Заказ нельзя принять из этой точки";
+    }
+    case "pickup-courier": {
+      const order = getActiveCourierOrder(session.jobs.courier);
+      return !order ? "Активного заказа нет" : order.status !== "accepted" ? "Груз уже забран" : "Сначала войди в точку выдачи";
+    }
+    case "deliver-courier": {
+      const order = getActiveCourierOrder(session.jobs.courier);
+      return !order ? "Активного заказа нет" : order.status !== "in-transit" ? "Сначала забери груз" : "Сначала войди в точку доставки";
+    }
+    case "pay-obligation": {
+      const obligation = session.pressure.obligations.find((item) => item.id === action.obligationId);
+      if (!isPlayerInsideHome(session)) return "Оплата обязательств доступна через домашний терминал";
+      if (!obligation || obligation.status === "paid") return "Обязательство уже закрыто";
+      return session.player.balance < (obligation?.amount ?? 0) ? "На счёте недостаточно денег" : "Платёж сейчас недоступен";
+    }
+    case "clinic-care": return location?.type === "clinic" ? "Недостаточно денег, медикаментов или мест" : "Сначала войди в клинику";
+    case "join-venue-queue": return "Очередь закрыта, заведение недоступно или ты находишься не там";
+    case "leave-venue-queue": return "Ты не стоишь в этой очереди";
+    case "buy-venue-offer": return "Предложение недоступно, не хватает денег или ты находишься не у кассы";
+    case "interview-work": return "Собеседование доступно только в заведении с открытой вакансией";
+    case "sign-work-contract": return "Работодатель ещё не сделал предложение";
+    case "wait-work-shift": return "До смены слишком далеко или она уже началась";
+    case "start-work-shift": return "Нужно быть на рабочем месте в окно начала смены";
+    case "perform-work-task": return "Эта задача недоступна или нарушена очередь выполнения";
+    case "finish-work-shift": return "Сначала заверши все задачи смены";
+    case "shoplift-venue-offer": return "Товар недоступен для кражи или ты находишься слишком далеко";
+    case "rob-venue-register": return "Касса недоступна или ты находишься не в заведении";
+    case "assault-actor": return "Цель не находится рядом или уже недоступна";
+    case "inspect-vehicle-crime": return "Подойди к машине ближе и выйди на улицу";
+    case "break-in-vehicle": return "Машина не осмотрена, слишком далеко или уже открыта";
+    case "hotwire-vehicle": return "Сначала проникни в машину и займи водительское место";
+    case "resolve-custody": return action.method === "pay" ? "Не хватает денег на штраф" : "Игрок сейчас не задержан";
+  }
+}
+
+function successMessage(action: LocalLifeAction, elapsedMinutes: number, moneyDelta: number): string {
+  const names: Record<LocalLifeAction["kind"], string> = {
+    "enter-home-unit": "Ты вошёл домой",
+    "leave-home-unit": "Ты вышел в коридор",
+    "buy-food": "Покупка завершена",
+    "eat-food": "Еда использована",
+    "store-food": "Продукты убраны в шкаф",
+    "discard-spoiled": "Испорченные продукты выброшены",
+    "sleep-home": "Сон завершён",
+    "sleep-outside": "Сон на улице завершён",
+    "accept-courier": "Заказ принят",
+    "pickup-courier": "Груз получен",
+    "deliver-courier": "Доставка завершена",
+    "pay-obligation": "Платёж проведён",
+    "clinic-care": "Медицинская процедура завершена",
+    "join-venue-queue": "Ты занял место в очереди",
+    "leave-venue-queue": "Ты вышел из очереди",
+    "buy-venue-offer": "Покупка завершена",
+    "interview-work": "Собеседование завершено",
+    "sign-work-contract": "Контракт подписан",
+    "wait-work-shift": "Время до смены пропущено",
+    "start-work-shift": "Смена началась",
+    "perform-work-task": "Рабочая задача выполнена",
+    "finish-work-shift": "Смена закрыта",
+    "shoplift-venue-offer": "Попытка кражи завершена",
+    "rob-venue-register": "Попытка ограбления завершена",
+    "assault-actor": "Нападение завершено",
+    "inspect-vehicle-crime": "Машина осмотрена",
+    "break-in-vehicle": "Попытка взлома завершена",
+    "hotwire-vehicle": "Попытка запуска завершена",
+    "resolve-custody": "Задержание завершено"
+  };
+  const details = [elapsedMinutes > 0 ? `${elapsedMinutes} мин.` : "без затрат времени", moneyDelta ? `${moneyDelta > 0 ? "+" : "−"}₵ ${Math.abs(moneyDelta)}` : ""].filter(Boolean).join(" · ");
+  return details ? `${names[action.kind]} · ${details}` : names[action.kind];
+}
+
+export function applyLocalLifeAction(session: GameSession, action: LocalLifeAction): LocalLifeCommandResult {
+  const next = execute(session, action);
+  if (next === session) {
+    return { session, ok: false, message: rejectionReason(session, action), tone: "warn", elapsedMinutes: 0, moneyDelta: 0 };
+  }
+  const elapsedMinutes = Math.max(0, Math.round((next.timestamp - session.timestamp) / 60_000));
+  const moneyDelta = next.player.balance - session.player.balance;
+  return {
+    session: next,
+    ok: true,
+    message: successMessage(action, elapsedMinutes, moneyDelta),
+    tone: action.kind === "shoplift-venue-offer" || action.kind === "rob-venue-register" || action.kind === "assault-actor" || action.kind === "break-in-vehicle" || action.kind === "hotwire-vehicle" ? "warn" : "good",
+    elapsedMinutes,
+    moneyDelta
+  };
 }

@@ -30,6 +30,29 @@ export function formatGameDateTime(timestamp: number): string {
   return `${formatGameDate(timestamp)} · ${formatGameTime(timestamp)} · ${WEEKDAYS[date.getUTCDay()]}`;
 }
 
+const MONTHS_RU = [
+  "января", "февраля", "марта", "апреля", "мая", "июня",
+  "июля", "августа", "сентября", "октября", "ноября", "декабря"
+];
+
+/** Formats in the fictional game clock, never in the device timezone. */
+export function formatGameShortDateTime(timestamp: number): string {
+  const date = new Date(timestamp);
+  return `${String(date.getUTCDate()).padStart(2, "0")}.${String(date.getUTCMonth() + 1).padStart(2, "0")} · ${formatGameTime(timestamp)}`;
+}
+
+/** Formats a compact month/day label in the fictional game clock. */
+export function formatGameMonthDayTime(timestamp: number): string {
+  const date = new Date(timestamp);
+  return `${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")} · ${formatGameTime(timestamp)}`;
+}
+
+export function formatGameDateLong(timestamp: number): string {
+  if (!Number.isFinite(timestamp)) return "дата неизвестна";
+  const date = new Date(timestamp);
+  return `${date.getUTCDate()} ${MONTHS_RU[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+}
+
 export function getDayNumber(timestamp: number): number {
   const elapsed = timestamp - INITIAL_GAME_TIMESTAMP;
   return Math.max(1, Math.floor(elapsed / 86_400_000) + 1);

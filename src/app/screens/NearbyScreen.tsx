@@ -12,6 +12,7 @@ import { localMovementTargetForActor, localMovementTargetForBuilding, localMovem
 import { ConversationPanel } from "../social/ConversationPanel";
 import type { ConversationAction } from "../../simulation/social/types";
 import { getConversationAvailability } from "../../gameplay/social/socialCommands";
+import { formatGameTime } from "../../core/time/gameTime";
 
 interface SelectedEntity {
   type: "person" | "building" | "vehicle";
@@ -207,7 +208,7 @@ export function NearbyScreen({
             </button>
           )) : null}
           {mode === "events" ? events.map((event) => (
-            <article className="event-row" key={event.id}><i>◉</i><span><strong>{event.title}</strong><small>{event.detail ?? "Без подробностей"}</small></span><time>{new Date(event.timestamp).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</time></article>
+            <article className="event-row" key={event.id}><i>◉</i><span><strong>{event.title}</strong><small>{event.detail ?? "Без подробностей"}</small></span><time>{formatGameTime(event.timestamp)}</time></article>
           )) : null}
           {((mode === "people" && !actors.length) || (mode === "places" && !buildings.length) || (mode === "cars" && !vehicles.length) || (mode === "events" && !events.length)) ? <p className="empty-copy">Подходящих объектов нет.</p> : null}
         </div>

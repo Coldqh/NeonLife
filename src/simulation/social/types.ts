@@ -6,6 +6,12 @@ export type KnowledgeSource = "personal" | "witnessed" | "heard" | "official";
 export type KnowledgeSubject = "person" | "place" | "incident" | "organization" | "player";
 export type ConversationAction = "greet" | "ask-incident" | "ask-place" | "ask-person" | "ask-help" | "offer-money" | "threaten" | "lie" | "end";
 
+export interface ConversationOutcome {
+  helpAccepted?: boolean;
+  moneyAccepted?: boolean;
+  lieBelieved?: boolean;
+}
+
 export interface SocialIdentityState {
   personId: EntityId;
   temperament: SocialTemperament;

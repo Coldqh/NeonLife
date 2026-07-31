@@ -1,3 +1,4 @@
+import { SAVE_SCHEMA_VERSION } from "../src/core/saves/types";
 import { createWorldSession } from "../src/world/generation/createWorld";
 import { progressLife } from "../src/gameplay/life/lifeSimulation";
 import { advanceMetropolitanState } from "../src/simulation/spatial/metropolitanSystem";
@@ -82,8 +83,8 @@ const migrated = migrateEnvelope({
   payload: legacy
 }, "slot-1");
 assert(migrated, "migration returned null");
-assert(migrated.schemaVersion === 29, "migration schema mismatch");
-assert(migrated.payload.metropolitan.version === 2, "metropolitan state was not created during migration");
+assert(migrated.schemaVersion === SAVE_SCHEMA_VERSION, "migration schema mismatch");
+assert(migrated.payload.metropolitan.version === 3, "metropolitan state was not created during migration");
 assert(migrated.payload.world.city.population >= 5_000_000, "legacy city was not expanded to metropolitan represented scale");
 assert(migrated.payload.metropolitan.totals.representedPopulation === migrated.payload.world.city.population, "metropolitan and world population diverged");
 

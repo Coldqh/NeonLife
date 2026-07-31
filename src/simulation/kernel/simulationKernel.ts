@@ -533,7 +533,8 @@ function activeEmploymentContract(input: KernelSyncInput, employment: Employment
 
 function activeWorldCoreEmploymentContract(input: KernelSyncInput, employment: WorldCoreEmploymentState): KernelContractState | null {
   const business = input.worldCore?.businesses.find((item) => item.id === employment.businessId);
-  if (!business) return null;
+  const resident = input.population.residents.find((item) => item.id === employment.residentId);
+  if (!business || !resident) return null;
   const status = employment.status === "ended" ? "ended" : employment.status === "breached" ? "breached" : employment.status === "suspended" ? "suspended" : "active";
   return {
     id: employmentContractId(employment.sourceEmploymentId ?? employment.sourcePlayerContractId ?? employment.id),
@@ -799,6 +800,19 @@ function dataAccessContracts(input: KernelSyncInput): KernelContractState[] {
       recordKinds: grant.recordKinds.join(",")
     }
   }));
+}
+
+function pruneOrphanedHistoricalContracts(
+  contracts: KernelContractState[],
+  accounts: KernelAccountState[],
+  assets: KernelAssetState[]
+): KernelContractState[] {
+  const entityIds = new Set(accounts.map((item) => item.entityId));
+  const assetIds = new Set(assets.map((item) => item.id));
+  return contracts.filter((item) => item.status !== "ended"
+    || (entityIds.has(item.sourceEntityId)
+      && entityIds.has(item.targetEntityId)
+      && (!item.assetId || assetIds.has(item.assetId))));
 }
 
 function buildContracts(input: KernelSyncInput, previous: KernelContractState[]): KernelContractState[] {
@@ -1111,7 +1125,7 @@ export function advanceSimulationKernel(state: SimulationKernelState, input: Ker
 
   const assets = buildAssets(input);
   const ownership = buildOwnership(assets, input.timestamp);
-  const contracts = buildContracts(input, state.contracts);
+  const contracts = pruneOrphanedHistoricalContracts(buildContracts(input, state.contracts), accounts, assets);
   const transactions = [...state.transactions, ...newTransactions].slice(-MAX_TRANSACTIONS);
   const previousContractIds = new Set(state.contracts.map((item) => item.id));
   const totals = {

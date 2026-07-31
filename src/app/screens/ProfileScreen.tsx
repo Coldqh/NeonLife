@@ -1,15 +1,11 @@
 import type { GameSession } from "../../world/state/types";
 import { asset, currentActivity, currentLocation, districtName, playerOccupation } from "../shared/presentation";
+import { formatGameDateLong } from "../../core/time/gameTime";
 
 function housingTypeLabel(type: GameSession["life"]["housing"]["type"]): string {
   if (type === "capsule") return "Капсула";
   if (type === "room") return "Комната";
   return "Квартира";
-}
-
-function formatDate(timestamp: number): string {
-  if (!Number.isFinite(timestamp)) return "дата неизвестна";
-  return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", year: "numeric" }).format(new Date(timestamp));
 }
 
 function livedDays(session: GameSession): number {
@@ -128,7 +124,7 @@ export function ProfileScreen({ session }: { session: GameSession }) {
           <article><strong>{failedWork}</strong><span>работ сорвано</span></article>
           <article><strong>{playerCases.length}</strong><span>дел связано</span></article>
         </div>
-        <p className="profile-created">Мир создан {formatDate(new Date(session.world.meta.createdAt).getTime())}</p>
+        <p className="profile-created">Мир создан {formatGameDateLong(new Date(session.world.meta.createdAt).getTime())}</p>
       </section>
     </section>
   );

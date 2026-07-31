@@ -3,6 +3,7 @@ import { Icon } from "../../ui/components/Icons";
 import { roleLabel, skillLabel } from "../../gameplay/jobs/work/workSystem";
 import type { PlayerWorkRole } from "../../gameplay/jobs/work/types";
 import type { GameSession } from "../../world/state/types";
+import { formatGameMonthDayTime } from "../../core/time/gameTime";
 
 const ROLE_FILTERS: Array<{ value: "all" | PlayerWorkRole; label: string }> = [
   { value: "all", label: "Все" },
@@ -12,9 +13,7 @@ const ROLE_FILTERS: Array<{ value: "all" | PlayerWorkRole; label: string }> = [
   { value: "mechanic", label: "Ремонт" }
 ];
 
-function dateTime(timestamp: number): string {
-  return new Date(timestamp).toISOString().slice(5, 16).replace("T", " · ");
-}
+const dateTime = formatGameMonthDayTime;
 
 export function WorkScreen({ session, onOpenVenue }: { session: GameSession; onOpenVenue: (venueId: string) => void }) {
   const [role, setRole] = useState<"all" | PlayerWorkRole>("all");

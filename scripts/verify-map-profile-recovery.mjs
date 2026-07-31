@@ -41,7 +41,7 @@ check("point selection remains backed by physical routing", mapScreen.includes('
 check("building profile exposes actual floors and units", mapProfile.includes("FloorGrid") && mapProfile.includes("building-profile__unit-grid") && mapProfile.includes("session.urban.units"));
 check("venue profile uses time-aware live data", mapProfile.includes("isLocationOpen(location, session.timestamp)") && mapProfile.includes("session.economy.businesses") && mapProfile.includes("session.localScene.actors"));
 check("continuous names use global axes", streets.includes("continuous-street") && streets.includes("globalAxisM"));
-check("topology generator version changed", streets.includes("TOPOLOGY_VERSION = 2"));
+check("topology generator version changed", streets.includes("TOPOLOGY_VERSION = 3"));
 check("street rename updates parcel addresses", streets.includes("streetName: nextName") && streets.includes("addressCode: `${nextName}"));
 check("street removal removes dependent topology", streets.includes("availableSegmentIds") && streets.includes("buildingEntrances = topology.buildingEntrances.filter") && streets.includes("parkingZones = topology.parkingZones.filter"));
 check("life simulation detects topology geometry", life.includes("streetGeometryChanged") && life.includes("geometryChanged"));

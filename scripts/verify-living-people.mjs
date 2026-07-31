@@ -30,7 +30,7 @@ check("physical incidents create witness knowledge", system.includes("incident.p
 check("rumors spread through relations", system.includes('type === "gossip"') && system.includes("holderPersonIds: [source.id, target.id]") && system.includes('source: "heard"'));
 check("NPC relationships change autonomously", system.includes("relationshipEvents") && system.includes("relationUpdate") && system.includes("strengthDelta"));
 check("threats and lies become shareable knowledge", commands.includes("Игрок угрожал") && commands.includes("сомнительную информацию") && commands.includes("recordSocialKnowledge"));
-check("real money transfer is used", commands.includes("balanceDelta: action === \"offer-money\" ? -25") && commands.includes("residentAfter") === false && commands.includes("updatePersonFunds"));
+check("real money transfer is conditional", commands.includes("const moneyAccepted") && commands.includes("balanceDelta: moneyAccepted ? -25 : 0") && commands.includes("if (moneyAccepted) progressed = updatePersonFunds"));
 check("social UI style is loaded", main.includes("social.css") && fs.existsSync(path.join(root, "src/ui/theme/social.css")));
 check("social CSS braces balanced", (read("src/ui/theme/social.css").match(/\{/g) ?? []).length === (read("src/ui/theme/social.css").match(/\}/g) ?? []).length);
 

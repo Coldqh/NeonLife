@@ -1,3 +1,4 @@
+import { SAVE_SCHEMA_VERSION } from "../src/core/saves/types";
 import { migrateEnvelope } from "../src/core/saves/migrations";
 import { createWorldSession } from "../src/world/generation/createWorld";
 import { getSectorStreetTopology, streetTopologyHealthy } from "../src/simulation/streets/streetTopologySystem";
@@ -51,7 +52,7 @@ function boundsOverlap(left: { xM: number; yM: number; widthM: number; heightM: 
 
 const seed = "street-topology-regression";
 const session = createWorldSession(seed);
-assert(session.schemaVersion === 29, "new world schema is not 29");
+assert(session.schemaVersion === SAVE_SCHEMA_VERSION, "new world schema is outdated");
 assert(session.streets.version === 1, "street topology state is missing");
 assert(session.streets.catalogs.length === session.metropolitan.sectors.length, "not every sector received a street catalog");
 assert(session.streets.catalogs.length === 1512, "unexpected city sector count");
@@ -178,7 +179,7 @@ const migrated = migrateEnvelope({
   checksum: "legacy",
   payload: { ...legacyPayload, schemaVersion: 28 }
 }, "slot-1");
-assert(migrated?.payload.schemaVersion === 29, "legacy save was not upgraded to schema 29");
+assert(migrated?.payload.schemaVersion === SAVE_SCHEMA_VERSION, "legacy save was not upgraded to current schema");
 assert(migrated.payload.streets.catalogs.length === 1512, "migration did not build street catalogs");
 assert(migrated.payload.urban.buildings.map((building) => building.id).sort().join("|") === buildingIds, "migration changed building identities");
 assert(migrated.payload.urban.buildings.every((building) => Boolean(building.addressCode)), "migration lost building addresses");
@@ -194,19 +195,20 @@ for (const sector of session.metropolitan.sectors.slice(0, 240)) {
   const leftBoundary = leftTopology.segments.filter((segment) => {
     const from = leftNodes.get(segment.fromIntersectionId);
     const to = leftNodes.get(segment.toIntersectionId);
-    return Boolean(from && to && (Math.abs(from.xM - (sector.bounds.xM + sector.bounds.widthM)) < .01 || Math.abs(to.xM - (sector.bounds.xM + sector.bounds.widthM)) < .01));
+    if (!from || !to || Math.abs(from.yM - to.yM) >= .01) return false;
+    const borderX = sector.bounds.xM + sector.bounds.widthM;
+    return Math.abs(from.xM - borderX) < .01 || Math.abs(to.xM - borderX) < .01;
   });
   for (const segment of leftBoundary) {
     const from = leftNodes.get(segment.fromIntersectionId)!;
     const to = leftNodes.get(segment.toIntersectionId)!;
-    const yM = Math.abs(from.xM - (sector.bounds.xM + sector.bounds.widthM)) < .01 ? from.yM : to.yM;
+    const yM = from.yM;
     const match = rightTopology.segments.find((candidate) => {
       const rightFrom = rightNodes.get(candidate.fromIntersectionId);
       const rightTo = rightNodes.get(candidate.toIntersectionId);
-      return Boolean(rightFrom && rightTo && (
-        Math.abs(rightFrom.xM - east.bounds.xM) < .01 && Math.abs(rightFrom.yM - yM) < .01
-        || Math.abs(rightTo.xM - east.bounds.xM) < .01 && Math.abs(rightTo.yM - yM) < .01
-      ));
+      if (!rightFrom || !rightTo || Math.abs(rightFrom.yM - rightTo.yM) >= .01) return false;
+      return Math.abs(rightFrom.yM - yM) < .01
+        && (Math.abs(rightFrom.xM - east.bounds.xM) < .01 || Math.abs(rightTo.xM - east.bounds.xM) < .01);
     });
     if (match) assert(match.name === segment.name, `street name changes at border ${sector.code}/${east.code}`);
   }

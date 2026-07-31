@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.46.0 — Player Loop & Runtime Split
+
+- split short local actions from the full city simulation pipeline so zero-minute and sub-hour physical actions no longer rebuild the economy, World Core, inventory and Kernel;
+- added a dedicated Life screen with immediate risks, condition, obligations, work, courier contracts and recent consequences;
+- replaced Crime in the primary navigation with Life while keeping custody able to force-open the Crime screen;
+- added explicit local command results and user-facing rejection reasons instead of silent no-op buttons;
+- moved autosave into an idle, deduplicated write queue with a longer debounce to avoid serializing the full world after every click;
+- unified all game date/time presentation on the UTC-backed game clock instead of the host computer timezone;
+- made courier contracts respect opening hours and include pickup, delivery, handling and risk time in their deadlines;
+- made social replies and state changes share one outcome, including actual refusal of money and consistent lie results;
+- fixed stale employment contracts during save migration, street names across sector borders, cached street deltas and transit alighting outside inactive sectors;
+- connected every domain test configuration to `npm test`, repaired stale version assertions and bounded expensive long-run regressions;
+- added local-tick, gift-refusal, contract-feasibility, street continuity, migration and Kernel-account regressions.
+
 ## 0.45.0 — Simulation Pipeline Recovery
 
 - replaced quadratic per-account Kernel reconciliation with indexed batch settlement;

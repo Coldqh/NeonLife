@@ -34,7 +34,7 @@ const main = read("src/main.tsx");
 check("App is below 240 lines", lineCount("src/app/App.tsx") <= 240);
 check("No Home screen remains", !/HomeView|"home"\s*\|\s*"profile"|label:\s*"Главная"/.test(app + nav));
 check("No Move screen remains", !/MoveView|label:\s*"Путь"|"move"/.test(app + nav));
-check("Exactly five primary screens", ["profile", "map", "work", "crime", "nearby"].every((id) => nav.includes(`id: "${id}"`)) && (nav.match(/id:\s*"/g) ?? []).length === 5);
+check("Exactly five primary screens", ["profile", "map", "work", "life", "nearby"].every((id) => nav.includes(`id: "${id}"`)) && (nav.match(/id:\s*"/g) ?? []).length === 5);
 check("Map is the initial screen", app.includes('useState<GameScreen>("map")'));
 check("Balance is in unified header", header.includes("session.player.balance") && header.includes("temperatureC") && header.includes("formatGameDate"));
 check("Single shell is mounted", app.includes("<GameShell") && !app.includes("NeonShell") && !app.includes("MobileExperience"));

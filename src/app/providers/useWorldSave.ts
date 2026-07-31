@@ -21,6 +21,13 @@ import type { GameSession } from "../../world/state/types";
 import { reconcileLoadedTransitJourney } from "../../gameplay/transit/reconcileTransitJourney";
 
 const LEGACY_SESSION_KEY = "neon-life/demo-session/v1";
+const AUTOSAVE_DEBOUNCE_MS = 2_500;
+const AUTOSAVE_IDLE_TIMEOUT_MS = 1_500;
+
+type IdleWindow = Window & {
+  requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+  cancelIdleCallback?: (handle: number) => void;
+};
 
 interface LegacySession {
   timestamp?: number;
@@ -94,6 +101,9 @@ export function useWorldSave(): WorldSaveController {
   const databaseRef = useRef<IDBDatabase | null>(null);
   const activeSlotRef = useRef<SaveSlotId>("slot-1");
   const sessionRef = useRef<GameSession | null>(null);
+  const lastPersistedSessionRef = useRef<GameSession | null>(null);
+  const lastQueuedSessionRef = useRef<GameSession | null>(null);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [session, setSessionState] = useState<GameSession | null>(null);
   const [state, setState] = useState<SaveSystemState>({
     activeSlotId: "slot-1",
@@ -129,20 +139,34 @@ export function useWorldSave(): WorldSaveController {
     }));
   }, []);
 
-  const persist = useCallback(async (targetSession: GameSession, slotId: SaveSlotId) => {
+  const persist = useCallback((targetSession: GameSession, slotId: SaveSlotId): Promise<void> => {
     const database = databaseRef.current;
-    if (!database) return;
-    setState((current) => ({ ...current, status: "saving", error: null }));
-    try {
-      const envelope = await saveSession(database, slotId, targetSession);
-      await refreshMetadata(database, envelope.updatedAt);
-    } catch (error) {
-      setState((current) => ({
-        ...current,
-        status: "error",
-        error: error instanceof Error ? error.message : "Save failed"
-      }));
+    if (!database) return Promise.resolve();
+    if (lastPersistedSessionRef.current === targetSession || lastQueuedSessionRef.current === targetSession) {
+      return saveQueueRef.current;
     }
+
+    lastQueuedSessionRef.current = targetSession;
+    const write = async () => {
+      setState((current) => ({ ...current, status: "saving", error: null }));
+      try {
+        const envelope = await saveSession(database, slotId, targetSession);
+        lastPersistedSessionRef.current = targetSession;
+        await refreshMetadata(database, envelope.updatedAt);
+      } catch (error) {
+        setState((current) => ({
+          ...current,
+          status: "error",
+          error: error instanceof Error ? error.message : "Save failed"
+        }));
+      } finally {
+        if (lastQueuedSessionRef.current === targetSession) lastQueuedSessionRef.current = null;
+      }
+    };
+
+    const queued = saveQueueRef.current.then(write, write);
+    saveQueueRef.current = queued;
+    return queued;
   }, [refreshMetadata]);
 
   const saveNow = useCallback(async () => {
@@ -176,6 +200,7 @@ export function useWorldSave(): WorldSaveController {
         const loaded = await loadOrCreate(database, activeSlotId);
         activeSlotRef.current = activeSlotId;
         sessionRef.current = loaded;
+        lastPersistedSessionRef.current = loaded;
         setSessionState(loaded);
         setState((current) => ({ ...current, activeSlotId }));
         await refreshMetadata(database);
@@ -198,11 +223,25 @@ export function useWorldSave(): WorldSaveController {
   useEffect(() => {
     if (!session || state.status === "booting") return;
     sessionRef.current = session;
+
+    const idleWindow = window as IdleWindow;
+    let idleHandle: number | null = null;
+    let fallbackHandle: number | null = null;
     const timer = window.setTimeout(() => {
-      void persist(session, activeSlotRef.current);
-    }, 650);
-    return () => window.clearTimeout(timer);
-  }, [persist, session]);
+      const save = () => void persist(session, activeSlotRef.current);
+      if (idleWindow.requestIdleCallback) {
+        idleHandle = idleWindow.requestIdleCallback(save, { timeout: AUTOSAVE_IDLE_TIMEOUT_MS });
+      } else {
+        fallbackHandle = window.setTimeout(save, 0);
+      }
+    }, AUTOSAVE_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+      if (idleHandle !== null) idleWindow.cancelIdleCallback?.(idleHandle);
+      if (fallbackHandle !== null) window.clearTimeout(fallbackHandle);
+    };
+  }, [persist, session, state.status]);
 
   const switchSlot = useCallback(async (slotId: SaveSlotId) => {
     const database = databaseRef.current;
@@ -213,6 +252,7 @@ export function useWorldSave(): WorldSaveController {
     await writeActiveSlot(database, slotId);
     activeSlotRef.current = slotId;
     sessionRef.current = loaded;
+    lastPersistedSessionRef.current = loaded;
     setSessionState(loaded);
     setState((current) => ({ ...current, activeSlotId: slotId }));
     await refreshMetadata(database);
@@ -225,6 +265,7 @@ export function useWorldSave(): WorldSaveController {
     await saveSession(database, slotId, fresh);
     if (slotId === activeSlotRef.current) {
       sessionRef.current = fresh;
+      lastPersistedSessionRef.current = fresh;
       setSessionState(fresh);
     }
     await refreshMetadata(database, new Date().toISOString());
@@ -238,6 +279,7 @@ export function useWorldSave(): WorldSaveController {
       const fresh = createWorldSession(createSeedForSlot(slotId));
       await saveSession(database, slotId, fresh);
       sessionRef.current = fresh;
+      lastPersistedSessionRef.current = fresh;
       setSessionState(fresh);
     }
     await refreshMetadata(database);

@@ -62,8 +62,32 @@ const CARGO = [
   { name: "unregistered sealed parcel", cargoClass: "sealed" as const, weight: [1.0, 6.5], base: 112 }
 ] as const;
 
-function eligibleLocations(locations: LocationState[]): LocationState[] {
-  return locations.filter((location) => location.type !== "housing" && location.open);
+function locationOpenAt(location: LocationState, timestamp: number): boolean {
+  if (!location.open) return false;
+  const hour = new Date(timestamp).getUTCHours();
+  const openHour = location.openHour ?? 0;
+  const closeHour = location.closeHour ?? 24;
+  if (openHour === closeHour) return true;
+  if (openHour < closeHour) return hour >= openHour && hour < closeHour;
+  return hour >= openHour || hour < closeHour;
+}
+
+function minutesUntilClose(location: LocationState, timestamp: number): number {
+  const openHour = location.openHour ?? 0;
+  const closeHour = location.closeHour ?? 24;
+  if (openHour === closeHour) return Number.POSITIVE_INFINITY;
+  if (!locationOpenAt(location, timestamp)) return 0;
+  const date = new Date(timestamp);
+  const minuteOfDay = date.getUTCHours() * 60 + date.getUTCMinutes();
+  let closeMinute = closeHour * 60;
+  if (closeMinute <= minuteOfDay) closeMinute += 24 * 60;
+  return Math.max(0, closeMinute - minuteOfDay);
+}
+
+function eligibleLocations(locations: LocationState[], timestamp: number, minimumWindowMinutes = 90): LocationState[] {
+  return locations.filter((location) => location.type !== "housing"
+    && locationOpenAt(location, timestamp)
+    && minutesUntilClose(location, timestamp) >= minimumWindowMinutes);
 }
 
 function requestFor(person: PersonState, cargoClass: CourierOrder["cargoClass"]): string {
@@ -79,10 +103,20 @@ function requestFor(person: PersonState, cargoClass: CourierOrder["cargoClass"])
 }
 
 function chooseDropoff(person: PersonState, locations: LocationState[], fallback: LocationState): LocationState {
-  return locations.find((location) => location.id === person.currentLocationId)
-    ?? locations.find((location) => location.id === person.workLocationId)
-    ?? locations.find((location) => location.id === person.homeLocationId)
+  const eligibleIds = new Set(locations.map((location) => location.id));
+  return locations.find((location) => location.id === person.currentLocationId && eligibleIds.has(location.id))
+    ?? locations.find((location) => location.id === person.workLocationId && eligibleIds.has(location.id))
+    ?? locations.find((location) => location.id === person.homeLocationId && eligibleIds.has(location.id))
     ?? fallback;
+}
+
+function feasibleDeadlineMinutes(pickup: LocationState, dropoff: LocationState, rng: SeededRandom): number {
+  // The board does not know which transport the player will use. Use a conservative
+  // city-scale budget that includes reaching pickup, hand-off time and disruption.
+  const sameDistrict = pickup.districtId === dropoff.districtId;
+  const travelBudget = sameDistrict ? 110 : 280;
+  const handlingAndRisk = 30 + rng.integer(20, 70);
+  return travelBudget + handlingAndRisk;
 }
 
 function cargoForSupplyClass(supplyClass: BusinessState["supplyClass"]) {
@@ -106,7 +140,7 @@ function createBoard(
   businesses: BusinessState[],
   generation: number
 ): CourierOrder[] {
-  const candidates = eligibleLocations(locations);
+  const candidates = eligibleLocations(locations, timestamp);
   const livingPeople = people.filter((person) => (person.lifeStatus ?? "alive") === "alive");
   if (candidates.length < 2 || !livingPeople.length) return [];
   const rng = new SeededRandom(`${seed}:courier-board:${generation}`);
@@ -132,7 +166,7 @@ function createBoard(
       : cargo.cargoClass === "medical" && rng.chance(0.2) ? "restricted" : "legal";
     const weightKg = Math.round((cargo.weight[0] + rng.next() * (cargo.weight[1] - cargo.weight[0])) * 10) / 10;
     const problemPressure = Math.round(client.problem.severity / 10);
-    const durationMinutes = rng.integer(48, 150);
+    const durationMinutes = feasibleDeadlineMinutes(pickup, dropoff, rng);
     const supplyUrgency = business ? Math.max(0, Math.round((55 - business.stock) * 0.9)) : 0;
     const payout = cargo.base + Math.round(weightKg * 5) + (risk === "high" ? 52 : risk === "medium" ? 24 : 0) + problemPressure + supplyUrgency;
     const code = `DLV-${generation.toString().padStart(2, "0")}${rng.integer(100, 999)}`;

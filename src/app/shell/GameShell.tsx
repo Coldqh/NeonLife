@@ -14,7 +14,7 @@ interface GameShellProps {
   notice?: ReactNode;
 }
 
-const SCREEN_ORDER: GameScreen[] = ["profile", "map", "nearby"];
+const SCREEN_ORDER: GameScreen[] = ["map", "nearby", "life", "work", "profile"];
 
 interface SwipeStart {
   pointerId: number;
@@ -47,6 +47,7 @@ export function GameShell({ session, screen, onScreenChange, onSettings, childre
     const dy = event.clientY - start.y;
     if (Math.abs(dx) < 72 || Math.abs(dx) < Math.abs(dy) * 1.35) return;
     const currentIndex = SCREEN_ORDER.indexOf(screen);
+    if (currentIndex < 0) return;
     const nextIndex = dx < 0 ? currentIndex + 1 : currentIndex - 1;
     const next = SCREEN_ORDER[nextIndex];
     if (next) onScreenChange(next);

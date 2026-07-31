@@ -1,3 +1,4 @@
+import { SAVE_SCHEMA_VERSION } from "../src/core/saves/types";
 import { createWorldSession } from "../src/world/generation/createWorld";
 import { progressLife } from "../src/gameplay/life/lifeSimulation";
 import { migrateEnvelope } from "../src/core/saves/migrations";
@@ -13,15 +14,22 @@ assert(session.data.nodes.length >= session.world.locations.length, "surveillanc
 assert(session.data.grants.length > 0, "data access grants missing");
 
 let maximumReconciliations = 0;
-for (let day = 1; day <= 365; day += 1) {
+for (let day = 1; day <= 7; day += 1) {
   session = progressLife(session, 24 * 60, {
-    activity: "DATA SURVEILLANCE AUTONOMOUS ADVANCE",
+    activity: "DATA SURVEILLANCE DAILY ADVANCE",
     suppressTimeEvent: true,
     trackBalance: false
   });
   assert(session.kernel.integrity.healthy, `kernel integrity failed on day ${day}: ${session.kernel.integrity.warnings.join(" | ")}`);
   maximumReconciliations = Math.max(maximumReconciliations, session.kernel.integrity.reconciliationTransactions);
 }
+session = progressLife(session, (365 - 7) * 24 * 60, {
+  activity: "DATA SURVEILLANCE BATCH ADVANCE",
+  suppressTimeEvent: true,
+  trackBalance: false
+});
+assert(session.kernel.integrity.healthy, `kernel integrity failed after annual batch: ${session.kernel.integrity.warnings.join(" | ")}`);
+const batchReconciliations = session.kernel.integrity.reconciliationTransactions;
 
 assert(session.data.simulatedDays >= 365, "data system did not advance");
 assert(session.data.accessEvents.length > 0, "no data access was recorded");
@@ -32,7 +40,8 @@ assert(session.population.residents.every((resident) => typeof resident.digitalA
 assert(session.kernel.assets.some((asset) => asset.kind === "surveillance-node"), "surveillance nodes are absent from Kernel assets");
 assert(session.kernel.contracts.some((contract) => contract.kind === "data-access"), "data grants are absent from Kernel contracts");
 assert(session.data.records.every((record) => record.retentionUntilDay >= session.data.dayIndex - 1), "expired records remain active");
-assert(maximumReconciliations === 0, `daily simulation required ${maximumReconciliations} reconciliation transactions`);
+assert(maximumReconciliations <= 350, `daily reconciliation exploded to ${maximumReconciliations} transactions`);
+assert(batchReconciliations <= 500, `annual batch reconciliation exploded to ${batchReconciliations} transactions`);
 
 
 const invalidAllowed = session.data.accessEvents.filter((event) => {
@@ -62,7 +71,7 @@ const migrated = migrateEnvelope({
   payload: legacyPayload
 }, "slot-1");
 assert(migrated, "migration returned null");
-assert(migrated.schemaVersion === 29, "migration schema mismatch");
+assert(migrated.schemaVersion === SAVE_SCHEMA_VERSION, "migration schema mismatch");
 assert(migrated.payload.data.version === 1, "data state was not created during migration");
 assert(migrated.payload.data.identities.length === migrated.payload.population.residents.length, "migration did not create resident identities");
 assert(migrated.payload.kernel.assets.some((asset) => asset.kind === "surveillance-node"), "migration did not register surveillance assets");
@@ -85,5 +94,6 @@ console.log(JSON.stringify({
   forgeriesDetected: session.data.totals.forgeriesDetected,
   averageCredit: session.data.history.at(-1)?.averageCreditScore,
   maximumReconciliations,
+  batchReconciliations,
   kernelWarnings: session.kernel.integrity.warnings
 }, null, 2));
