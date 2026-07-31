@@ -3,6 +3,7 @@ import { SeededRandom } from "../../core/random/seededRandom";
 import type { BusinessState, BusinessStatus, LocalEconomyState } from "../../gameplay/economy/types";
 import type { FoodState } from "../../gameplay/food/foodSystem";
 import { FOOD_CATALOG, getFoodProduct } from "../../data/products/foodCatalog";
+import { getProduct } from "../../data/products/productCatalog";
 import type { HumanNetworkState, PersonState } from "../../people/network/types";
 import type { DistrictState, LocationState, OrganizationState } from "../../world/state/types";
 import { advanceLaborMarketDay, createLaborMarketState } from "../labor/laborMarket";
@@ -768,15 +769,15 @@ export function advancePopulation(
       const consumed = consumePantry(household.pantry, dailyFoodNeed);
       household.pantry = consumed.pantry;
       for (const item of consumed.items) inventoryCommands.push({ kind: "consume", householdId: household.id, productId: item.productId, quantity: item.units, timestamp: dayIndex * DAY_MS });
-      if (consumed.consumed > 0) transactions.push({
-        idempotencyKey: `${seed}:day:${dayIndex}:food-consumed-stock:${household.id}`,
+      for (const item of consumed.items) transactions.push({
+        idempotencyKey: `${seed}:day:${dayIndex}:food-consumed-stock:${household.id}:${item.productId}`,
         timestamp: dayIndex * DAY_MS,
         debitEntityId: household.id,
         creditEntityId: kernelSystemEntityId(seed, "consumption"),
-        resource: "food-units",
-        amount: consumed.consumed,
+        resource: getProduct(item.productId).legacyResource === "medical-units" ? "medical-units" : "food-units",
+        amount: item.units,
         reason: "inventory-transfer",
-        description: `Household daily food consumption.`
+        description: `${item.productId} consumed from household pantry.`
       });
       let unmet = dailyFoodNeed - consumed.consumed;
       let purchases: HouseholdDailyLedger["purchases"] = [];
@@ -793,20 +794,21 @@ export function advancePopulation(
         household.pantry = afterPurchase.pantry;
         for (const item of afterPurchase.items) inventoryCommands.push({ kind: "consume", householdId: household.id, productId: item.productId, quantity: item.units, timestamp: dayIndex * DAY_MS });
         unmet -= afterPurchase.consumed;
-        if (afterPurchase.consumed > 0) transactions.push({
-          idempotencyKey: `${seed}:day:${dayIndex}:food-consumed-purchase:${household.id}`,
+        for (const item of afterPurchase.items) transactions.push({
+          idempotencyKey: `${seed}:day:${dayIndex}:food-consumed-purchase:${household.id}:${item.productId}`,
           timestamp: dayIndex * DAY_MS,
           debitEntityId: household.id,
           creditEntityId: kernelSystemEntityId(seed, "consumption"),
-          resource: "food-units",
-          amount: afterPurchase.consumed,
+          resource: getProduct(item.productId).legacyResource === "medical-units" ? "medical-units" : "food-units",
+          amount: item.units,
           reason: "inventory-transfer",
-          description: `Freshly purchased food consumed by household.`
+          description: `${item.productId} consumed after household purchase.`
         });
       }
       for (const purchase of purchases) {
         const seller = businessForLocation(businesses, purchase.locationId);
         const sellerId = seller?.id ?? kernelSystemEntityId(seed, "wholesale");
+        const inventoryResource = getProduct(purchase.productId).legacyResource === "medical-units" ? "medical-units" : "food-units";
         transactions.push({
           idempotencyKey: `${seed}:day:${dayIndex}:food-credit:${household.id}:${purchase.locationId}:${purchase.productId}`,
           timestamp: dayIndex * DAY_MS,
@@ -823,7 +825,7 @@ export function advancePopulation(
           timestamp: dayIndex * DAY_MS,
           debitEntityId: sellerId,
           creditEntityId: household.id,
-          resource: "food-units",
+          resource: inventoryResource,
           amount: purchase.units,
           unitValue: purchase.units ? purchase.paid / purchase.units : 0,
           reason: "inventory-transfer",

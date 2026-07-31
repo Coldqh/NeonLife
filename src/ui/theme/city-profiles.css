@@ -258,3 +258,29 @@
 .building-profile__venues article strong { display: block; color: #f4f7fb; font-size: 11px; }
 .building-profile__venues article small { color: var(--nl-muted); font-size: 9px; }
 @media (max-width: 640px) { .generated-venue__address, .building-profile__venues > div { grid-template-columns: 1fr; } }
+
+/* v0.48.1 — truthful profiles and single-context actions */
+.map-profile__hero { min-height: 280px; }
+.map-profile__hero-copy h2 { max-width: 86%; font-size: clamp(30px, 4.5vw, 52px); letter-spacing: -.015em; }
+.map-profile__content { gap: 12px; padding-top: 16px; }
+.building-profile__unit-grid { grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); align-content: start; }
+.building-profile__unit-grid > div { position: relative; min-height: 58px; justify-items: start; align-content: center; padding: 8px 10px; }
+.building-profile__unit-grid > div small { color: var(--nl-muted); font-size: 8px; line-height: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.building-profile__unit-grid > div b { position: absolute; right: 7px; top: 7px; }
+.building-profile__floor-empty { grid-column: 1 / -1; margin: 0; padding: 18px; border: 1px dashed rgba(139, 157, 184, .18); color: var(--nl-muted); font-size: 11px; line-height: 17px; }
+.building-profile__floor-detail dl div:first-child { grid-column: span 1; }
+.map-profile__footer { grid-template-columns: minmax(0, 1fr); }
+.map-profile__footer button { width: 100%; }
+.map-profile__footer .map-profile__blocked { border-color: rgba(255, 170, 55, .28); background: rgba(255, 170, 55, .07); color: #ffc36b; }
+.building-profile__venues > div > button { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px; min-height: 56px; padding: 10px 34px 10px 11px; border: 1px solid rgba(130,149,178,.14); background: rgba(8,15,24,.82); color: var(--nl-text); text-align: left; }
+.building-profile__venues > div > button:hover { border-color: rgba(255, 77, 101, .38); background: rgba(255, 48, 77, .08); }
+.building-profile__venues > div > button strong { display: block; min-width: 0; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.building-profile__venues > div > button small { grid-column: 1; color: var(--nl-muted); font-size: 9px; }
+.building-profile__venues > div > button b { position: absolute; right: 12px; top: 50%; color: var(--nl-accent); transform: translateY(-50%); }
+@media (max-width: 720px) {
+  .map-profile__hero { min-height: 240px; }
+  .map-profile__hero-copy h2 { max-width: 100%; font-size: 30px; }
+  .building-profile__unit-grid { grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); }
+  .map-profile__footer { grid-template-columns: 1fr; }
+  .map-profile__footer button:last-child { display: block; }
+}

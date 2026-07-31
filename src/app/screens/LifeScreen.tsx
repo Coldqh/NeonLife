@@ -90,11 +90,13 @@ function conditionTone(kind: "health" | "hunger" | "fatigue" | "stress", value: 
 export function LifeScreen({ session, onOpen }: { session: GameSession; onOpen: (screen: GameScreen) => void }) {
   const priority = priorityFor(session);
   const condition = session.player.condition;
-  const obligations = activeObligations(session.pressure).slice(0, 4);
-  const requests = activeRequests(session.pressure).slice(0, 3);
+  const allObligations = activeObligations(session.pressure);
+  const allRequests = activeRequests(session.pressure);
+  const obligations = allObligations.slice(0, 4);
+  const requests = allRequests.slice(0, 3);
   const activeOrder = getActiveCourierOrder(session.jobs.courier);
   const contract = session.jobs.work.contracts.find((item) => item.id === session.jobs.work.activeContractId);
-  const latestEvents = session.events.filter((event) => event.importance >= 2).slice(0, 4);
+  const latestEvents = session.events.filter((event) => event.importance >= 2).slice().sort((left, right) => right.timestamp - left.timestamp).slice(0, 4);
 
   const metrics = [
     { key: "health" as const, label: "Здоровье", value: condition.health, display: `${percent(condition.health)}%` },
@@ -127,7 +129,7 @@ export function LifeScreen({ session, onOpen }: { session: GameSession; onOpen: 
 
       <div className="life-grid">
         <section className="life-panel">
-          <header><div><span>СРОКИ</span><h2>Обязательства</h2></div><strong>{obligations.length}</strong></header>
+          <header><div><span>СРОКИ</span><h2>Обязательства</h2></div><strong>{allObligations.length}</strong></header>
           <div className="life-list">
             {obligations.map((obligation) => (
               <article key={obligation.id} className={obligation.status !== "active" ? "is-danger" : ""}>
@@ -137,7 +139,7 @@ export function LifeScreen({ session, onOpen }: { session: GameSession; onOpen: 
             ))}
             {!obligations.length ? <p>Активных платежей нет.</p> : null}
           </div>
-          {obligations.length ? <button type="button" onClick={() => onOpen("nearby")}>Открыть оплату</button> : null}
+          {obligations.length && priority.screen !== "nearby" ? <button type="button" onClick={() => onOpen("nearby")}>Открыть оплату</button> : obligations.length ? <p className="life-panel__current">Открыто в главной цели</p> : null}
         </section>
 
         <section className="life-panel">
@@ -149,11 +151,11 @@ export function LifeScreen({ session, onOpen }: { session: GameSession; onOpen: 
               <p>₵ {contract.wagePerHour}/ч · предупреждения {contract.warningCount}/3</p>
             </div>
           ) : <p className="life-empty">Постоянного работодателя нет.</p>}
-          <button type="button" onClick={() => onOpen("work")}>{contract ? "Открыть контракт" : "Найти работу"}</button>
+          {priority.screen !== "work" ? <button type="button" onClick={() => onOpen("work")}>{contract ? "Открыть контракт" : "Найти работу"}</button> : <p className="life-panel__current">Открыто в главной цели</p>}
         </section>
 
         <section className="life-panel">
-          <header><div><span>ЗАДАЧА</span><h2>Курьер</h2></div><strong>{session.jobs.courier.rating}%</strong></header>
+          <header><div><span>ЗАДАЧА</span><h2>Курьер</h2></div><strong>{Math.round(session.jobs.courier.rating)}%</strong></header>
           {activeOrder ? (
             <div className="life-focus">
               <strong>{activeOrder.code}</strong>
@@ -161,16 +163,16 @@ export function LifeScreen({ session, onOpen }: { session: GameSession; onOpen: 
               <p>₵ {activeOrder.payout} · срок {formatGameShortDateTime(activeOrder.deadlineAt)}</p>
             </div>
           ) : <p className="life-empty">Активного заказа нет.</p>}
-          <button type="button" onClick={() => onOpen(activeOrder ? "map" : "nearby")}>{activeOrder ? "Продолжить маршрут" : "Открыть диспетчерскую"}</button>
+          {priority.screen !== (activeOrder ? "map" : "nearby") ? <button type="button" onClick={() => onOpen(activeOrder ? "map" : "nearby")}>{activeOrder ? "Продолжить маршрут" : "Открыть диспетчерскую"}</button> : <p className="life-panel__current">Открыто в главной цели</p>}
         </section>
 
         <section className="life-panel">
-          <header><div><span>ЛЮДИ</span><h2>Просьбы</h2></div><strong>{requests.length}</strong></header>
+          <header><div><span>ЛЮДИ</span><h2>Просьбы</h2></div><strong>{allRequests.length}</strong></header>
           <div className="life-list">
             {requests.map((request) => <article key={request.id}><div><strong>{request.title}</strong><span>{formatGameShortDateTime(request.dueAt)} · {request.status}</span></div><em>₵ {request.reward}</em></article>)}
             {!requests.length ? <p>Никто ничего не ждёт.</p> : null}
           </div>
-          <button type="button" onClick={() => onOpen("nearby")}>Открыть людей рядом</button>
+          {priority.screen !== "nearby" ? <button type="button" onClick={() => onOpen("nearby")}>Открыть людей рядом</button> : <p className="life-panel__current">Открыто в главной цели</p>}
         </section>
       </div>
 

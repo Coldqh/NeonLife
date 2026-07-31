@@ -1,4 +1,5 @@
 import { createStableEntityId } from "../../core/ids/entityId";
+import { getProduct } from "../../data/products/productCatalog";
 import type { PlayerState } from "../../gameplay/player/demoPlayer";
 import type { FoodState } from "../../gameplay/food/foodSystem";
 import type { BusinessState, LocalEconomyState, SupplyClass } from "../../gameplay/economy/types";
@@ -143,6 +144,23 @@ function resourceForProduction(resource: ProductionResource): KernelResource {
   return "packaging-units";
 }
 
+function inventoryBalancesFor(input: KernelSyncInput, ownerEntityId: string): KernelResourceBalance[] {
+  if (!input.productInventory) return [];
+  const totals = new Map<KernelResource, number>();
+  for (const inventory of input.productInventory.inventories) {
+    if (inventory.ownerEntityId !== ownerEntityId) continue;
+    for (const stack of inventory.stacks) {
+      if (stack.status !== "available" || (stack.expiresAt !== undefined && stack.expiresAt <= input.timestamp)) continue;
+      const quantity = Math.max(0, stack.quantity - stack.reservedQuantity);
+      if (quantity <= 0) continue;
+      const legacyResource = getProduct(stack.productId).legacyResource ?? "mixed-units";
+      const resource = resourceForProduction(legacyResource);
+      totals.set(resource, (totals.get(resource) ?? 0) + quantity);
+    }
+  }
+  return [...totals.entries()].map(([resource, amount]) => balance(resource, amount));
+}
+
 function getBalance(account: KernelAccountState, resource: KernelResource): number {
   return account.balances.find((entry) => entry.resource === resource)?.amount ?? 0;
 }
@@ -173,7 +191,7 @@ function account(entityId: string, entityKind: KernelEntityKind, balances: Kerne
 
 function snapshotAccounts(input: KernelSyncInput): KernelAccountState[] {
   const accounts: KernelAccountState[] = [
-    account(input.player.id, "player", [balance("credits", input.player.balance)], input.timestamp),
+    account(input.player.id, "player", [balance("credits", input.player.balance), ...inventoryBalancesFor(input, input.player.id)], input.timestamp),
     account(input.city.id, "city", [], input.timestamp)
   ];
 
@@ -188,8 +206,9 @@ function snapshotAccounts(input: KernelSyncInput): KernelAccountState[] {
   for (const district of input.districts) accounts.push(account(district.id, "district", [], input.timestamp));
   for (const location of input.locations) accounts.push(account(location.id, "location", [], input.timestamp));
   for (const business of input.economy.businesses) {
-    const balances = [balance("credits", business.cash)];
-    if (business.supplyClass === "food") {
+    const physicalBalances = inventoryBalancesFor(input, business.id);
+    const balances = [balance("credits", business.cash), ...physicalBalances];
+    if (!physicalBalances.length && business.supplyClass === "food") {
       const shopStock = input.food.shopStocks[business.locationId];
       const physicalFoodUnits = shopStock ? Object.values(shopStock).reduce((sum, units) => sum + units, 0) : 0;
       balances.push(balance("food-units", physicalFoodUnits));
@@ -197,8 +216,9 @@ function snapshotAccounts(input: KernelSyncInput): KernelAccountState[] {
     accounts.push(account(business.id, "business", balances, input.timestamp));
   }
   for (const business of input.worldCore?.businesses ?? []) {
-    const balances = [balance("credits", business.cash)];
-    if (business.stockUnits > 0) balances.push(balance(resourceForSupply(business.supplyClass), business.stockUnits));
+    const physicalBalances = inventoryBalancesFor(input, business.id);
+    const balances = [balance("credits", business.cash), ...physicalBalances];
+    if (!physicalBalances.length && business.stockUnits > 0) balances.push(balance(resourceForSupply(business.supplyClass), business.stockUnits));
     accounts.push(account(business.id, "business", balances, input.timestamp));
   }
   for (const facility of input.production.facilities) {
@@ -214,9 +234,10 @@ function snapshotAccounts(input: KernelSyncInput): KernelAccountState[] {
     ], input.timestamp));
   }
   for (const household of input.population.households) {
+    const physicalBalances = inventoryBalancesFor(input, household.id);
     accounts.push(account(household.id, "household", [
       balance("credits", household.balance),
-      balance("food-units", household.pantry.reduce((sum, item) => sum + item.units, 0))
+      ...(physicalBalances.length ? physicalBalances : [balance("food-units", household.pantry.reduce((sum, item) => sum + item.units, 0))])
     ], input.timestamp));
   }
   for (const resident of input.population.residents) {
@@ -909,9 +930,7 @@ function transactionFromDraft(draft: KernelTransactionDraft): KernelTransactionS
 }
 
 function sanitizeAccountToSnapshot(current: KernelAccountState, target: KernelAccountState, timestamp: number): KernelAccountState {
-  const trackedResources = new Set(target.balances.map((entry) => entry.resource));
-  const balances = current.balances.filter((entry) => trackedResources.has(entry.resource));
-  return { ...current, entityKind: target.entityKind, balances, updatedAt: timestamp };
+  return { ...current, entityKind: target.entityKind, balances: current.balances.map((entry) => ({ ...entry })), updatedAt: timestamp };
 }
 
 function reconcileAccounts(
@@ -943,25 +962,20 @@ function reconcileAccounts(
 
     const current = sanitizeAccountToSnapshot(nextAccounts[index], target, input.timestamp);
     nextAccounts[index] = current;
-    const desiredBalances = new Map(target.balances.map((entry) => [entry.resource, entry.amount]));
-    const resources = new Set([...target.balances.map((entry) => entry.resource), ...current.balances.map((entry) => entry.resource)]);
-    for (const resource of resources) {
-      const desiredAmount = desiredBalances.get(resource) ?? 0;
-      const actual = getBalance(current, resource);
-      const resourceWasUntracked = !current.balances.some((entry) => entry.resource === resource);
-      const difference = Math.round((desiredAmount - actual) * 100) / 100;
-      if (Math.abs(difference) < 0.02) continue;
+    for (const targetBalance of target.balances) {
+      const resourceWasUntracked = !current.balances.some((entry) => entry.resource === targetBalance.resource);
+      if (!accountWasMissing && !resourceWasUntracked) continue;
+      const openingAmount = Math.round(targetBalance.amount * 100) / 100;
+      if (Math.abs(openingAmount) < 0.02) continue;
       const transaction = transactionFromDraft({
-        idempotencyKey: `${input.seed}:reconcile:${input.timestamp}:${target.entityId}:${resource}:${difference}`,
+        idempotencyKey: `${input.seed}:account-opening:${input.timestamp}:${target.entityId}:${targetBalance.resource}:${openingAmount}`,
         timestamp: input.timestamp,
-        debitEntityId: difference > 0 ? clearing : target.entityId,
-        creditEntityId: difference > 0 ? target.entityId : clearing,
-        resource,
-        amount: Math.abs(difference),
-        reason: accountWasMissing || resourceWasUntracked ? "account-opening" : "domain-reconciliation",
-        description: accountWasMissing || resourceWasUntracked
-          ? `Opened ${target.entityKind} account resource from authoritative domain state.`
-          : `Reconciled ${target.entityKind} state with simulation ledger.`
+        debitEntityId: openingAmount > 0 ? clearing : target.entityId,
+        creditEntityId: openingAmount > 0 ? target.entityId : clearing,
+        resource: targetBalance.resource,
+        amount: Math.abs(openingAmount),
+        reason: "account-opening",
+        description: `Opened ${target.entityKind} account resource from authoritative domain state.`
       });
       if (existingIds.has(transaction.id)) continue;
       existingIds.add(transaction.id);
@@ -986,7 +1000,7 @@ function reconcileAccounts(
         creditEntityId: balance.amount > 0 ? clearing : stale.entityId,
         resource: balance.resource,
         amount: Math.abs(balance.amount),
-        reason: "domain-reconciliation",
+        reason: "migration-settlement",
         description: `Settled archived ${stale.entityKind} account after entity left active simulation.`
       });
       if (existingIds.has(transaction.id)) continue;
