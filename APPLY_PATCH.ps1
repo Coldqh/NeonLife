@@ -21,8 +21,8 @@ if (-not (Test-Path $Manifest)) {
 }
 
 $packageJson = Get-Content (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json
-if ($packageJson.version -ne "0.43.0") {
-  Write-Warning "Expected base version 0.43.0, found $($packageJson.version)."
+if ($packageJson.version -ne "0.44.0") {
+  Write-Warning "Expected base version 0.44.0, found $($packageJson.version)."
 }
 
 $files = Get-Content $Manifest | Where-Object {
@@ -44,11 +44,11 @@ foreach ($relativePath in $files) {
 }
 
 $updatedPackage = Get-Content (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json
-if ($updatedPackage.version -ne "0.44.0") {
-  throw "Patch copied, but package.json version is $($updatedPackage.version), expected 0.44.0"
+if ($updatedPackage.version -ne "0.45.0") {
+  throw "Patch copied, but package.json version is $($updatedPackage.version), expected 0.45.0"
 }
 
-Write-Host "NEON LIFE v0.44.0 UNIFIED BUSINESS ECONOMY applied successfully." -ForegroundColor Green
+Write-Host "NEON LIFE v0.45.0 SIMULATION PIPELINE RECOVERY applied successfully." -ForegroundColor Green
 
 if ($RunChecks) {
   Push-Location $ProjectRoot

@@ -11,7 +11,8 @@ import {
   seedCanonicalInventories
 } from "../inventory/inventorySystem";
 import type { InventoryState, ProductBatchState, ProductInventoryState, ProductTransferState } from "../inventory/types";
-import type { KernelAccountState, KernelTransactionDraft, SimulationKernelState } from "../kernel/types";
+import { kernelSystemEntityId } from "../kernel/simulationKernel";
+import type { KernelAccountState, KernelResource, KernelTransactionDraft, SimulationKernelState } from "../kernel/types";
 import { indexCitywideVenues } from "../urban/urbanSystem";
 import type { VenueCategory, VenueOperatingStatus, VenueState } from "../urban/types";
 import type { WorldCoreBusinessState, WorldCoreBusinessStatus, WorldCoreState } from "../worldCore/types";
@@ -488,10 +489,28 @@ function attractiveness(business: UnifiedBusinessState): number {
   return Math.max(.01, (business.reputation * .45 + business.quality * .35 + business.demandScore * .2) * priceFactor * staffFactor * stockFactor * licenseFactor);
 }
 
+function creditAmount(value: number): number {
+  return Math.max(0, Math.round(value));
+}
+
 function draft(timestamp: number, key: string, debitEntityId: string, creditEntityId: string, amount: number, reason: KernelTransactionDraft["reason"], description: string): KernelTransactionDraft | null {
-  const rounded = Math.max(0, Math.round(amount));
+  const rounded = creditAmount(amount);
   if (!rounded) return null;
   return { idempotencyKey: key, timestamp, debitEntityId, creditEntityId, resource: "credits", amount: rounded, reason, description };
+}
+
+function resourceDraft(timestamp: number, key: string, debitEntityId: string, creditEntityId: string, resource: KernelResource, amount: number, description: string): KernelTransactionDraft | null {
+  const rounded = Math.max(0, Math.round(amount * 100) / 100);
+  if (!rounded) return null;
+  return { idempotencyKey: key, timestamp, debitEntityId, creditEntityId, resource, amount: rounded, reason: "inventory-transfer", description };
+}
+
+function inventoryResource(category: UnifiedBusinessState["category"]): KernelResource {
+  if (["convenience", "food", "bar", "market", "hotel"].includes(category)) return "food-units";
+  if (["clinic", "pharmacy", "cyberware"].includes(category)) return "medical-units";
+  if (["repair", "transport", "logistics"].includes(category)) return "parts-units";
+  if (["office-service", "corporate", "education", "government"].includes(category)) return "document-units";
+  return "mixed-units";
 }
 
 function utilityProvider(input: BusinessEconomyInput, districtId: string): string {
@@ -724,6 +743,7 @@ function simulateDay(
       let units = 0;
       let grossRevenue = 0;
       let inventoryCost = 0;
+      let inventoryUnitsSold = 0;
       if (SERVICE_CATEGORIES.has(business.category)) {
         const stockFactor = business.category === "clinic" || business.category === "repair" || business.category === "cyberware" ? Math.max(.15, stockAvailability(business) / 100) : 1;
         units = Math.floor(targetUnits * stockFactor);
@@ -732,12 +752,14 @@ function simulateDay(
         if (["clinic", "repair", "cyberware"].includes(business.category) && units > 0) {
           const sold = sellInventory(marketInventory, business, Math.max(1, Math.ceil(units / 5)), timestamp, `consumer-pool:${districtId}`);
           inventoryCost += sold.cost;
+          inventoryUnitsSold += sold.units;
         }
       } else {
         const sold = sellInventory(marketInventory, business, targetUnits, timestamp, `consumer-pool:${districtId}`);
         units = sold.units;
         grossRevenue = sold.revenue;
         inventoryCost = sold.cost;
+        inventoryUnitsSold = sold.units;
       }
       supplied += units;
       unitsSoldTotal += units;
@@ -753,7 +775,10 @@ function simulateDay(
       const debtInterest = Math.round(Math.max(0, business.debt) * .0007);
       const expenses = round(inventoryCost + payroll + dailyRent + utilities + tax + debtInterest);
       const profit = round(grossRevenue - expenses);
-      let cash = round(business.cash + profit);
+      // Cost of goods sold is an accounting expense, not a second cash payment at
+      // the moment of sale. Inventory procurement already moved credits earlier.
+      const cashFlow = round(creditAmount(grossRevenue) - creditAmount(payroll) - creditAmount(dailyRent) - creditAmount(utilities) - creditAmount(tax) - creditAmount(debtInterest));
+      let cash = round(business.cash + cashFlow);
       let debt = business.debt;
       if (cash < -800) {
         debt = round(debt + Math.abs(cash) + 400);
@@ -807,7 +832,9 @@ function simulateDay(
       const rentDraft = draft(timestamp, `${input.seed}:business:${day}:${business.id}:rent`, business.id, business.landlordEntityId, dailyRent, "rent", `${business.name}: premises rent`);
       const utilityDraft = draft(timestamp, `${input.seed}:business:${day}:${business.id}:utilities`, business.id, provider, utilities, "utility-service", `${business.name}: utilities`);
       const taxDraft = draft(timestamp, `${input.seed}:business:${day}:${business.id}:tax`, business.id, input.government.budget.authorityOrganizationId, tax, "tax", `${business.name}: profit tax`);
-      for (const item of [saleDraft, payrollDraft, rentDraft, utilityDraft, taxDraft]) if (item) drafts.push(item);
+      const interestDraft = draft(timestamp, `${input.seed}:business:${day}:${business.id}:interest`, business.id, kernelSystemEntityId(input.seed, "credit-bureau"), debtInterest, "debt-repayment", `${business.name}: debt interest`);
+      const inventoryDraft = resourceDraft(timestamp, `${input.seed}:business:${day}:${business.id}:inventory-consumption`, business.id, kernelSystemEntityId(input.seed, "consumption"), inventoryResource(business.category), inventoryUnitsSold, `${business.name}: inventory sold to represented consumers`);
+      for (const item of [saleDraft, payrollDraft, rentDraft, utilityDraft, taxDraft, interestDraft, inventoryDraft]) if (item) drafts.push(item);
     }
 
     const unmet = Math.max(0, demand - supplied);
@@ -915,7 +942,7 @@ function simulateDay(
     return {
       ...company,
       businessIds: local.map((item) => item.id),
-      treasury: round(Math.max(0, company.treasury - (acquisitionCostByCompany.get(company.id) ?? 0) + local.reduce((sum, item) => sum + Math.max(0, item.profitToday) * .08, 0))),
+      treasury: round(Math.max(0, company.treasury - (acquisitionCostByCompany.get(company.id) ?? 0))),
       debt: round(debt),
       status: activeCount === 0 ? "dissolved" as const : debt > Math.max(20_000, cash * 1.5) ? "insolvent" as const : local.some((item) => item.status === "insolvent") ? "strained" as const : "active" as const,
       dissolvedDay: activeCount === 0 ? day : undefined,

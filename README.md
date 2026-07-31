@@ -1,14 +1,14 @@
-# NEON LIFE 0.44.0 patch
+# NEON LIFE 0.45.0 patch
 
-Патч **Unified Business Economy** устанавливается поверх `0.43.0`.
+Патч **Simulation Pipeline Recovery** устанавливается поверх `0.44.0`.
 
-Это headless-патч логики мира. Он создаёт единую городскую экономику компаний и заведений: постоянный реестр, помещения, аренду, лицензии, конкуренцию, продажи конкретных SKU, расходы, банкротства и поглощения. Новых экранов, карт и игровых кнопок нет.
+Он чинит полуночный каскад симуляции: Kernel больше не выполняет квадратичное копирование тысяч счетов, ежедневные продажи и зарплаты не создают отдельный счёт на каждый бизнес, а бизнес-касса и физический склад проводятся согласованно с ledger. Новых экранов и игровых кнопок нет.
 
-Изменения перечислены в `PATCH_0.44.0.md`. Архив содержит только новые и изменённые файлы.
+Изменения перечислены в `PATCH_0.45.0.md`. Патч-архив содержит только новые и изменённые файлы.
 
 ## Установка
 
-Распакуй архив поверх корня проекта либо запусти:
+Распакуй патч поверх корня проекта либо запусти:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\APPLY_PATCH.ps1 -ProjectRoot C:\NeonLife -RunChecks
@@ -18,10 +18,10 @@ powershell -ExecutionPolicy Bypass -File .\APPLY_PATCH.ps1 -ProjectRoot C:\NeonL
 cd C:\NeonLife
 npm install
 npm run typecheck
+npm run test:integrity
 npm run test:business
 npm run test:world-core
 npm run test:inventory
-npm run test:integrity
 npm run build
 npm run dev
 ```

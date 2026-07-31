@@ -35,7 +35,30 @@ const DAY_MS = 24 * HOUR_MS;
 const WEEK_MS = 7 * DAY_MS;
 const MAX_TRANSACTIONS = 2_000;
 
-export type KernelSystemAccount = "clearing" | "wholesale" | "maintenance" | "credit-bureau" | "housing-authority" | "city-services" | "consumption" | "power-grid" | "water-grid" | "data-grid" | "transport-grid" | "waste-grid" | "logistics-clearing" | "external-trade" | "production-consumption" | "production-output" | "unregistered-market" | "illegal-consumption" | "corrupt-officials";
+export const KERNEL_SYSTEM_ACCOUNTS = [
+  "clearing",
+  "wholesale",
+  "maintenance",
+  "credit-bureau",
+  "housing-authority",
+  "city-services",
+  "consumption",
+  "labor-market",
+  "power-grid",
+  "water-grid",
+  "data-grid",
+  "transport-grid",
+  "waste-grid",
+  "logistics-clearing",
+  "external-trade",
+  "production-consumption",
+  "production-output",
+  "unregistered-market",
+  "illegal-consumption",
+  "corrupt-officials"
+] as const;
+
+export type KernelSystemAccount = typeof KERNEL_SYSTEM_ACCOUNTS[number];
 
 export interface KernelSyncInput {
   timestamp: number;
@@ -202,7 +225,7 @@ function snapshotAccounts(input: KernelSyncInput): KernelAccountState[] {
       balance("credits", housing.maintenanceFund)
     ], input.timestamp));
   }
-  for (const kind of ["clearing", "wholesale", "maintenance", "credit-bureau", "housing-authority", "city-services", "consumption", "power-grid", "water-grid", "data-grid", "transport-grid", "waste-grid", "logistics-clearing", "external-trade", "production-consumption", "production-output", "unregistered-market", "illegal-consumption", "corrupt-officials"] as const) {
+  for (const kind of KERNEL_SYSTEM_ACCOUNTS) {
     accounts.push(account(kernelSystemEntityId(input.seed, kind), "system", [], input.timestamp));
   }
   return dedupeAccounts(accounts);
@@ -799,26 +822,48 @@ function buildContracts(input: KernelSyncInput, previous: KernelContractState[])
   return [...generated, ...ended].slice(-10_000);
 }
 
-function applyTransaction(
-  accounts: KernelAccountState[],
-  transaction: KernelTransactionState,
-  timestamp: number
-): KernelAccountState[] {
-  const next = [...accounts];
-  const ensure = (entityId: string): number => {
-    const existing = next.findIndex((item) => item.entityId === entityId);
-    if (existing >= 0) return existing;
-    next.push(account(entityId, "system", [], timestamp));
-    return next.length - 1;
+function canonicalKernelCounterparty(seed: string, entityId: string): string {
+  if (entityId.startsWith("consumer-pool:")) return kernelSystemEntityId(seed, "consumption");
+  if (entityId.startsWith("workforce-pool:")) return kernelSystemEntityId(seed, "labor-market");
+  return entityId;
+}
+
+function canonicalizeDraft(input: KernelSyncInput, draft: KernelTransactionDraft): KernelTransactionDraft {
+  return {
+    ...draft,
+    debitEntityId: canonicalKernelCounterparty(input.seed, draft.debitEntityId),
+    creditEntityId: canonicalKernelCounterparty(input.seed, draft.creditEntityId)
   };
-  const debitIndex = ensure(transaction.debitEntityId);
-  const creditIndex = ensure(transaction.creditEntityId);
-  next[debitIndex] = setBalance(next[debitIndex], transaction.resource, getBalance(next[debitIndex], transaction.resource) - transaction.amount, timestamp);
-  next[creditIndex] = setBalance(next[creditIndex], transaction.resource, getBalance(next[creditIndex], transaction.resource) + transaction.amount, timestamp);
-  return next;
+}
+
+function compactLegacySyntheticAccounts(accounts: KernelAccountState[], input: KernelSyncInput): KernelAccountState[] {
+  const merged = new Map<string, KernelAccountState>();
+  for (const source of accounts) {
+    const entityId = canonicalKernelCounterparty(input.seed, source.entityId);
+    const existing = merged.get(entityId);
+    if (!existing) {
+      merged.set(entityId, {
+        ...source,
+        id: accountId(entityId),
+        entityId,
+        entityKind: entityId === source.entityId ? source.entityKind : "system",
+        balances: source.balances.map((entry) => ({ ...entry }))
+      });
+      continue;
+    }
+    const balances = new Map(existing.balances.map((entry) => [entry.resource, entry.amount]));
+    for (const entry of source.balances) balances.set(entry.resource, (balances.get(entry.resource) ?? 0) + entry.amount);
+    merged.set(entityId, {
+      ...existing,
+      balances: [...balances.entries()].map(([resource, amount]) => balance(resource, amount)),
+      updatedAt: Math.max(existing.updatedAt, source.updatedAt)
+    });
+  }
+  return [...merged.values()];
 }
 
 function applyTransactionsBatch(accounts: KernelAccountState[], transactions: KernelTransactionState[], timestamp: number): KernelAccountState[] {
+  if (!transactions.length) return accounts;
   const next = accounts.map((item) => ({ ...item, balances: item.balances.map((entry) => ({ ...entry })) }));
   const indexByEntity = new Map(next.map((item, index) => [item.entityId, index]));
   const ensure = (entityId: string): number => {
@@ -862,21 +907,26 @@ function reconcileAccounts(
   let nextAccounts = [...accounts];
   const transactions: KernelTransactionState[] = [];
   const clearing = kernelSystemEntityId(input.seed, "clearing");
-  const protectedSystems = new Set([clearing, kernelSystemEntityId(input.seed, "wholesale"), kernelSystemEntityId(input.seed, "maintenance"), kernelSystemEntityId(input.seed, "credit-bureau"), kernelSystemEntityId(input.seed, "housing-authority"), kernelSystemEntityId(input.seed, "city-services"), kernelSystemEntityId(input.seed, "consumption"), kernelSystemEntityId(input.seed, "power-grid"), kernelSystemEntityId(input.seed, "water-grid"), kernelSystemEntityId(input.seed, "data-grid"), kernelSystemEntityId(input.seed, "transport-grid"), kernelSystemEntityId(input.seed, "waste-grid"), kernelSystemEntityId(input.seed, "logistics-clearing"), kernelSystemEntityId(input.seed, "external-trade"), kernelSystemEntityId(input.seed, "production-consumption"), kernelSystemEntityId(input.seed, "production-output"), kernelSystemEntityId(input.seed, "unregistered-market"), kernelSystemEntityId(input.seed, "illegal-consumption"), kernelSystemEntityId(input.seed, "corrupt-officials")]);
-
+  const protectedSystems = new Set(KERNEL_SYSTEM_ACCOUNTS.map((kind) => kernelSystemEntityId(input.seed, kind)));
+  const accountIndex = new Map(nextAccounts.map((item, index) => [item.entityId, index]));
   const snapshotEntityIds = new Set(snapshot.map((item) => item.entityId));
+
+  // Reconciliation used to perform a full Array.find + Array.map + transaction
+  // application for every account. Opening a city-sized batch of business/company
+  // accounts at a day boundary therefore became quadratic and could stall the game.
+  // Build all adjustments against an indexed snapshot, then apply them in one pass.
   for (const target of snapshot) {
     if (protectedSystems.has(target.entityId)) continue;
-    let current = nextAccounts.find((item) => item.entityId === target.entityId);
-    const accountWasMissing = !current;
-    if (!current) {
-      current = account(target.entityId, target.entityKind, [], input.timestamp);
-      nextAccounts.push(current);
-    } else {
-      const sanitized = sanitizeAccountToSnapshot(current, target, input.timestamp);
-      nextAccounts = nextAccounts.map((item) => item.entityId === target.entityId ? sanitized : item);
-      current = sanitized;
+    let index = accountIndex.get(target.entityId);
+    const accountWasMissing = index === undefined;
+    if (index === undefined) {
+      index = nextAccounts.length;
+      nextAccounts.push(account(target.entityId, target.entityKind, [], input.timestamp));
+      accountIndex.set(target.entityId, index);
     }
+
+    const current = sanitizeAccountToSnapshot(nextAccounts[index], target, input.timestamp);
+    nextAccounts[index] = current;
     const desiredBalances = new Map(target.balances.map((entry) => [entry.resource, entry.amount]));
     const resources = new Set([...target.balances.map((entry) => entry.resource), ...current.balances.map((entry) => entry.resource)]);
     for (const resource of resources) {
@@ -885,9 +935,8 @@ function reconcileAccounts(
       const resourceWasUntracked = !current.balances.some((entry) => entry.resource === resource);
       const difference = Math.round((desiredAmount - actual) * 100) / 100;
       if (Math.abs(difference) < 0.02) continue;
-      const key = `${input.seed}:reconcile:${input.timestamp}:${target.entityId}:${resource}:${difference}`;
       const transaction = transactionFromDraft({
-        idempotencyKey: key,
+        idempotencyKey: `${input.seed}:reconcile:${input.timestamp}:${target.entityId}:${resource}:${difference}`,
         timestamp: input.timestamp,
         debitEntityId: difference > 0 ? clearing : target.entityId,
         creditEntityId: difference > 0 ? target.entityId : clearing,
@@ -900,21 +949,22 @@ function reconcileAccounts(
       });
       if (existingIds.has(transaction.id)) continue;
       existingIds.add(transaction.id);
-      nextAccounts = applyTransaction(nextAccounts, transaction, input.timestamp);
       transactions.push(transaction);
-      current = nextAccounts.find((item) => item.entityId === target.entityId) ?? current;
     }
   }
+  nextAccounts = applyTransactionsBatch(nextAccounts, transactions, input.timestamp);
 
   // Residents and households can leave the detailed simulation through death, migration,
   // household merging or separation. Their historical ledger account remains addressable,
   // but any live balances must be settled back to clearing once the entity disappears
   // from the authoritative domain snapshot.
-  for (const stale of nextAccounts.filter((item) => item.entityKind !== "system" && !snapshotEntityIds.has(item.entityId))) {
-    for (const balance of stale.balances.filter((entry) => Math.abs(entry.amount) >= 0.01)) {
-      const key = `${input.seed}:reconcile-stale:${input.timestamp}:${stale.entityId}:${balance.resource}:${balance.amount}`;
+  const staleTransactions: KernelTransactionState[] = [];
+  for (const stale of nextAccounts) {
+    if (stale.entityKind === "system" || snapshotEntityIds.has(stale.entityId)) continue;
+    for (const balance of stale.balances) {
+      if (Math.abs(balance.amount) < 0.01) continue;
       const transaction = transactionFromDraft({
-        idempotencyKey: key,
+        idempotencyKey: `${input.seed}:reconcile-stale:${input.timestamp}:${stale.entityId}:${balance.resource}:${balance.amount}`,
         timestamp: input.timestamp,
         debitEntityId: balance.amount > 0 ? stale.entityId : clearing,
         creditEntityId: balance.amount > 0 ? clearing : stale.entityId,
@@ -925,9 +975,12 @@ function reconcileAccounts(
       });
       if (existingIds.has(transaction.id)) continue;
       existingIds.add(transaction.id);
-      nextAccounts = applyTransaction(nextAccounts, transaction, input.timestamp);
-      transactions.push(transaction);
+      staleTransactions.push(transaction);
     }
+  }
+  if (staleTransactions.length) {
+    nextAccounts = applyTransactionsBatch(nextAccounts, staleTransactions, input.timestamp);
+    transactions.push(...staleTransactions);
   }
   return { accounts: nextAccounts, transactions };
 }
@@ -1039,12 +1092,12 @@ export function normalizeSimulationKernel(value: unknown, input: KernelSyncInput
 
 export function advanceSimulationKernel(state: SimulationKernelState, input: KernelSyncInput): SimulationKernelState {
   const existingIds = new Set(state.transactions.map((item) => item.id));
-  let accounts = state.accounts.map((item) => ({ ...item, balances: item.balances.map((entry) => ({ ...entry })) }));
+  let accounts = compactLegacySyntheticAccounts(state.accounts, input);
   const newTransactions: KernelTransactionState[] = [];
 
-  for (const draft of input.drafts ?? []) {
-    if (draft.amount <= 0) continue;
-    const transaction = transactionFromDraft(draft);
+  for (const rawDraft of input.drafts ?? []) {
+    if (rawDraft.amount <= 0) continue;
+    const transaction = transactionFromDraft(canonicalizeDraft(input, rawDraft));
     if (existingIds.has(transaction.id)) continue;
     existingIds.add(transaction.id);
     newTransactions.push(transaction);

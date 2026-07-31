@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.45.0 — Simulation Pipeline Recovery
+
+- replaced quadratic per-account Kernel reconciliation with indexed batch settlement;
+- compacted legacy consumer and workforce pseudo-accounts into canonical system accounts;
+- added a canonical labor-market account for aggregated payroll counterparties;
+- stopped education fallback flows from opening ephemeral institution accounts;
+- aligned business cash flow with ledger rounding and removed duplicate cash COGS deduction;
+- added physical inventory-consumption and debt-interest Kernel drafts;
+- removed unsupported daily company-treasury profit creation;
+- extended the integrity regression across midnight with account-leak and reconciliation bounds;
+- made the world-integrity runner use the local TypeScript compiler and added a 60-second hard timeout.
+
 ## 0.44.0 — Unified Business Economy
 
 - added a deterministic citywide registry of businesses that exists independently from map streaming and materialization;

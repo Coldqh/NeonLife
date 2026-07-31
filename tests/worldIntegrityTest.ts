@@ -14,6 +14,7 @@ import {
 } from "../src/gameplay/life/lifeSimulation";
 import { localMovementTargetForPoint } from "../src/simulation/localMovement/localMovementSystem";
 import { getSectorStreetTopology } from "../src/simulation/streets/streetTopologySystem";
+import { kernelSystemEntityId } from "../src/simulation/kernel/simulationKernel";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -65,11 +66,46 @@ assert(leftVehicle.localScene.playerPosition.state === "outside", "player could 
 assert(!leftVehicle.vehicles.player.currentVehicleId, "vehicle state survived exit");
 
 const needsSeed = `${seed}:needs`;
-const oneChunk = progressLife(createWorldSession(needsSeed), 120, { suppressTimeEvent: true });
+const needsCreated = createWorldSession(needsSeed);
+const initialDayIndex = needsCreated.kernel.clock.dayIndex;
+const initialAccountCount = needsCreated.kernel.accounts.length;
+const oneChunk = progressLife(needsCreated, 120, { suppressTimeEvent: true });
 let manyChunks = createWorldSession(needsSeed);
 for (let step = 0; step < 10; step += 1) manyChunks = progressLife(manyChunks, 12, { suppressTimeEvent: true });
+assert(oneChunk.timestamp === manyChunks.timestamp, "simulation timestamp depends on time chunk size");
+assert(oneChunk.kernel.clock.dayIndex === manyChunks.kernel.clock.dayIndex, "kernel day index depends on time chunk size");
+assert(oneChunk.kernel.clock.dayIndex > initialDayIndex, "time regression did not cross a day boundary");
 assert(close(oneChunk.player.condition.fatigue, manyChunks.player.condition.fatigue), "fatigue depends on time chunk size");
 assert(close(oneChunk.player.condition.hunger, manyChunks.player.condition.hunger), "hunger depends on time chunk size");
+assert(oneChunk.kernel.integrity.healthy && manyChunks.kernel.integrity.healthy, "kernel integrity failed after day boundary");
+assert(oneChunk.kernel.accounts.length - initialAccountCount <= 2, "day boundary leaked synthetic kernel accounts");
+assert(manyChunks.kernel.accounts.length - initialAccountCount <= 2, "chunked day boundary leaked synthetic kernel accounts");
+assert(!manyChunks.kernel.accounts.some((account) => account.entityId.startsWith("consumer-pool:") || account.entityId.startsWith("workforce-pool:")), "raw synthetic pool account survived kernel compaction");
+assert(oneChunk.kernel.integrity.reconciliationTransactions <= 50, "day boundary produced excessive domain reconciliation");
+assert(manyChunks.kernel.integrity.reconciliationTransactions <= 50, "chunked day boundary produced excessive domain reconciliation");
+
+const legacyKernelBase = createWorldSession(`${seed}:legacy-kernel`);
+const consumptionId = kernelSystemEntityId(legacyKernelBase.world.meta.seed, "consumption");
+const laborMarketId = kernelSystemEntityId(legacyKernelBase.world.meta.seed, "labor-market");
+const creditBalance = (entityId: string): number => legacyKernelBase.kernel.accounts
+  .find((account) => account.entityId === entityId)?.balances.find((entry) => entry.resource === "credits")?.amount ?? 0;
+const legacyKernelSession = {
+  ...legacyKernelBase,
+  kernel: {
+    ...legacyKernelBase.kernel,
+    accounts: [
+      ...legacyKernelBase.kernel.accounts,
+      { id: "legacy-consumer-account", entityId: "consumer-pool:legacy-district", entityKind: "system" as const, balances: [{ resource: "credits" as const, amount: 75 }], updatedAt: legacyKernelBase.timestamp },
+      { id: "legacy-workforce-account", entityId: "workforce-pool:legacy-business", entityKind: "system" as const, balances: [{ resource: "credits" as const, amount: 125 }], updatedAt: legacyKernelBase.timestamp }
+    ]
+  }
+};
+const compactedLegacyKernel = progressLife(legacyKernelSession, 1, { suppressTimeEvent: true });
+assert(!compactedLegacyKernel.kernel.accounts.some((account) => account.entityId.startsWith("consumer-pool:") || account.entityId.startsWith("workforce-pool:")), "legacy synthetic kernel accounts were not compacted");
+const compactedBalance = (entityId: string): number => compactedLegacyKernel.kernel.accounts
+  .find((account) => account.entityId === entityId)?.balances.find((entry) => entry.resource === "credits")?.amount ?? 0;
+assert(close(compactedBalance(consumptionId), creditBalance(consumptionId) + 75), "legacy consumer balance was lost during compaction");
+assert(close(compactedBalance(laborMarketId), creditBalance(laborMarketId) + 125), "legacy workforce balance was lost during compaction");
 
 const walkingCreated = createWorldSession(`${seed}:walking`);
 const focus = walkingCreated.metropolitan.sectors.find((sector) => sector.id === walkingCreated.localScene.playerPosition.sectorId)
@@ -151,6 +187,9 @@ console.log(JSON.stringify({
   vehicleExit: leftVehicle.localScene.playerPosition.state,
   fatigueAfter120m: oneChunk.player.condition.fatigue,
   hungerAfter120m: oneChunk.player.condition.hunger,
+  dayBoundaryAccounts: manyChunks.kernel.accounts.length,
+  dayBoundaryReconciliations: manyChunks.kernel.integrity.reconciliationTransactions,
+  legacySyntheticAccounts: compactedLegacyKernel.kernel.accounts.filter((account) => account.entityId.startsWith("consumer-pool:") || account.entityId.startsWith("workforce-pool:")).length,
   exactLocationAfterStreetWalk: getPlayerExactLocationId(arrivedAtPoint),
   nextRentCode: nextRent.code,
   loanAmount: personalDebt.amount
