@@ -168,8 +168,8 @@ export function LocalSectorMap({
       });
     });
   }, [buildingById, sector.id, venues]);
-  const venueLimit = camera.zoom < 1.35 ? 14 : camera.zoom < 2.4 ? 30 : 60;
-  const renderedVenues = useMemo(() => positionedVenues
+  const venueLimit = camera.zoom < 1.35 ? 8 : camera.zoom < 2.4 ? 18 : camera.zoom < 3.6 ? 34 : 60;
+  const renderedVenues = useMemo(() => [...positionedVenues]
     .sort((left, right) => Number(selectedKey === `venue:${right.venue.id}`) - Number(selectedKey === `venue:${left.venue.id}`) || right.venue.mapPriority - left.venue.mapPriority)
     .slice(0, venueLimit), [positionedVenues, selectedKey, venueLimit]);
 
@@ -334,7 +334,7 @@ export function LocalSectorMap({
         {locations.map(({ location, placement }) => <g key={location.id} className={`local-map__poi local-map__poi--${location.type}${selectedKey === `location:${location.id}` ? " is-selected" : ""}`} transform={`translate(${toX(placement.bounds.xM + placement.bounds.widthM / 2)} ${toY(placement.bounds.yM + placement.bounds.heightM / 2)})`}><path d="M0-4.5 3.8-2.2 3.8 2.2 0 4.5-3.8 2.2-3.8-2.2z" filter={`url(#map-glow-${sector.id})`}/><text textAnchor="middle" y="1.25">{PLACE_ICONS[location.type]}</text></g>)}
         {renderedVenues.map(({ venue, xM, yM }) => {
           const active = selectedKey === `venue:${venue.id}`;
-          return <g key={venue.id} className={`local-map__venue local-map__venue--${venue.category}${active ? " is-selected" : ""}`} transform={`translate(${toX(xM)} ${toY(yM)})`}><circle className="local-map__venue-halo" r={active ? "5.2" : "4.1"}/><path d="M0-3.7 3.2-1.8 3.2 1.8 0 3.7-3.2 1.8-3.2-1.8z"/><text textAnchor="middle" y="1.1">{VENUE_ICONS[venue.category]}</text>{active || camera.zoom >= 2.2 && venue.mapPriority >= 65 ? <g className="local-map__venue-label"><rect x="-10" y="4.8" width="20" height="4.2" rx="1"/><text textAnchor="middle" y="7.7">{venue.name.slice(0, 20)}</text></g> : null}</g>;
+          return <g key={venue.id} className={`local-map__venue local-map__venue--${venue.category}${active ? " is-selected" : ""}`} transform={`translate(${toX(xM)} ${toY(yM)})`}><circle className="local-map__venue-halo" r={active ? "5.2" : "4.1"}/><path d="M0-3.7 3.2-1.8 3.2 1.8 0 3.7-3.2 1.8-3.2-1.8z"/><text textAnchor="middle" y="1.1">{VENUE_ICONS[venue.category]}</text>{active || camera.zoom >= 3.1 && venue.mapPriority >= 75 ? <g className="local-map__venue-label"><rect x="-10" y="4.8" width="20" height="4.2" rx="1"/><text textAnchor="middle" y="7.7">{venue.name.slice(0, 20)}</text></g> : null}</g>;
         })}
         {camera.zoom >= 3.2 ? (pedestrians.length ? pedestrians : actors.map((actor) => ({ id: actor.id, actorId: actor.id, segmentId: "", xM: actor.position.xM, yM: actor.position.yM, headingDeg: 0, speedMPerMinute: 0, motion: "waiting" as const, sidewalkSide: "left" as const, updatedAt: session.timestamp }))).map((pedestrian) => {
           const actor = actors.find((item) => item.id === pedestrian.actorId) ?? session.localScene.actors.find((item) => item.id === pedestrian.actorId);

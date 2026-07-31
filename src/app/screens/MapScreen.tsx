@@ -440,6 +440,7 @@ export function MapScreen({
           target={target}
           preview={preview}
           travel={travel}
+          routeReady={routeReady}
           favorite={favorite}
           onClose={() => setSelection(null)}
           onDetails={() => selection.kind === "location" || selection.kind === "venue" || selection.kind === "building" ? setProfileOpen(true) : setFlash("Подробный профиль появится после системы контактов")}
