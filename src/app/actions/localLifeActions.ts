@@ -76,7 +76,7 @@ export type LocalLifeAction =
   | { kind: "inspect-vehicle-crime"; vehicleId: string }
   | { kind: "break-in-vehicle"; vehicleId: string }
   | { kind: "hotwire-vehicle"; vehicleId: string }
-  | { kind: "resolve-custody"; method: "pay" | "serve" };
+  | { kind: "resolve-custody"; method: "submit-search" | "resist-search" | "attempt-escape" | "proceed-hearing" | "pay" | "serve" };
 
 export interface LocalLifeCommandResult {
   session: GameSession;
@@ -204,7 +204,15 @@ function rejectionReason(session: GameSession, action: LocalLifeAction): string 
     case "inspect-vehicle-crime": return "Подойди к машине ближе и выйди на улицу";
     case "break-in-vehicle": return "Машина не осмотрена, слишком далеко или уже открыта";
     case "hotwire-vehicle": return "Сначала проникни в машину и займи водительское место";
-    case "resolve-custody": return action.method === "pay" ? "Не хватает денег на штраф" : "Игрок сейчас не задержан";
+    case "resolve-custody": {
+      const custody = session.playerCrime.custody;
+      if (!custody || custody.status !== "detained") return "Игрок сейчас не задержан";
+      if (action.method === "pay") return custody.phase !== "hearing" ? "Сначала пройди обыск и разбор дела" : "Не хватает денег на штраф";
+      if (action.method === "serve") return custody.phase !== "hearing" ? "Сначала пройди обыск и разбор дела" : "Срок сейчас нельзя отбыть";
+      if (action.method === "proceed-hearing") return custody.phase !== "searched" ? "Сначала должен завершиться обыск" : "Разбор дела сейчас недоступен";
+      if (action.method === "submit-search" || action.method === "resist-search") return custody.phase !== "stopped" ? "Обыск уже завершён" : "Действие сейчас недоступно";
+      return custody.escapeAttempted || custody.phase !== "stopped" ? "Побег сейчас невозможен" : "Попытка побега сорвалась";
+    }
   }
 }
 

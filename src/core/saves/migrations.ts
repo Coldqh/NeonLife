@@ -278,6 +278,24 @@ function ensureLocalOperators(
     { scope: "night-kitchen", name: "NIGHT KITCHEN COLLECTIVE", code: "FOOD/COL", type: "independent", budget: 240_000, reputation: 38, employeeCount: 34, locationType: "food", locationName: "NIGHT KITCHEN 14" }
   ];
   let locations = sourceLocations.map((location) => ({ ...location }));
+  const gangDefinitions = [
+    { scope: "red-static", name: "RED STATIC", code: "R/ST", budget: 330_000, reputation: 16, employeeCount: 64 },
+    { scope: "mourning-sons", name: "MOURNING SONS", code: "MS/13", budget: 520_000, reputation: 22, employeeCount: 118 }
+  ];
+  for (const definition of gangDefinitions) {
+    const id = createStableEntityId("org", `${seed}:${definition.scope}`);
+    if (organizations.some((entry) => entry.id === id || entry.code === definition.code)) continue;
+    organizations.push({
+      id,
+      name: definition.name,
+      code: definition.code,
+      type: "gang",
+      budget: definition.budget,
+      reputation: definition.reputation,
+      employeeCount: definition.employeeCount,
+      locationIds: []
+    });
+  }
   for (const definition of definitions) {
     const id = createStableEntityId("org", `${seed}:${definition.scope}`);
     let organization = organizations.find((entry) => entry.id === id);
@@ -726,6 +744,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     streetScene,
     data,
     urban,
+    government,
     districts,
     organizations
   });

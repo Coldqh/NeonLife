@@ -179,10 +179,12 @@ export function createWorldSession(seed: string): GameSession {
   const civic = createOrganization(seed, "civic-authority", `${cityName} CIVIC AUTHORITY`, "CIV/AUTH", "government", 46_000_000, 39, 8_200);
   const police = createOrganization(seed, "police", "DISTRICT SECURITY BUREAU", "DSB", "police", 27_900_000, 32, 6_300);
   const gang = createOrganization(seed, "cutwire", "CUTWIRE", "CW", "gang", 410_000, 19, 86);
+  const redStatic = createOrganization(seed, "red-static", "RED STATIC", "R/ST", "gang", 330_000, 16, 64);
+  const mourningSons = createOrganization(seed, "mourning-sons", "MOURNING SONS", "MS/13", "gang", 520_000, 22, 118);
   const habstack = createOrganization(seed, "habstack-trust", "HABSTACK PROPERTY TRUST", "HAB/TRUST", "company", 780_000, 28, 54);
   const marketCoop = createOrganization(seed, "underline-market", "UNDERLINE MARKET COOPERATIVE", "MKT/COOP", "independent", 620_000, 44, 96);
   const kitchenCollective = createOrganization(seed, "night-kitchen", "NIGHT KITCHEN COLLECTIVE", "FOOD/COL", "independent", 240_000, 38, 34);
-  const organizations = [aurelian, vectra, meshline, transit, medical, civic, police, gang, habstack, marketCoop, kitchenCollective];
+  const organizations = [aurelian, vectra, meshline, transit, medical, civic, police, gang, redStatic, mourningSons, habstack, marketCoop, kitchenCollective];
 
   const housing = createLocation(seed, "capsule", lower.id, "HAB-STACK 07", "HAB/U07", "housing", 31, habstack.id, 0, 24);
   const canteen = createLocation(seed, "canteen", lower.id, "NIGHT KITCHEN 14", "FOOD/U14", "food", 24, kitchenCollective.id, 18, 5);
@@ -425,6 +427,7 @@ export function createWorldSession(seed: string): GameSession {
     streetScene,
     data,
     urban,
+    government,
     districts,
     organizations
   });

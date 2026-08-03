@@ -14,6 +14,7 @@ export type CrimeOperationKind = "cargo-diversion" | "data-theft" | "counterfeit
 export type CrimeOperationStatus = "active" | "strained" | "disrupted" | "dormant";
 export type EnforcementCaseStatus = "open" | "investigating" | "charged" | "closed" | "cold";
 export type EnforcementCaseKind = "organized-crime" | "cargo-theft" | "vehicle-theft" | "cybercrime" | "extortion" | "contraband" | "corruption";
+export type GangConflictStatus = "tense" | "active" | "cooling" | "ended";
 
 export interface GovernmentPolicyState {
   householdIncomeTaxRate: number;
@@ -117,6 +118,23 @@ export interface CrimeNetworkState {
   lastUpdatedAt: number;
 }
 
+export interface GangConflictState {
+  id: EntityId;
+  networkAId: EntityId;
+  networkBId: EntityId;
+  districtId: EntityId;
+  status: GangConflictStatus;
+  intensity: number;
+  startedAt: number;
+  lastClashAt?: number;
+  endedAt?: number;
+  lossesA: number;
+  lossesB: number;
+  creditsLostA: number;
+  creditsLostB: number;
+  lastUpdatedAt: number;
+}
+
 export interface EnforcementCaseState {
   id: EntityId;
   districtId: EntityId;
@@ -145,6 +163,7 @@ export interface GovernmentDailySnapshot {
   arrests: number;
   openCases: number;
   suspendedLicenses: number;
+  activeGangConflicts: number;
   averagePatrolCoverage: number;
   averageCorruption: number;
 }
@@ -163,6 +182,8 @@ export interface GovernmentCrimeTotals {
   casesOpened: number;
   inspections: number;
   licensesSuspended: number;
+  gangClashes: number;
+  gangCasualties: number;
 }
 
 export interface GovernmentCrimeState {
@@ -172,6 +193,7 @@ export interface GovernmentCrimeState {
   licenses: BusinessLicenseState[];
   districts: DistrictLawState[];
   crimeNetworks: CrimeNetworkState[];
+  gangConflicts: GangConflictState[];
   cases: EnforcementCaseState[];
   history: GovernmentDailySnapshot[];
   totals: GovernmentCrimeTotals;

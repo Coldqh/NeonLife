@@ -70,7 +70,7 @@ import {
   transferProduct
 } from "../../simulation/inventory/inventorySystem";
 import { advanceBusinessEconomyState, projectBusinessEconomyToWorldCore, synchronizeBusinessEconomyFromKernel } from "../../simulation/business/businessEconomySystem";
-import { advancePlayerCrimeState, recordPlayerCrimeAction, releasePlayerCustodyState } from "../../simulation/crime/playerCrimeSystem";
+import { actOnPlayerCustodyState, advancePlayerCrimeState, recordPlayerCrimeAction, releasePlayerCustodyState } from "../../simulation/crime/playerCrimeSystem";
 import { joinVenueQueueState, leaveVenueQueueState, purchaseVenueOfferState, venueIsOpenAt } from "../../simulation/venues/venueOperationsSystem";
 import type { StreetIncidentAction } from "../../simulation/streetScene/types";
 import {
@@ -385,6 +385,7 @@ function progressLocalLife(session: GameSession, minutes: number, options: Progr
     streetScene: streetAdvance.state,
     data: crimeAdvance.data,
     urban: urbanState,
+    government: crimeAdvance.government,
     districts: session.world.districts,
     organizations: crimeAdvance.organizations
   });
@@ -863,6 +864,7 @@ function progressWorldLife(session: GameSession, minutes: number, options: Progr
     streetScene: streetAdvance.state,
     data: crimeAdvance.data,
     urban: urbanState,
+    government: governmentAdvance.state,
     districts: session.world.districts,
     organizations: crimeAdvance.organizations
   });
@@ -2134,6 +2136,7 @@ export function hotwirePhysicalVehicle(session: GameSession, vehicleId: string):
     streetScene: session.streetScene,
     data,
     urban: session.urban,
+    government: session.government,
     districts: session.world.districts,
     organizations: session.world.organizations,
     kind: "vehicle-theft",
@@ -2925,6 +2928,7 @@ function recordCrimeAtPlayer(session: GameSession, input: {
     streetScene: session.streetScene,
     data: session.data,
     urban: session.urban,
+    government: session.government,
     districts: session.world.districts,
     organizations: session.world.organizations,
     ...location,
@@ -3093,16 +3097,50 @@ export function assaultLocalActor(session: GameSession, actorId: string): GameSe
   });
 }
 
-export function resolvePlayerCustody(session: GameSession, method: "pay" | "serve"): GameSession {
+export function resolvePlayerCustody(session: GameSession, method: "submit-search" | "resist-search" | "attempt-escape" | "proceed-hearing" | "pay" | "serve"): GameSession {
   const custody = session.playerCrime.custody;
   if (!custody || custody.status !== "detained") return session;
+
+  if (method === "submit-search" || method === "resist-search" || method === "attempt-escape" || method === "proceed-hearing") {
+    const result = actOnPlayerCustodyState(session.playerCrime, {
+      seed: session.world.meta.seed,
+      timestamp: session.timestamp,
+      action: method,
+      health: session.player.condition.health,
+      fatigue: session.player.condition.fatigue
+    });
+    if (!result.success) return session;
+    const minutes = method === "proceed-hearing"
+      ? Math.max(1, Math.ceil((custody.hearingAt - session.timestamp) / 60_000))
+      : method === "submit-search" ? 15 : method === "resist-search" ? 10 : 6;
+    const title = method === "submit-search"
+      ? "Обыск завершён."
+      : method === "resist-search"
+        ? "Сопротивление обыску подавлено."
+        : method === "attempt-escape"
+          ? (result.state.custody?.status === "released" ? "Побег удался." : "Побег сорван.")
+          : "Материалы дела рассмотрены.";
+    return progressLife({ ...session, playerCrime: result.state }, minutes, {
+      category: "personal",
+      title,
+      detail: result.message,
+      importance: method === "attempt-escape" || method === "resist-search" ? 3 : 2,
+      fatigueDelta: method === "attempt-escape" ? 8 : 2,
+      stressDelta: method === "attempt-escape" ? 12 : method === "resist-search" ? 8 : 4,
+      activity: title,
+      suppressTimeEvent: true
+    });
+  }
+
+  if (custody.phase !== "hearing") return session;
   if (method === "pay") {
     if (session.player.balance < custody.fine) return session;
     const playerCrime = releasePlayerCustodyState(session.playerCrime, session.timestamp, true);
+    if (playerCrime === session.playerCrime) return session;
     return progressLife({ ...session, playerCrime }, 20, {
       category: "finance",
       title: "Штраф оплачен. Игрок освобождён.",
-      detail: `−₵ ${custody.fine} · изъятые вещи остаются уликами.`,
+      detail: `−₵ ${custody.fine} · изъятые вещи остаются в материалах дела.`,
       importance: 2,
       balanceDelta: -custody.fine,
       balanceCounterpartyEntityId: session.world.organizations.find((item) => item.type === "government")?.id,
@@ -3114,7 +3152,7 @@ export function resolvePlayerCustody(session: GameSession, method: "pay" | "serv
   const minutes = Math.max(1, Math.ceil((custody.releaseAt - session.timestamp) / 60_000));
   const progressed = progressLife(session, minutes, {
     category: "personal",
-    title: "Срок задержания окончен.",
+    title: "Срок содержания окончен.",
     detail: `Проведено под стражей ${Math.ceil(minutes / 60)} ч.`,
     importance: 2,
     fatigueDelta: 12,

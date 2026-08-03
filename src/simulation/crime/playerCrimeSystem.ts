@@ -3,6 +3,7 @@ import { SeededRandom } from "../../core/random/seededRandom";
 import type { OrganizationState } from "../../world/state/types";
 import type {
   CrimeEvidenceKind,
+  CrimeReportSource,
   GangFactionState,
   PlayerCrimeActionInput,
   PlayerCrimeAdvanceResult,
@@ -11,6 +12,9 @@ import type {
   PlayerCrimeInput,
   PlayerCrimeState,
   PlayerCrimeTotalsState,
+  PlayerCustodyActionInput,
+  PlayerCustodyActionResult,
+  PlayerCustodyState,
   PlayerWarrantState,
   PoliceResponseState,
   StolenPropertyState
@@ -18,6 +22,7 @@ import type {
 
 const DAY_MS = 24 * 60 * 60_000;
 const HOUR_MS = 60 * 60_000;
+const UNOBSERVED_RESOLUTION_MS = 6 * HOUR_MS;
 
 function clamp(value: number, min = 0, max = 100): number {
   return Math.max(min, Math.min(max, value));
@@ -34,6 +39,8 @@ function emptyTotals(): PlayerCrimeTotalsState {
     reportsFiled: 0,
     policeResponses: 0,
     arrests: 0,
+    escapes: 0,
+    failedEscapes: 0,
     finesPaid: 0,
     stolenCredits: 0
   };
@@ -42,35 +49,142 @@ function emptyTotals(): PlayerCrimeTotalsState {
 function gangSeeds(seed: string, timestamp: number, organizations: OrganizationState[], districtIds: string[]): GangFactionState[] {
   const existing = organizations.filter((item) => item.type === "gang");
   const names = ["CUTWIRE", "RED STATIC", "MOURNING SONS"];
-  return names.map((name, index) => {
+  const gangs = names.map((name, index) => {
     const organization = existing[index];
     const rng = new SeededRandom(`${seed}:gang-faction:${index}`);
+    const homeDistrictId = districtIds[index % Math.max(1, districtIds.length)] ?? "district-missing";
     return {
       id: organization?.id ?? createStableEntityId("gang-faction", `${seed}:${name}`),
       organizationId: organization?.id,
       name: organization?.name ?? name,
       code: organization?.code ?? `G/${index + 1}`,
-      homeDistrictId: districtIds[index % Math.max(1, districtIds.length)] ?? "district-missing",
+      homeDistrictId,
       influence: rng.integer(24, 68),
+      influenceByDistrict: Object.fromEntries(districtIds.map((districtId) => [districtId, districtId === homeDistrictId ? rng.integer(35, 68) : rng.integer(4, 28)])),
       cash: organization?.budget ?? rng.integer(90_000, 520_000),
       hostilityToPlayer: 0,
       controlledVenueIds: [],
       rivalIds: [],
       activeMembers: organization?.employeeCount ?? rng.integer(45, 180),
+      activeOperations: 0,
+      disruptedOperations: 0,
+      knownIntel: rng.integer(18, 34),
+      conflictIntensity: 0,
+      conflictLosses: 0,
+      conflictCreditsLost: 0,
+      lastKnownAt: timestamp,
       lastUpdatedAt: timestamp
+    } satisfies GangFactionState;
+  });
+  return gangs.map((gang) => ({ ...gang, rivalIds: gangs.filter((item) => item.id !== gang.id).map((item) => item.id) }));
+}
+
+function strongestDistrict(influenceByDistrict: Record<string, number>, fallback: string): string {
+  return Object.entries(influenceByDistrict).sort((left, right) => right[1] - left[1])[0]?.[0] ?? fallback;
+}
+
+function conflictProjection(networkId: string, influenceByDistrict: Record<string, number>, violence: number, gangs: Array<{ id: string; influenceByDistrict: Record<string, number>; violence: number }>): { intensity: number; rivalId?: string } {
+  let intensity = 0;
+  let rivalId: string | undefined;
+  for (const rival of gangs) {
+    if (rival.id === networkId) continue;
+    const overlap = Object.keys(influenceByDistrict).reduce((highest, districtId) => Math.max(highest, Math.min(influenceByDistrict[districtId] ?? 0, rival.influenceByDistrict[districtId] ?? 0)), 0);
+    const pressure = clamp(overlap * .72 + Math.min(violence, rival.violence) * .28 - 18);
+    if (pressure > intensity) {
+      intensity = pressure;
+      rivalId = rival.id;
+    }
+  }
+  return { intensity: Math.round(intensity), rivalId: intensity >= 48 ? rivalId : undefined };
+}
+
+function controlledVenues(input: PlayerCrimeInput, influenceByDistrict: Record<string, number>, networkId: string): string[] {
+  const result: string[] = [];
+  for (const [districtId, influence] of Object.entries(influenceByDistrict)) {
+    if (influence < 42) continue;
+    const venues = input.urban.venueOperations.registry
+      .filter((entry) => entry.venue.districtId === districtId && entry.venue.operatingStatus === "operating")
+      .map((entry) => entry.venue.id)
+      .sort((left, right) => left.localeCompare(right));
+    const target = Math.min(12, Math.max(1, Math.floor(influence / 15)));
+    const rng = new SeededRandom(`${input.seed}:gang-control:${networkId}:${districtId}`);
+    const offset = venues.length ? rng.integer(0, Math.max(0, venues.length - 1)) : 0;
+    for (let index = 0; index < target && index < venues.length; index += 1) {
+      result.push(venues[(offset + index * 3) % venues.length]);
+    }
+  }
+  return [...new Set(result)];
+}
+
+function projectGangs(input: PlayerCrimeInput, previous: GangFactionState[] = []): GangFactionState[] {
+  const networks = input.government?.crimeNetworks ?? [];
+  if (!networks.length) {
+    const fallback = previous.length ? previous : gangSeeds(input.seed, input.timestamp, input.organizations, input.districts.map((item) => item.id));
+    const elapsedDays = Math.max(0, Math.floor((input.timestamp - Math.max(0, ...fallback.map((item) => item.lastUpdatedAt))) / DAY_MS));
+    return fallback.map((gang) => ({
+      ...gang,
+      hostilityToPlayer: clamp(gang.hostilityToPlayer - elapsedDays),
+      lastUpdatedAt: input.timestamp
+    }));
+  }
+  const networkViews = networks.map((network) => ({ id: network.id, influenceByDistrict: network.influenceByDistrict, violence: network.violence }));
+  return networks.map((network, index) => {
+    const organization = input.organizations.find((item) => item.id === network.organizationId);
+    const prior = previous.find((item) => item.sourceNetworkId === network.id || item.organizationId === network.organizationId || item.id === network.id);
+    const influenceValues = Object.values(network.influenceByDistrict);
+    const influence = clamp(influenceValues.length ? Math.max(...influenceValues) : 0);
+    const homeDistrictId = strongestDistrict(network.influenceByDistrict, input.districts[index % Math.max(1, input.districts.length)]?.id ?? "district-missing");
+    const projectedConflict = conflictProjection(network.id, network.influenceByDistrict, network.violence, networkViews);
+    const canonicalConflict = (input.government?.gangConflicts ?? [])
+      .filter((item) => item.status === "active" || item.status === "tense" || item.status === "cooling")
+      .filter((item) => item.networkAId === network.id || item.networkBId === network.id)
+      .sort((left, right) => right.intensity - left.intensity)[0];
+    const isConflictSideA = canonicalConflict?.networkAId === network.id;
+    const conflictRivalId = canonicalConflict
+      ? (isConflictSideA ? canonicalConflict.networkBId : canonicalConflict.networkAId)
+      : projectedConflict.rivalId;
+    const conflictLosses = canonicalConflict ? (isConflictSideA ? canonicalConflict.lossesA : canonicalConflict.lossesB) : 0;
+    const conflictCreditsLost = canonicalConflict ? (isConflictSideA ? canonicalConflict.creditsLostA : canonicalConflict.creditsLostB) : 0;
+    const activeOperations = network.operations.filter((item) => item.status === "active" || item.status === "strained").length;
+    const disruptedOperations = network.operations.filter((item) => item.status === "disrupted" || item.status === "dormant").length;
+    const publicIntel = clamp(Math.round(46 - network.secrecy * .24 + network.heat * .18 + (organization?.type === "gang" ? 8 : 0)), 12, 46);
+    const knownIntel = clamp(Math.max(prior?.knownIntel ?? 0, publicIntel));
+    return {
+      id: network.id,
+      sourceNetworkId: network.id,
+      organizationId: network.organizationId,
+      name: network.name,
+      code: organization?.code ?? `NET/${index + 1}`,
+      homeDistrictId,
+      influence,
+      influenceByDistrict: { ...network.influenceByDistrict },
+      cash: network.treasury,
+      hostilityToPlayer: prior?.hostilityToPlayer ?? 0,
+      controlledVenueIds: controlledVenues(input, network.influenceByDistrict, network.id),
+      rivalIds: networks.filter((item) => item.id !== network.id).map((item) => item.id),
+      activeMembers: network.memberResidentIds.length,
+      activeOperations,
+      disruptedOperations,
+      knownIntel,
+      conflictIntensity: canonicalConflict?.intensity ?? projectedConflict.intensity,
+      conflictLosses,
+      conflictCreditsLost,
+      warWithGangId: conflictRivalId,
+      lastKnownAt: knownIntel > 0 ? input.timestamp : prior?.lastKnownAt,
+      lastUpdatedAt: input.timestamp
     };
-  }).map((gang, _index, gangs) => ({ ...gang, rivalIds: gangs.filter((item) => item.id !== gang.id).map((item) => item.id) }));
+  });
 }
 
 export function createPlayerCrimeState(input: PlayerCrimeInput): PlayerCrimeState {
   return {
-    version: 1,
+    version: 2,
     incidents: [],
     evidence: [],
     warrants: [],
     stolenProperty: [],
     policeResponses: [],
-    gangs: gangSeeds(input.seed, input.timestamp, input.organizations, input.districts.map((item) => item.id)),
+    gangs: projectGangs(input),
     custody: null,
     heat: 0,
     totals: emptyTotals(),
@@ -78,20 +192,107 @@ export function createPlayerCrimeState(input: PlayerCrimeInput): PlayerCrimeStat
   };
 }
 
+function normalizeIncident(raw: Partial<PlayerCrimeIncidentState>): PlayerCrimeIncidentState | null {
+  if (!raw.id || !raw.kind || !raw.districtId || !raw.sectorId || typeof raw.occurredAt !== "number") return null;
+  const aware = Array.isArray(raw.playerAwareEvidenceKinds) ? raw.playerAwareEvidenceKinds : [];
+  return {
+    id: raw.id,
+    kind: raw.kind,
+    status: raw.status ?? "resolved",
+    districtId: raw.districtId,
+    sectorId: raw.sectorId,
+    xM: raw.xM ?? 0,
+    yM: raw.yM ?? 0,
+    venueId: raw.venueId,
+    vehicleId: raw.vehicleId,
+    victimActorId: raw.victimActorId,
+    victimResidentId: raw.victimResidentId,
+    occurredAt: raw.occurredAt,
+    reportDueAt: raw.reportDueAt ?? raw.occurredAt + 45 * 60_000,
+    reportedAt: raw.reportedAt,
+    resolvedAt: raw.resolvedAt,
+    reportSource: raw.reportSource ?? (raw.alarmTriggered ? "alarm" : (raw.witnessActorIds?.length ?? 0) > 0 ? "witness" : raw.kind === "vehicle-theft" || raw.kind === "assault" ? "victim" : "none"),
+    alarmTriggered: raw.alarmTriggered ?? raw.kind === "register-robbery",
+    success: raw.success ?? false,
+    violence: clamp(raw.violence ?? 0),
+    stolenValue: Math.max(0, raw.stolenValue ?? 0),
+    evidenceIds: Array.isArray(raw.evidenceIds) ? raw.evidenceIds : [],
+    playerAwareEvidenceKinds: aware,
+    witnessActorIds: Array.isArray(raw.witnessActorIds) ? raw.witnessActorIds : [],
+    recognizedPlayer: raw.recognizedPlayer ?? false,
+    identityConfidence: clamp(raw.identityConfidence ?? 0),
+    heat: clamp(raw.heat ?? 0),
+    outcome: raw.outcome
+  };
+}
+
+function normalizeCustody(raw: Partial<PlayerCustodyState> | null | undefined): PlayerCustodyState | null {
+  if (!raw || !raw.incidentId || !raw.status || typeof raw.startedAt !== "number" || typeof raw.releaseAt !== "number") return null;
+  const sentenceHours = Math.max(1, raw.sentenceHours ?? Math.ceil((raw.releaseAt - raw.startedAt) / HOUR_MS));
+  const phase = raw.status === "released" ? "released" : raw.phase ?? "hearing";
+  return {
+    incidentId: raw.incidentId,
+    warrantId: raw.warrantId,
+    status: raw.status,
+    phase,
+    startedAt: raw.startedAt,
+    searchCompletedAt: raw.searchCompletedAt,
+    hearingAt: raw.hearingAt ?? raw.startedAt,
+    releaseAt: raw.releaseAt,
+    sentenceHours,
+    fine: Math.max(0, raw.fine ?? 0),
+    confiscatedPropertyIds: Array.isArray(raw.confiscatedPropertyIds) ? raw.confiscatedPropertyIds : [],
+    reason: raw.reason ?? "Материалы дела не указаны",
+    searchOutcome: raw.searchOutcome,
+    escapeAttempted: raw.escapeAttempted ?? false,
+    resistedSearch: raw.resistedSearch ?? false,
+    releasedAt: raw.releasedAt
+  };
+}
+
+function normalizeGang(raw: Partial<GangFactionState>, input: PlayerCrimeInput): GangFactionState | null {
+  if (!raw.id || !raw.name || !raw.homeDistrictId) return null;
+  return {
+    id: raw.id,
+    sourceNetworkId: raw.sourceNetworkId,
+    organizationId: raw.organizationId,
+    name: raw.name,
+    code: raw.code ?? "G/—",
+    homeDistrictId: raw.homeDistrictId,
+    influence: clamp(raw.influence ?? 0),
+    influenceByDistrict: raw.influenceByDistrict && typeof raw.influenceByDistrict === "object" ? { ...raw.influenceByDistrict } : { [raw.homeDistrictId]: clamp(raw.influence ?? 0) },
+    cash: Math.max(0, raw.cash ?? 0),
+    hostilityToPlayer: clamp(raw.hostilityToPlayer ?? 0),
+    controlledVenueIds: Array.isArray(raw.controlledVenueIds) ? raw.controlledVenueIds : [],
+    rivalIds: Array.isArray(raw.rivalIds) ? raw.rivalIds : [],
+    activeMembers: Math.max(0, raw.activeMembers ?? 0),
+    activeOperations: Math.max(0, raw.activeOperations ?? 0),
+    disruptedOperations: Math.max(0, raw.disruptedOperations ?? 0),
+    knownIntel: clamp(raw.knownIntel ?? 18),
+    conflictIntensity: clamp(raw.conflictIntensity ?? 0),
+    conflictLosses: Math.max(0, Math.round(raw.conflictLosses ?? 0)),
+    conflictCreditsLost: Math.max(0, Math.round(raw.conflictCreditsLost ?? 0)),
+    warWithGangId: raw.warWithGangId,
+    lastKnownAt: raw.lastKnownAt,
+    lastUpdatedAt: raw.lastUpdatedAt ?? input.timestamp
+  };
+}
+
 export function normalizePlayerCrimeState(value: unknown, input: PlayerCrimeInput): PlayerCrimeState {
   if (!value || typeof value !== "object") return createPlayerCrimeState(input);
-  const raw = value as Partial<PlayerCrimeState>;
-  if (raw.version !== 1) return createPlayerCrimeState(input);
-  const fresh = createPlayerCrimeState(input);
+  const raw = value as Partial<Omit<PlayerCrimeState, "version">> & { version?: number };
+  if (raw.version !== 1 && raw.version !== 2) return createPlayerCrimeState(input);
+  const normalizedGangs = Array.isArray(raw.gangs) ? raw.gangs.map((item) => normalizeGang(item, input)).filter((item): item is GangFactionState => Boolean(item)) : [];
+  const baseGangs = projectGangs(input, normalizedGangs);
   return {
-    version: 1,
-    incidents: Array.isArray(raw.incidents) ? raw.incidents : [],
+    version: 2,
+    incidents: Array.isArray(raw.incidents) ? raw.incidents.map((item) => normalizeIncident(item)).filter((item): item is PlayerCrimeIncidentState => Boolean(item)) : [],
     evidence: Array.isArray(raw.evidence) ? raw.evidence : [],
     warrants: Array.isArray(raw.warrants) ? raw.warrants : [],
     stolenProperty: Array.isArray(raw.stolenProperty) ? raw.stolenProperty : [],
     policeResponses: Array.isArray(raw.policeResponses) ? raw.policeResponses : [],
-    gangs: Array.isArray(raw.gangs) && raw.gangs.length ? raw.gangs : fresh.gangs,
-    custody: raw.custody ?? null,
+    gangs: baseGangs,
+    custody: normalizeCustody(raw.custody),
     heat: typeof raw.heat === "number" ? clamp(raw.heat) : 0,
     totals: { ...emptyTotals(), ...(raw.totals ?? {}) },
     lastUpdatedAt: typeof raw.lastUpdatedAt === "number" ? raw.lastUpdatedAt : input.timestamp
@@ -184,11 +385,29 @@ function physicalEvidence(input: PlayerCrimeActionInput, incidentId: string, pol
   return result;
 }
 
-function reportDelayMinutes(input: PlayerCrimeActionInput, evidenceCount: number): number {
-  if (input.alarmTriggered || input.kind === "register-robbery") return 1;
-  if (input.kind === "assault") return evidenceCount ? 3 : 18;
-  if (input.kind === "vehicle-theft") return evidenceCount ? 7 : 28;
-  return evidenceCount ? 12 : 45;
+function reportSource(input: PlayerCrimeActionInput, witnessCount: number, cameraCount: number): CrimeReportSource {
+  if (input.alarmTriggered || input.kind === "register-robbery") return "alarm";
+  if (witnessCount > 0) return "witness";
+  if (cameraCount > 0) return "camera";
+  if (input.victimActorId || input.victimResidentId || input.kind === "vehicle-theft") return "victim";
+  return "none";
+}
+
+function reportDelayMinutes(input: PlayerCrimeActionInput, source: CrimeReportSource): number {
+  if (source === "alarm") return 1;
+  if (source === "witness") return input.kind === "assault" ? 3 : 9;
+  if (source === "camera") return input.kind === "vehicle-theft" ? 7 : 18;
+  if (source === "victim") return input.kind === "vehicle-theft" ? 35 : 16;
+  return 360;
+}
+
+function playerAwareEvidence(input: PlayerCrimeActionInput, witnessCount: number, cameraCount: number, physical: PlayerCrimeEvidenceState[]): CrimeEvidenceKind[] {
+  const result: CrimeEvidenceKind[] = [];
+  if (witnessCount > 0) result.push("witness");
+  if (cameraCount > 0) result.push("camera");
+  for (const item of physical) result.push(item.kind);
+  if (input.stolenProperty) result.push("stolen-property");
+  return [...new Set(result)];
 }
 
 export function recordPlayerCrimeAction(state: PlayerCrimeState, input: PlayerCrimeActionInput): PlayerCrimeState {
@@ -203,7 +422,8 @@ export function recordPlayerCrimeAction(state: PlayerCrimeState, input: PlayerCr
   const heatBase = input.kind === "shoplifting" ? 10 : input.kind === "vehicle-theft" ? 28 : input.kind === "assault" ? 34 : 42;
   const heat = clamp(Math.round(heatBase + evidenceStrength * .34 + input.violence * .2));
   const identityConfidence = clamp(Math.max(0, ...evidence.map((item) => item.subjectIdentified ? item.strength : item.strength * .42)));
-  const reportDelay = reportDelayMinutes(input, evidence.length);
+  const source = reportSource(input, witness.evidence.length, camera.length);
+  const reportDelay = reportDelayMinutes(input, source);
   const incident: PlayerCrimeIncidentState = {
     id: incidentId,
     kind: input.kind,
@@ -218,15 +438,18 @@ export function recordPlayerCrimeAction(state: PlayerCrimeState, input: PlayerCr
     victimResidentId: input.victimResidentId,
     occurredAt: input.timestamp,
     reportDueAt: input.timestamp + reportDelay * 60_000,
+    reportSource: source,
+    alarmTriggered: Boolean(input.alarmTriggered || input.kind === "register-robbery"),
     success: input.success,
     violence: clamp(input.violence),
     stolenValue: Math.max(0, Math.round(input.stolenValue)),
     evidenceIds: evidence.map((item) => item.id),
+    playerAwareEvidenceKinds: playerAwareEvidence(input, witness.evidence.length, camera.length, physical),
     witnessActorIds: witness.actorIds,
     recognizedPlayer: witness.recognized || camera.some((item) => item.subjectIdentified),
     identityConfidence,
     heat,
-    outcome: input.success ? undefined : "Попытка сорвалась, но следы остались."
+    outcome: input.success ? undefined : "Попытка сорвалась, но следы могли остаться."
   };
   const stolenProperty: StolenPropertyState[] = input.success && input.stolenProperty ? [{
     ...input.stolenProperty,
@@ -244,11 +467,23 @@ export function recordPlayerCrimeAction(state: PlayerCrimeState, input: PlayerCr
     evidenceCreated: state.totals.evidenceCreated + evidence.length,
     stolenCredits: state.totals.stolenCredits + (input.success ? input.stolenValue : 0)
   };
+  const gangs = state.gangs.map((gang) => {
+    const hitControlledVenue = Boolean(input.venueId && gang.controlledVenueIds.includes(input.venueId));
+    if (!hitControlledVenue) return gang;
+    const hostilityGain = input.kind === "register-robbery" ? 18 : input.kind === "shoplifting" ? 6 : 10;
+    return {
+      ...gang,
+      hostilityToPlayer: clamp(gang.hostilityToPlayer + hostilityGain),
+      knownIntel: clamp(gang.knownIntel + 8),
+      lastKnownAt: input.timestamp
+    };
+  });
   return {
     ...state,
     incidents: [incident, ...state.incidents].slice(0, 180),
     evidence: [...evidence, ...state.evidence].filter((item) => item.expiresAt > input.timestamp).slice(0, 500),
     stolenProperty: [...stolenProperty, ...state.stolenProperty].slice(0, 120),
+    gangs,
     heat: clamp(state.heat + heat * .45),
     totals,
     lastUpdatedAt: input.timestamp
@@ -256,17 +491,19 @@ export function recordPlayerCrimeAction(state: PlayerCrimeState, input: PlayerCr
 }
 
 function policeOrigin(input: PlayerCrimeInput, incident: PlayerCrimeIncidentState): { x: number; y: number } {
-  const sector = input.urban.buildings.find((building) => building.sectorId === incident.sectorId && building.use === "civic");
-  if (sector) return { x: sector.bounds.xM + sector.bounds.widthM / 2, y: sector.bounds.yM + sector.bounds.heightM / 2 };
+  const civic = input.urban.buildings.find((building) => building.sectorId === incident.sectorId && building.use === "civic");
+  if (civic) return { x: civic.bounds.xM + civic.bounds.widthM / 2, y: civic.bounds.yM + civic.bounds.heightM / 2 };
   return { x: incident.xM - 620, y: incident.yM - 420 };
 }
 
 function createResponse(input: PlayerCrimeInput, incident: PlayerCrimeIncidentState): PoliceResponseState {
   const district = input.districts.find((item) => item.id === incident.districtId);
+  const law = input.government?.districts.find((item) => item.districtId === incident.districtId);
   const origin = policeOrigin(input, incident);
   const distance = Math.hypot(incident.xM - origin.x, incident.yM - origin.y);
-  const security = district?.securityLevel ?? 45;
-  const travelMinutes = Math.max(2, Math.min(14, Math.round(distance / 240 + (100 - security) / 18)));
+  const readiness = law?.policeReadiness ?? district?.securityLevel ?? 45;
+  const coverage = law?.patrolCoverage ?? district?.securityLevel ?? 45;
+  const travelMinutes = Math.max(2, Math.min(18, Math.round(distance / 240 + (100 - readiness) / 20 + (100 - coverage) / 28)));
   return {
     id: createStableEntityId("police-response", `${incident.id}:response`),
     incidentId: incident.id,
@@ -284,6 +521,12 @@ function createResponse(input: PlayerCrimeInput, incident: PlayerCrimeIncidentSt
   };
 }
 
+function shouldDispatchResponse(incident: PlayerCrimeIncidentState): boolean {
+  if (incident.alarmTriggered || incident.reportSource === "alarm") return true;
+  if (incident.kind === "vehicle-theft" || incident.violence >= 35) return true;
+  return incident.reportSource === "witness" && incident.reportDueAt - incident.occurredAt <= 10 * 60_000;
+}
+
 function warrantForIncident(state: PlayerCrimeState, incident: PlayerCrimeIncidentState, timestamp: number): PlayerWarrantState {
   const existing = state.warrants.find((item) => item.status !== "closed" && item.status !== "arrested" && item.districtId === incident.districtId);
   const confidence = clamp(Math.max(existing?.identityConfidence ?? 0, incident.identityConfidence));
@@ -299,33 +542,9 @@ function warrantForIncident(state: PlayerCrimeState, incident: PlayerCrimeIncide
     identityConfidence: confidence,
     heat: clamp((existing?.heat ?? 0) + incident.heat * .55),
     issuedAt: existing?.issuedAt ?? timestamp,
-    lastSeenSectorId: incident.sectorId,
-    lastSeenAt: timestamp
+    lastSeenSectorId: incident.recognizedPlayer ? incident.sectorId : existing?.lastSeenSectorId,
+    lastSeenAt: incident.recognizedPlayer ? timestamp : existing?.lastSeenAt
   };
-}
-
-function advanceGangs(state: PlayerCrimeState, input: PlayerCrimeInput): GangFactionState[] {
-  const elapsedDays = Math.floor((input.timestamp - state.lastUpdatedAt) / DAY_MS);
-  if (elapsedDays <= 0) return state.gangs;
-  const venuesByDistrict = new Map<string, string[]>();
-  for (const entry of input.urban.venueOperations.registry) {
-    const local = venuesByDistrict.get(entry.venue.districtId) ?? [];
-    if (entry.venue.operatingStatus === "operating") local.push(entry.venue.id);
-    venuesByDistrict.set(entry.venue.districtId, local);
-  }
-  return state.gangs.map((gang) => {
-    const rng = new SeededRandom(`${input.seed}:gang-advance:${gang.id}:${Math.floor(input.timestamp / DAY_MS)}`);
-    const localVenues = venuesByDistrict.get(gang.homeDistrictId) ?? [];
-    const controlled = localVenues.filter((_, index) => index % Math.max(3, 9 - Math.round(gang.influence / 15)) === 0).slice(0, 12);
-    return {
-      ...gang,
-      influence: clamp(gang.influence + rng.integer(-2, 3) * elapsedDays),
-      cash: Math.max(0, gang.cash + controlled.length * rng.integer(180, 520) * elapsedDays - gang.activeMembers * 9 * elapsedDays),
-      controlledVenueIds: controlled,
-      hostilityToPlayer: clamp(gang.hostilityToPlayer - elapsedDays),
-      lastUpdatedAt: input.timestamp
-    };
-  });
 }
 
 function shouldDetain(state: PlayerCrimeState, input: PlayerCrimeInput, response: PoliceResponseState, incident: PlayerCrimeIncidentState): boolean {
@@ -333,11 +552,36 @@ function shouldDetain(state: PlayerCrimeState, input: PlayerCrimeInput, response
   if (response.status !== "on-scene" && response.status !== "searching") return false;
   if (input.playerPosition.sectorId !== incident.sectorId) return false;
   const distance = Math.hypot(input.playerPosition.xM - incident.xM, input.playerPosition.yM - incident.yM);
-  if (distance <= 28 && input.timestamp - response.arrivesAt <= 25 * 60_000) return true;
   const warrant = state.warrants.find((item) => item.incidentIds.includes(incident.id) && item.status === "identified");
+  const linkedProperty = state.stolenProperty.some((item) => item.incidentId === incident.id && !item.confiscatedAt && !item.disposedAt);
+  if (distance <= 28 && input.timestamp - response.arrivesAt <= 25 * 60_000) {
+    return Boolean(warrant || incident.recognizedPlayer || linkedProperty || incident.violence >= 60);
+  }
   if (!warrant) return false;
   const nearCheckpoint = input.streetScene.incidents.some((item) => item.type === "checkpoint" && item.status !== "resolved" && item.sectorId === input.playerPosition.sectorId && Math.hypot(item.xM - input.playerPosition.xM, item.yM - input.playerPosition.yM) <= 32);
   return nearCheckpoint;
+}
+
+function arrestCustody(state: PlayerCrimeState, input: PlayerCrimeInput, incident: PlayerCrimeIncidentState, warrant: PlayerWarrantState | undefined): PlayerCustodyState {
+  const confiscated = state.stolenProperty.filter((item) => !item.confiscatedAt && !item.disposedAt && (warrant?.incidentIds.includes(item.incidentId) || item.incidentId === incident.id)).map((item) => item.id);
+  const sentenceHours = Math.max(2, Math.min(24, 2 + (warrant?.charges.length ?? 1) * 3 + Math.round(incident.violence / 25)));
+  const hearingAt = input.timestamp + 35 * 60_000;
+  const fine = Math.round(80 + incident.stolenValue * .72 + incident.violence * 4 + (warrant?.charges.length ?? 1) * 55);
+  return {
+    incidentId: incident.id,
+    warrantId: warrant?.id,
+    status: "detained",
+    phase: "stopped",
+    startedAt: input.timestamp,
+    hearingAt,
+    releaseAt: hearingAt + sentenceHours * HOUR_MS,
+    sentenceHours,
+    fine,
+    confiscatedPropertyIds: confiscated,
+    reason: `${incident.kind} · материалы дела сформированы`,
+    escapeAttempted: false,
+    resistedSearch: false
+  };
 }
 
 export function advancePlayerCrimeState(state: PlayerCrimeState | undefined, input: PlayerCrimeInput): PlayerCrimeAdvanceResult {
@@ -349,23 +593,25 @@ export function advancePlayerCrimeState(state: PlayerCrimeState | undefined, inp
   let reportsFiled = 0;
   let responsesCreated = 0;
   const incidents = base.incidents.map((incident) => {
-    if (incident.status === "unreported" && input.timestamp >= incident.reportDueAt) {
-      reportsFiled += 1;
-      const reported = { ...incident, status: "reported" as const, reportedAt: input.timestamp };
-      const warrant = warrantForIncident({ ...base, warrants }, reported, input.timestamp);
-      warrants = [warrant, ...warrants.filter((item) => item.id !== warrant.id)];
-      if (!responses.some((item) => item.incidentId === incident.id)) {
-        responses.push(createResponse(input, reported));
-        responsesCreated += 1;
-      }
-      notices.push({
-        title: "Преступление зарегистрировано.",
-        detail: `${reported.kind} · улики ${reported.evidenceIds.length} · подозреваемый ${warrant.status === "identified" ? "установлен" : "не установлен"}.`,
-        importance: warrant.status === "identified" ? 3 : 2
-      });
-      return reported;
+    if (incident.status !== "unreported") return incident;
+    if (incident.reportSource === "none" && input.timestamp - incident.occurredAt >= UNOBSERVED_RESOLUTION_MS) {
+      return { ...incident, status: "resolved" as const, resolvedAt: input.timestamp, outcome: incident.outcome ?? "Сообщения не поступило. Дело не открыто." };
     }
-    return incident;
+    if (incident.reportSource === "none" || input.timestamp < incident.reportDueAt) return incident;
+    reportsFiled += 1;
+    const reported = { ...incident, status: "reported" as const, reportedAt: input.timestamp };
+    const warrant = warrantForIncident({ ...base, warrants }, reported, input.timestamp);
+    warrants = [warrant, ...warrants.filter((item) => item.id !== warrant.id)];
+    if (shouldDispatchResponse(reported) && !responses.some((item) => item.incidentId === incident.id)) {
+      responses.push(createResponse(input, reported));
+      responsesCreated += 1;
+    }
+    notices.push({
+      title: warrant.status === "identified" ? "Личность попала в ориентировку." : "Полиция открыла дело против неизвестного.",
+      detail: warrant.status === "identified" ? "Свидетель или запись связали происшествие с игроком." : "Прямой связи с игроком пока нет.",
+      importance: warrant.status === "identified" ? 3 : 1
+    });
+    return reported;
   });
 
   responses = responses.map((response) => {
@@ -392,27 +638,20 @@ export function advancePlayerCrimeState(state: PlayerCrimeState | undefined, inp
       const incident = incidents.find((item) => item.id === response.incidentId);
       if (!incident || !shouldDetain({ ...base, warrants, policeResponses: responses }, input, response, incident)) continue;
       const warrant = warrants.find((item) => item.incidentIds.includes(incident.id) && item.status !== "closed");
-      const confiscated = base.stolenProperty.filter((item) => !item.confiscatedAt && warrant?.incidentIds.includes(item.incidentId)).map((item) => item.id);
-      const fine = Math.round(80 + incident.stolenValue * .72 + incident.violence * 4 + (warrant?.charges.length ?? 1) * 55);
-      custody = {
-        incidentId: incident.id,
-        warrantId: warrant?.id,
-        status: "detained",
-        startedAt: input.timestamp,
-        releaseAt: input.timestamp + Math.max(2, Math.min(18, 2 + (warrant?.charges.length ?? 1) * 3)) * HOUR_MS,
-        fine,
-        confiscatedPropertyIds: confiscated,
-        reason: `${incident.kind} · улики ${incident.evidenceIds.length}`
-      };
+      custody = arrestCustody(base, input, incident, warrant);
       if (warrant) warrants = warrants.map((item) => item.id === warrant.id ? { ...item, status: "arrested" as const } : item);
       newlyDetained = true;
-      notices.push({ title: "Игрок задержан.", detail: `${custody.reason} · штраф ₵ ${fine}.`, importance: 3 });
+      notices.push({ title: "Полиция остановила игрока.", detail: "Сначала будет обыск, затем разбор материалов дела.", importance: 3 });
       break;
     }
   }
 
   const evidence = base.evidence.filter((item) => item.expiresAt > input.timestamp);
   const heatDecay = Math.max(0, (input.timestamp - base.lastUpdatedAt) / HOUR_MS * 0.35);
+  const projectedGangs = projectGangs(input, base.gangs).map((gang) => ({
+    ...gang,
+    hostilityToPlayer: clamp(gang.hostilityToPlayer - Math.max(0, Math.floor((input.timestamp - base.lastUpdatedAt) / DAY_MS)))
+  }));
   const next: PlayerCrimeState = {
     ...base,
     incidents: incidents.map((incident) => {
@@ -423,7 +662,7 @@ export function advancePlayerCrimeState(state: PlayerCrimeState | undefined, inp
     evidence,
     warrants,
     policeResponses: responses.slice(-80),
-    gangs: advanceGangs(base, input),
+    gangs: projectedGangs,
     custody,
     heat: clamp(base.heat - heatDecay + reportsFiled * 4),
     totals: {
@@ -437,16 +676,116 @@ export function advancePlayerCrimeState(state: PlayerCrimeState | undefined, inp
   return { state: next, notices, newlyDetained };
 }
 
+function confiscateCustodyProperty(state: PlayerCrimeState, custody: PlayerCustodyState, timestamp: number): PlayerCrimeState["stolenProperty"] {
+  const confiscated = new Set(custody.confiscatedPropertyIds);
+  return state.stolenProperty.map((item) => confiscated.has(item.id) && !item.confiscatedAt ? { ...item, confiscatedAt: timestamp } : item);
+}
+
+export function actOnPlayerCustodyState(state: PlayerCrimeState, input: PlayerCustodyActionInput): PlayerCustodyActionResult {
+  const custody = state.custody;
+  if (!custody || custody.status !== "detained") return { state, success: false, message: "Игрок не находится под стражей." };
+  if (input.action === "submit-search") {
+    if (custody.phase !== "stopped") return { state, success: false, message: "Обыск уже завершён." };
+    const nextCustody: PlayerCustodyState = {
+      ...custody,
+      phase: "searched",
+      searchCompletedAt: input.timestamp,
+      searchOutcome: custody.confiscatedPropertyIds.length ? `Изъято предметов: ${custody.confiscatedPropertyIds.length}.` : "Запрещённых и краденых предметов при игроке не нашли."
+    };
+    return {
+      state: { ...state, custody: nextCustody, stolenProperty: confiscateCustodyProperty(state, nextCustody, input.timestamp), lastUpdatedAt: input.timestamp },
+      success: true,
+      message: nextCustody.searchOutcome ?? "Обыск завершён."
+    };
+  }
+  if (input.action === "resist-search") {
+    if (custody.phase !== "stopped") return { state, success: false, message: "Сопротивляться обыску уже поздно." };
+    const nextCustody: PlayerCustodyState = {
+      ...custody,
+      phase: "searched",
+      searchCompletedAt: input.timestamp,
+      fine: custody.fine + 140,
+      sentenceHours: custody.sentenceHours + 2,
+      releaseAt: custody.releaseAt + 2 * HOUR_MS,
+      resistedSearch: true,
+      searchOutcome: `Сопротивление подавлено. Штраф увеличен на ₵ 140, срок — на 2 часа.`
+    };
+    return {
+      state: {
+        ...state,
+        custody: nextCustody,
+        stolenProperty: confiscateCustodyProperty(state, nextCustody, input.timestamp),
+        heat: clamp(state.heat + 12),
+        lastUpdatedAt: input.timestamp
+      },
+      success: true,
+      message: nextCustody.searchOutcome ?? "Сопротивление подавлено."
+    };
+  }
+  if (input.action === "attempt-escape") {
+    if (custody.phase !== "stopped" || custody.escapeAttempted) return { state, success: false, message: "Побег сейчас невозможен." };
+    const chance = clamp(12 + input.health * .38 - input.fatigue * .24 - state.heat * .16, 5, 52);
+    const rng = new SeededRandom(`${input.seed}:custody-escape:${custody.incidentId}:${Math.floor(input.timestamp / 60_000)}`);
+    const escaped = rng.chance(chance / 100);
+    if (escaped) {
+      return {
+        state: {
+          ...state,
+          custody: { ...custody, status: "released", phase: "released", escapeAttempted: true, releasedAt: input.timestamp, searchOutcome: "Побег удался до обыска." },
+          warrants: state.warrants.map((item) => item.id === custody.warrantId ? { ...item, status: "identified" as const, lastSeenAt: input.timestamp } : item),
+          policeResponses: state.policeResponses.map((item) => item.incidentId === custody.incidentId && item.status !== "resolved" ? { ...item, status: "searching" as const } : item),
+          heat: clamp(state.heat + 28),
+          totals: { ...state.totals, escapes: state.totals.escapes + 1 },
+          lastUpdatedAt: input.timestamp
+        },
+        success: true,
+        message: "Побег удался. Ориентировка усилена."
+      };
+    }
+    const nextCustody: PlayerCustodyState = {
+      ...custody,
+      phase: "searched",
+      searchCompletedAt: input.timestamp,
+      escapeAttempted: true,
+      fine: custody.fine + 220,
+      sentenceHours: custody.sentenceHours + 4,
+      releaseAt: custody.releaseAt + 4 * HOUR_MS,
+      searchOutcome: "Побег сорван. Штраф увеличен на ₵ 220, срок — на 4 часа."
+    };
+    return {
+      state: {
+        ...state,
+        custody: nextCustody,
+        stolenProperty: confiscateCustodyProperty(state, nextCustody, input.timestamp),
+        heat: clamp(state.heat + 20),
+        totals: { ...state.totals, failedEscapes: state.totals.failedEscapes + 1 },
+        lastUpdatedAt: input.timestamp
+      },
+      success: true,
+      message: nextCustody.searchOutcome ?? "Побег сорван."
+    };
+  }
+  if (input.action === "proceed-hearing") {
+    if (custody.phase !== "searched") return { state, success: false, message: "Сначала должен завершиться обыск." };
+    const hearingAt = Math.max(input.timestamp, custody.hearingAt);
+    return {
+      state: { ...state, custody: { ...custody, phase: "hearing", hearingAt }, lastUpdatedAt: input.timestamp },
+      success: true,
+      message: `Материалы рассмотрены: штраф ₵ ${custody.fine} или ${custody.sentenceHours} ч. под стражей.`
+    };
+  }
+  return { state, success: false, message: "Неизвестное действие." };
+}
+
 export function releasePlayerCustodyState(state: PlayerCrimeState, timestamp: number, paidFine: boolean): PlayerCrimeState {
   const custody = state.custody;
-  if (!custody || custody.status !== "detained") return state;
+  if (!custody || custody.status !== "detained" || custody.phase !== "hearing") return state;
   const released = paidFine || timestamp >= custody.releaseAt;
   if (!released) return state;
-  const confiscated = new Set(custody.confiscatedPropertyIds);
   return {
     ...state,
-    custody: { ...custody, status: "released", releasedAt: timestamp },
-    stolenProperty: state.stolenProperty.map((item) => confiscated.has(item.id) ? { ...item, confiscatedAt: timestamp } : item),
+    custody: { ...custody, status: "released", phase: "released", releasedAt: timestamp },
+    stolenProperty: state.stolenProperty.map((item) => custody.confiscatedPropertyIds.includes(item.id) && !item.confiscatedAt ? { ...item, confiscatedAt: timestamp } : item),
     warrants: state.warrants.map((item) => item.id === custody.warrantId ? { ...item, status: "closed", closedAt: timestamp } : item),
     heat: clamp(state.heat * .38),
     totals: { ...state.totals, finesPaid: state.totals.finesPaid + (paidFine ? custody.fine : 0) },

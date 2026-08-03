@@ -13,6 +13,7 @@ import type {
   DistrictLawState,
   EnforcementCaseKind,
   EnforcementCaseState,
+  GangConflictState,
   GovernmentAdvanceInput,
   GovernmentAdvanceResult,
   GovernmentCrimeState,
@@ -101,7 +102,9 @@ function emptyTotals(): GovernmentCrimeTotals {
     convictions: 0,
     casesOpened: 0,
     inspections: 0,
-    licensesSuspended: 0
+    licensesSuspended: 0,
+    gangClashes: 0,
+    gangCasualties: 0
   };
 }
 
@@ -258,6 +261,7 @@ export function createGovernmentCrimeState(input: GovernmentAdvanceInput): Gover
     licenses: createLicenses(input, input.timestamp),
     districts: createDistrictLaw(input, input.timestamp),
     crimeNetworks: createCrimeNetworks(input, input.timestamp),
+    gangConflicts: [],
     cases: [],
     history: [],
     totals: emptyTotals(),
@@ -293,6 +297,7 @@ export function normalizeGovernmentCrimeState(value: unknown, input: GovernmentA
     licenses: fresh.licenses.map((item) => normalizeLicense(licenseByBusiness.get(item.businessId) ?? item, item)),
     districts: fresh.districts.map((item) => ({ ...item, ...(districtById.get(item.districtId) ?? {}) })),
     crimeNetworks: fresh.crimeNetworks.map((item) => ({ ...item, ...(networkByOrg.get(item.organizationId) ?? {}), operations: networkByOrg.get(item.organizationId)?.operations ?? item.operations })),
+    gangConflicts: Array.isArray(raw.gangConflicts) ? raw.gangConflicts : [],
     cases: Array.isArray(raw.cases) ? raw.cases : [],
     history: Array.isArray(raw.history) ? raw.history : [],
     totals: { ...fresh.totals, ...(raw.totals ?? {}) },
@@ -359,6 +364,209 @@ function applyBusinessLicenseStatus(business: BusinessState, license: BusinessLi
   return business;
 }
 
+
+interface GangConflictAdvanceResult {
+  networks: CrimeNetworkState[];
+  conflicts: GangConflictState[];
+  organizations: OrganizationState[];
+  population: GovernmentAdvanceInput["population"];
+}
+
+function conflictDistrict(left: CrimeNetworkState, right: CrimeNetworkState): { districtId: string; overlap: number } | null {
+  let districtId: string | undefined;
+  let overlap = 0;
+  for (const id of new Set([...Object.keys(left.influenceByDistrict), ...Object.keys(right.influenceByDistrict)])) {
+    const local = Math.min(left.influenceByDistrict[id] ?? 0, right.influenceByDistrict[id] ?? 0);
+    if (local > overlap) {
+      overlap = local;
+      districtId = id;
+    }
+  }
+  return districtId ? { districtId, overlap } : null;
+}
+
+function networkConflictPower(network: CrimeNetworkState, districtId: string): number {
+  return network.memberResidentIds.length * 1.8
+    + network.cohesion * .65
+    + network.violence * .45
+    + (network.influenceByDistrict[districtId] ?? 0) * .8
+    + Math.sqrt(Math.max(0, network.treasury)) * .18;
+}
+
+function advanceGangConflicts(
+  seed: string,
+  dayIndex: number,
+  timestamp: number,
+  sourceNetworks: CrimeNetworkState[],
+  sourceConflicts: GangConflictState[],
+  sourceOrganizations: OrganizationState[],
+  sourcePopulation: GovernmentAdvanceInput["population"],
+  notices: GovernmentNotice[],
+  transactions: KernelTransactionDraft[],
+  dayTotals: GovernmentCrimeTotals
+): GangConflictAdvanceResult {
+  let networks = sourceNetworks.map((network) => ({
+    ...network,
+    memberResidentIds: [...network.memberResidentIds],
+    influenceByDistrict: { ...network.influenceByDistrict },
+    operations: network.operations.map((operation) => ({ ...operation }))
+  }));
+  let organizations = sourceOrganizations;
+  let population = { ...sourcePopulation, residents: sourcePopulation.residents.map((resident) => ({ ...resident })) };
+  const previousById = new Map(sourceConflicts.map((conflict) => [conflict.id, conflict]));
+  const next: GangConflictState[] = [];
+  const touched = new Set<string>();
+
+  for (let leftIndex = 0; leftIndex < networks.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < networks.length; rightIndex += 1) {
+      let left = networks[leftIndex];
+      let right = networks[rightIndex];
+      const local = conflictDistrict(left, right);
+      if (!local) continue;
+      const pair = [left.id, right.id].sort();
+      const leftIsSideA = left.id === pair[0];
+      const id = createStableEntityId("gang-conflict", `${seed}:${pair[0]}:${pair[1]}`);
+      touched.add(id);
+      const previous = previousById.get(id);
+      const previousLeftLosses = previous ? (previous.networkAId === left.id ? previous.lossesA : previous.lossesB) : 0;
+      const previousRightLosses = previous ? (previous.networkAId === right.id ? previous.lossesA : previous.lossesB) : 0;
+      const previousLeftCredits = previous ? (previous.networkAId === left.id ? previous.creditsLostA : previous.creditsLostB) : 0;
+      const previousRightCredits = previous ? (previous.networkAId === right.id ? previous.creditsLostA : previous.creditsLostB) : 0;
+      const pressure = clamp(
+        local.overlap * .62
+        + Math.min(left.violence, right.violence) * .24
+        + Math.min(left.heat, right.heat) * .18
+        - 22
+      );
+
+      if (pressure < 24) {
+        if (previous) {
+          const intensity = clamp(previous.intensity - 12);
+          next.push({
+            ...previous,
+            status: intensity <= 4 ? "ended" : "cooling",
+            intensity,
+            endedAt: intensity <= 4 ? timestamp : previous.endedAt,
+            lastUpdatedAt: timestamp
+          });
+        }
+        continue;
+      }
+
+      const intensity = clamp(Math.round((previous?.intensity ?? pressure) * .58 + pressure * .42));
+      const status: GangConflictState["status"] = intensity >= 54 ? "active" : "tense";
+      let conflict: GangConflictState = {
+        id,
+        networkAId: pair[0],
+        networkBId: pair[1],
+        districtId: local.districtId,
+        status,
+        intensity,
+        startedAt: previous?.startedAt ?? timestamp,
+        lastClashAt: previous?.lastClashAt,
+        lossesA: leftIsSideA ? previousLeftLosses : previousRightLosses,
+        lossesB: leftIsSideA ? previousRightLosses : previousLeftLosses,
+        creditsLostA: leftIsSideA ? previousLeftCredits : previousRightCredits,
+        creditsLostB: leftIsSideA ? previousRightCredits : previousLeftCredits,
+        lastUpdatedAt: timestamp
+      };
+
+      const rng = new SeededRandom(`${seed}:gang-conflict:${dayIndex}:${id}`);
+      const clashChance = status === "active" ? clamp(intensity / 115, .18, .82) : clamp(intensity / 260, .06, .28);
+      if (rng.chance(clashChance)) {
+        const leftPower = networkConflictPower(left, local.districtId) + rng.integer(-18, 18);
+        const rightPower = networkConflictPower(right, local.districtId) + rng.integer(-18, 18);
+        const leftLoses = Math.min(Math.max(0, left.memberResidentIds.length - 1), rng.integer(0, 1) + (leftPower < rightPower ? 1 : 0));
+        const rightLoses = Math.min(Math.max(0, right.memberResidentIds.length - 1), rng.integer(0, 1) + (rightPower < leftPower ? 1 : 0));
+        const lostLeftIds = left.memberResidentIds.slice(-leftLoses);
+        const lostRightIds = right.memberResidentIds.slice(-rightLoses);
+        const leftOrgBudget = organizations.find((item) => item.id === left.organizationId)?.budget ?? left.treasury;
+        const rightOrgBudget = organizations.find((item) => item.id === right.organizationId)?.budget ?? right.treasury;
+        const leftCost = Math.max(0, Math.min(left.treasury, Math.max(0, leftOrgBudget), Math.round(120 + intensity * 3 + leftLoses * 220)));
+        const rightCost = Math.max(0, Math.min(right.treasury, Math.max(0, rightOrgBudget), Math.round(120 + intensity * 3 + rightLoses * 220)));
+        const leftWon = leftPower >= rightPower;
+        const leftInfluence = clamp((left.influenceByDistrict[local.districtId] ?? 0) + (leftWon ? rng.integer(1, 4) : -rng.integer(2, 5)));
+        const rightInfluence = clamp((right.influenceByDistrict[local.districtId] ?? 0) + (leftWon ? -rng.integer(2, 5) : rng.integer(1, 4)));
+
+        left = {
+          ...left,
+          memberResidentIds: left.memberResidentIds.filter((residentId) => !lostLeftIds.includes(residentId)),
+          treasury: Math.max(0, left.treasury - leftCost),
+          cohesion: clamp(left.cohesion + (leftWon ? 2 : -4)),
+          heat: clamp(left.heat + 4 + leftLoses * 2),
+          influenceByDistrict: { ...left.influenceByDistrict, [local.districtId]: leftInfluence },
+          operations: left.operations.map((operation) => operation.districtId === local.districtId && !leftWon ? { ...operation, status: "strained" as const, heat: clamp(operation.heat + 8) } : operation),
+          lastUpdatedAt: timestamp
+        };
+        right = {
+          ...right,
+          memberResidentIds: right.memberResidentIds.filter((residentId) => !lostRightIds.includes(residentId)),
+          treasury: Math.max(0, right.treasury - rightCost),
+          cohesion: clamp(right.cohesion + (leftWon ? -4 : 2)),
+          heat: clamp(right.heat + 4 + rightLoses * 2),
+          influenceByDistrict: { ...right.influenceByDistrict, [local.districtId]: rightInfluence },
+          operations: right.operations.map((operation) => operation.districtId === local.districtId && leftWon ? { ...operation, status: "strained" as const, heat: clamp(operation.heat + 8) } : operation),
+          lastUpdatedAt: timestamp
+        };
+        networks[leftIndex] = left;
+        networks[rightIndex] = right;
+        organizations = updateOrganizationBudget(organizations, left.organizationId, -leftCost);
+        organizations = updateOrganizationBudget(organizations, right.organizationId, -rightCost);
+        const harmed = new Set([...lostLeftIds, ...lostRightIds]);
+        population.residents = population.residents.map((resident) => harmed.has(resident.id) ? {
+          ...resident,
+          health: resident.health === "healthy" ? "strained" : "ill",
+          healthScore: clamp(resident.healthScore - rng.integer(12, 28))
+        } : resident);
+        if (leftCost > 0) pushTransaction(transactions, {
+          idempotencyKey: `${seed}:gang-conflict-cost:${dayIndex}:${id}:${left.id}`,
+          timestamp,
+          debitEntityId: left.organizationId,
+          creditEntityId: createStableEntityId("kernel-system", `${seed}:unregistered-market`),
+          resource: "credits",
+          amount: leftCost,
+          reason: "operating-settlement",
+          description: "Crew losses, weapons, treatment and replacement costs from a territorial clash."
+        });
+        if (rightCost > 0) pushTransaction(transactions, {
+          idempotencyKey: `${seed}:gang-conflict-cost:${dayIndex}:${id}:${right.id}`,
+          timestamp,
+          debitEntityId: right.organizationId,
+          creditEntityId: createStableEntityId("kernel-system", `${seed}:unregistered-market`),
+          resource: "credits",
+          amount: rightCost,
+          reason: "operating-settlement",
+          description: "Crew losses, weapons, treatment and replacement costs from a territorial clash."
+        });
+        conflict = {
+          ...conflict,
+          status: "active",
+          intensity: clamp(intensity + 6),
+          lastClashAt: timestamp,
+          lossesA: conflict.lossesA + (leftIsSideA ? leftLoses : rightLoses),
+          lossesB: conflict.lossesB + (leftIsSideA ? rightLoses : leftLoses),
+          creditsLostA: conflict.creditsLostA + (leftIsSideA ? leftCost : rightCost),
+          creditsLostB: conflict.creditsLostB + (leftIsSideA ? rightCost : leftCost)
+        };
+        addTotals(dayTotals, { gangClashes: 1, gangCasualties: leftLoses + rightLoses });
+        notices.push({
+          districtId: local.districtId,
+          title: "Столкновение преступных сетей.",
+          detail: `${left.name} и ${right.name}: потери состава ${leftLoses + rightLoses}, давление на район ${conflict.intensity}%.`,
+          importance: conflict.intensity >= 75 || leftLoses + rightLoses >= 3 ? 3 : 2
+        });
+      }
+      next.push(conflict);
+    }
+  }
+
+  for (const previous of sourceConflicts) {
+    if (touched.has(previous.id)) continue;
+    next.push({ ...previous, status: "ended", intensity: 0, endedAt: previous.endedAt ?? timestamp, lastUpdatedAt: timestamp });
+  }
+  return { networks, conflicts: next.slice(-80), organizations, population };
+}
+
 export function advanceGovernmentCrime(state: GovernmentCrimeState, input: GovernmentAdvanceInput): GovernmentAdvanceResult {
   if (input.timestamp <= state.lastUpdatedAt) {
     return { state, organizations: input.organizations, population: input.population, economy: input.economy, infrastructure: input.infrastructure, production: input.production, notices: [], transactions: [] };
@@ -375,6 +583,7 @@ export function advanceGovernmentCrime(state: GovernmentCrimeState, input: Gover
   let licenses = state.licenses.map((item) => ({ ...item }));
   let districts = state.districts.map((item) => ({ ...item }));
   let crimeNetworks = state.crimeNetworks.map((item) => ({ ...item, memberResidentIds: [...item.memberResidentIds], influenceByDistrict: { ...item.influenceByDistrict }, operations: item.operations.map((operation) => ({ ...operation })) }));
+  let gangConflicts = state.gangConflicts.map((item) => ({ ...item }));
   let cases = state.cases.map((item) => ({ ...item, assignedOfficerIds: [...item.assignedOfficerIds], detainedResidentIds: [...item.detainedResidentIds] }));
   const history = [...state.history];
   const totals = { ...state.totals };
@@ -788,6 +997,23 @@ export function advanceGovernmentCrime(state: GovernmentCrimeState, input: Gover
       return { ...network, treasury, corruptionBudget, heat, operations, lastUpdatedAt: timestamp };
     });
 
+    const conflictAdvance = advanceGangConflicts(
+      input.seed,
+      dayIndex,
+      timestamp,
+      crimeNetworks,
+      gangConflicts,
+      organizations,
+      population,
+      notices,
+      transactions,
+      dayTotals
+    );
+    crimeNetworks = conflictAdvance.networks;
+    gangConflicts = conflictAdvance.conflicts;
+    organizations = conflictAdvance.organizations;
+    population = conflictAdvance.population;
+
     cases.push(...newCases);
     cases = cases.map((caseState) => {
       if (caseState.status === "closed" || caseState.status === "cold") return caseState;
@@ -873,6 +1099,7 @@ export function advanceGovernmentCrime(state: GovernmentCrimeState, input: Gover
       arrests: dayTotals.arrests,
       openCases: cases.filter((item) => item.status === "open" || item.status === "investigating" || item.status === "charged").length,
       suspendedLicenses: licenses.filter((item) => item.status === "suspended" || item.status === "revoked").length,
+      activeGangConflicts: gangConflicts.filter((item) => item.status === "active" || item.status === "tense").length,
       averagePatrolCoverage: mean(districts.map((item) => item.patrolCoverage)),
       averageCorruption: mean(districts.map((item) => item.corruption))
     });
@@ -885,6 +1112,7 @@ export function advanceGovernmentCrime(state: GovernmentCrimeState, input: Gover
     licenses,
     districts,
     crimeNetworks,
+    gangConflicts,
     cases,
     history: history.slice(-MAX_HISTORY),
     totals,
