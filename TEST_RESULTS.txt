@@ -1,0 +1,16 @@
+Neon Life 0.50.2 verification
+
+Reproduction before fix:
+- TypeScript failed in src/app/map/VenueWorkPanel.tsx with 22 diagnostics, including all 10 diagnostics shown by GitHub annotations.
+
+Verification after physical deletion of all seven legacy files:
+- npm run typecheck: PASS
+- npm run test:legacy-work: PASS
+- npm run test:ui: PASS (all UI suites)
+- Domain suites: PASS 29/29
+- runtimePerformanceTest: creation 916 ms, projection 3.77 ms, hour 454 ms
+- saveCodecTest: 25,147,974 raw bytes -> 2,224,092 stored bytes
+
+Production bundling note:
+- Vite bundling could not execute in the Linux sandbox because the uploaded node_modules tree contains the Windows Rollup native package and lacks @rollup/rollup-linux-x64-gnu.
+- The build command completed its TypeScript phase successfully before that environment-only dependency error.

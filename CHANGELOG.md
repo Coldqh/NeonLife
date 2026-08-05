@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.50.2 — Verified Legacy Removal
+
+- physically removed every stale player-work file left by archive overlay: the venue panel, work engine, courier engine and obsolete test configs;
+- made patch application use `git rm --ignore-unmatch` plus filesystem deletion so tracked and untracked leftovers are both removed;
+- added post-apply hard checks that abort before commit if any legacy file still exists;
+- reproduced the failing TypeScript state first, then verified typecheck, all UI suites and all 29 domain suites on the cleaned tree;
+- kept `playerLoop` as the only player-facing source of truth for work, training, equipment, street fights and boxing;
+- updated application and service-worker version metadata to 0.50.2.
+
 ## 0.50.1 — Legacy Work Cleanup
 
 - removed the orphaned `src/app/map/VenueWorkPanel.tsx` left behind when the 0.50 archive was copied over an existing project instead of applied with the deletion manifest;
