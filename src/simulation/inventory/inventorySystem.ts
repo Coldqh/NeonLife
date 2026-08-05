@@ -27,6 +27,7 @@ import type {
 
 const MAX_TRANSFERS = 2_000;
 const FOOD_PRODUCT_IDS = new Set(FOOD_CATALOG.map((item) => item.id));
+const PRODUCT_IDS = new Set(PRODUCT_CATALOG.map((item) => item.id));
 
 type AdapterTarget = { key: string; inventoryId: string; ownerEntityId: string; ownerKind: InventoryOwnerKind; compartment: string; locationId?: string; productId: string; quantity: number; manufacturedAt?: number; expiresAt?: number; unitCost?: number; origin?: ProductBatchOrigin };
 
@@ -465,17 +466,33 @@ export function finalizeProductInventoryState(state: ProductInventoryState, time
   return { ...next, totals: totals(next), integrity: integrity(next, timestamp) };
 }
 
-function canonicalBusinessForLocation(worldCore: WorldCoreState, locationId: string): WorldCoreBusinessState | undefined {
-  return worldCore.businesses.find((business) => business.locationId === locationId);
+interface WorldCoreBusinessLookup {
+  byId: Map<string, WorldCoreBusinessState>;
+  byLocationId: Map<string, WorldCoreBusinessState>;
 }
 
-function canonicalBusinessForVenue(worldCore: WorldCoreState, venueId: string): WorldCoreBusinessState | undefined {
+function buildWorldCoreBusinessLookup(worldCore: WorldCoreState): WorldCoreBusinessLookup {
+  const byId = new Map<string, WorldCoreBusinessState>();
+  const byLocationId = new Map<string, WorldCoreBusinessState>();
+  for (const business of worldCore.businesses) {
+    byId.set(business.id, business);
+    if (business.locationId) byLocationId.set(business.locationId, business);
+  }
+  return { byId, byLocationId };
+}
+
+function canonicalBusinessForLocation(worldCore: WorldCoreState, locationId: string, lookup?: WorldCoreBusinessLookup): WorldCoreBusinessState | undefined {
+  return lookup?.byLocationId.get(locationId) ?? worldCore.businesses.find((business) => business.locationId === locationId);
+}
+
+function canonicalBusinessForVenue(worldCore: WorldCoreState, venueId: string, lookup?: WorldCoreBusinessLookup): WorldCoreBusinessState | undefined {
   const canonicalId = worldCore.aliasToBusinessId[venueId] ?? worldCore.aliasToBusinessId[`venue-account:${venueId}`];
-  return canonicalId ? worldCore.businesses.find((business) => business.id === canonicalId) : undefined;
+  return canonicalId ? lookup?.byId.get(canonicalId) ?? worldCore.businesses.find((business) => business.id === canonicalId) : undefined;
 }
 
 function adapterTargets(input: ProductInventoryInput, includeBusinessCompatibility = true): AdapterTarget[] {
   const targets: AdapterTarget[] = [];
+  const businessLookup = buildWorldCoreBusinessLookup(input.worldCore);
   const pushFoodStacks = (stacks: FoodStack[], compartment: "carried" | "home-storage") => {
     const grouped = new Map<string, FoodStack[]>();
     for (const stack of stacks) grouped.set(stack.productId, [...(grouped.get(stack.productId) ?? []), stack]);
@@ -492,20 +509,20 @@ function adapterTargets(input: ProductInventoryInput, includeBusinessCompatibili
   if (includeBusinessCompatibility) {
     const venueProductKeys = new Set<string>();
     for (const operation of input.urban.venueOperations.operations) {
-      const business = canonicalBusinessForVenue(input.worldCore, operation.venueId);
+      const business = canonicalBusinessForVenue(input.worldCore, operation.venueId, businessLookup);
       if (!business) continue;
       for (const offer of operation.offers) {
-        if (!offer.productId || !PRODUCT_CATALOG.some((product) => product.id === offer.productId)) continue;
+        if (!offer.productId || !PRODUCT_IDS.has(offer.productId)) continue;
         venueProductKeys.add(`${business.id}|${offer.productId}`);
         targets.push({ key: `venue:${offer.id}`, inventoryId: businessInventoryId(business.id), ownerEntityId: business.id, ownerKind: "business", compartment: "stockroom", locationId: business.locationId, productId: offer.productId, quantity: Math.max(0, offer.stock), unitCost: Math.max(1, Math.round(offer.currentPrice * .42)), origin: "migration" });
       }
     }
 
     for (const [locationId, stock] of Object.entries(input.food.shopStocks)) {
-      const business = canonicalBusinessForLocation(input.worldCore, locationId);
+      const business = canonicalBusinessForLocation(input.worldCore, locationId, businessLookup);
       if (!business) continue;
       for (const [productId, quantity] of Object.entries(stock)) {
-        if (!PRODUCT_CATALOG.some((product) => product.id === productId) || venueProductKeys.has(`${business.id}|${productId}`)) continue;
+        if (!PRODUCT_IDS.has(productId) || venueProductKeys.has(`${business.id}|${productId}`)) continue;
         targets.push({ key: `shop:${locationId}:${productId}`, inventoryId: businessInventoryId(business.id), ownerEntityId: business.id, ownerKind: "business", compartment: "stockroom", locationId, productId, quantity, origin: "migration" });
       }
     }
@@ -513,7 +530,7 @@ function adapterTargets(input: ProductInventoryInput, includeBusinessCompatibili
 
   for (const household of input.population.households) {
     for (const pantry of household.pantry) {
-      if (!PRODUCT_CATALOG.some((product) => product.id === pantry.productId)) continue;
+      if (!PRODUCT_IDS.has(pantry.productId)) continue;
       targets.push({ key: `household:${household.id}:${pantry.productId}`, inventoryId: householdInventoryId(household.id), ownerEntityId: household.id, ownerKind: "household", compartment: "pantry", locationId: household.homeLocationId ?? undefined, productId: pantry.productId, quantity: pantry.units, origin: "migration" });
     }
   }
@@ -624,13 +641,80 @@ function integrity(state: ProductInventoryState, timestamp: number): ProductInve
 }
 
 export function createProductInventoryState(input: ProductInventoryInput): ProductInventoryState {
-  let state = emptyState(input.timestamp);
   const targets = adapterTargets(input);
+  const inventories: InventoryState[] = [];
+  const inventoryById = new Map<string, InventoryState>();
+  const batches: ProductBatchState[] = [];
+  const adapterQuantities: ProductInventoryState["adapterQuantities"] = {};
+  const adapterBindings: ProductInventoryState["adapterBindings"] = {};
+  let sequence = 0;
+
   for (const target of targets) {
-    state = applyAdapterDelta(state, input, target, 0);
-    state.adapterQuantities[target.key] = target.quantity;
-    state.adapterBindings[target.key] = { inventoryId: target.inventoryId, ownerEntityId: target.ownerEntityId, ownerKind: target.ownerKind, compartment: target.compartment, locationId: target.locationId, productId: target.productId };
+    let inventory = inventoryById.get(target.inventoryId);
+    if (!inventory) {
+      inventory = inventoryShell(target, input.timestamp);
+      inventories.push(inventory);
+      inventoryById.set(target.inventoryId, inventory);
+    }
+
+    const quantity = Math.round(target.quantity);
+    if (quantity > 0) {
+      const product = getProduct(target.productId);
+      sequence += 1;
+      const manufacturedAt = target.manufacturedAt ?? input.timestamp;
+      const id = batchId(input.seed, target.productId, target.ownerEntityId, manufacturedAt, sequence);
+      const expiresAt = target.expiresAt ?? (product.shelfLifeHours === null ? undefined : manufacturedAt + product.shelfLifeHours * 3_600_000);
+      const quality = 75;
+      batches.push({
+        id,
+        productId: target.productId,
+        lotCode: lotCode(product, manufacturedAt, sequence),
+        producerEntityId: target.ownerEntityId,
+        origin: target.origin ?? "reconciliation",
+        quantityProduced: quantity,
+        quantityRemaining: quantity,
+        quality,
+        condition: 100,
+        manufacturedAt,
+        expiresAt,
+        legal: product.legality !== "illegal",
+        recalled: false
+      });
+      inventory.stacks.push({
+        id: stackId(inventory.id, id, sequence),
+        inventoryId: inventory.id,
+        productId: target.productId,
+        batchId: id,
+        quantity,
+        reservedQuantity: 0,
+        unitCost: target.unitCost ?? product.basePrice,
+        quality,
+        condition: 100,
+        acquiredAt: input.timestamp,
+        expiresAt,
+        status: expiresAt !== undefined && expiresAt <= input.timestamp ? "expired" : "available"
+      });
+    }
+
+    adapterQuantities[target.key] = target.quantity;
+    adapterBindings[target.key] = {
+      inventoryId: target.inventoryId,
+      ownerEntityId: target.ownerEntityId,
+      ownerKind: target.ownerKind,
+      compartment: target.compartment,
+      locationId: target.locationId,
+      productId: target.productId
+    };
   }
+
+  let state: ProductInventoryState = {
+    ...emptyState(input.timestamp),
+    batches,
+    inventories,
+    adapterQuantities,
+    adapterBindings,
+    sequence
+  };
   state = expireStacks(state, input.timestamp);
   state.totals = totals(state);
   state.integrity = integrity(state, input.timestamp);
@@ -705,10 +789,6 @@ export function advanceProductInventoryState(input: ProductInventoryInput): Prod
   if (!input.previous) return createProductInventoryState(input);
   let state: ProductInventoryState = {
     ...input.previous,
-    batches: input.previous.batches.map((item) => ({ ...item })),
-    inventories: input.previous.inventories.map((inventory) => ({ ...inventory, stacks: inventory.stacks.map((stack) => ({ ...stack })) })),
-    transfers: input.previous.transfers.map((item) => ({ ...item })),
-    recalls: input.previous.recalls.map((item) => ({ ...item })),
     adapterQuantities: {},
     adapterBindings: {},
     catalogVersion: PRODUCT_CATALOG_VERSION
@@ -912,7 +992,7 @@ function productionInventorySnapshot(production: ProductionState, food: FoodStat
     const business = canonicalBusinessForLocation(worldCore, locationId);
     if (!business) continue;
     for (const [productId, quantity] of Object.entries(stock)) {
-      if (!PRODUCT_CATALOG.some((product) => product.id === productId)) continue;
+      if (!PRODUCT_IDS.has(productId)) continue;
       entries.push({
         inventoryId: businessInventoryId(business.id),
         ownerEntityId: business.id,
@@ -1017,79 +1097,145 @@ export function destroyExpiredInventoryStacks(
   return { state: finalizeProductInventoryState({ ...state, inventories, lastUpdatedAt: timestamp }, timestamp), destroyed };
 }
 
+interface ProductInventoryProjectionIndex {
+  byId: Map<string, InventoryState>;
+  byOwnerCompartment: Map<string, InventoryState>;
+  quantitiesByInventoryId: Map<string, Map<string, number>>;
+  availableUnitsByInventoryId: Map<string, number>;
+  targetUnitsByInventoryId: Map<string, number>;
+}
+
+function ownerCompartmentKey(ownerEntityId: string, compartment: string): string {
+  return `${ownerEntityId}|${compartment}`;
+}
+
+function buildProductInventoryProjectionIndex(state: ProductInventoryState, timestamp: number): ProductInventoryProjectionIndex {
+  const byId = new Map<string, InventoryState>();
+  const byOwnerCompartment = new Map<string, InventoryState>();
+  const quantitiesByInventoryId = new Map<string, Map<string, number>>();
+  const availableUnitsByInventoryId = new Map<string, number>();
+  const targetUnitsByInventoryId = new Map<string, number>();
+
+  for (const inventory of state.inventories) {
+    byId.set(inventory.id, inventory);
+    byOwnerCompartment.set(ownerCompartmentKey(inventory.ownerEntityId, inventory.compartment), inventory);
+    const quantities = new Map<string, number>();
+    let availableUnits = 0;
+    let targetUnits = 0;
+    for (const stack of inventory.stacks) {
+      targetUnits += Math.max(stack.quantity, getProduct(stack.productId).stackLimit);
+      if (stack.status !== "available" || (stack.expiresAt !== undefined && stack.expiresAt <= timestamp)) continue;
+      const available = Math.max(0, stack.quantity - stack.reservedQuantity);
+      if (available <= 0) continue;
+      quantities.set(stack.productId, (quantities.get(stack.productId) ?? 0) + available);
+      availableUnits += stack.quantity;
+    }
+    quantitiesByInventoryId.set(inventory.id, quantities);
+    availableUnitsByInventoryId.set(inventory.id, availableUnits);
+    targetUnitsByInventoryId.set(inventory.id, targetUnits);
+  }
+
+  return { byId, byOwnerCompartment, quantitiesByInventoryId, availableUnitsByInventoryId, targetUnitsByInventoryId };
+}
+
+function indexedInventory(index: ProductInventoryProjectionIndex, ownerEntityId: string, compartment: string): InventoryState | undefined {
+  return index.byOwnerCompartment.get(ownerCompartmentKey(ownerEntityId, compartment));
+}
+
+function indexedQuantity(index: ProductInventoryProjectionIndex, inventory: InventoryState | undefined, productId: string): number {
+  return inventory ? index.quantitiesByInventoryId.get(inventory.id)?.get(productId) ?? 0 : 0;
+}
+
 function foodStacksFor(inventory: InventoryState | undefined): FoodStack[] {
   if (!inventory) return [];
   return inventory.stacks.filter((stack) => FOOD_PRODUCT_IDS.has(stack.productId) && stack.status === "available").map((stack) => ({ id: stack.id, productId: stack.productId, quantity: stack.quantity, purchasedAt: stack.acquiredAt, expiresAt: stack.expiresAt ?? Number.MAX_SAFE_INTEGER }));
 }
 
-function projectFood(state: ProductInventoryState, input: ProductInventoryInput): FoodState {
-  const carried = foodStacksFor(state.inventories.find((item) => item.id === playerCarriedInventoryId(input.playerId)));
-  const storage = foodStacksFor(state.inventories.find((item) => item.id === playerStorageInventoryId(input.playerId)));
+function projectFood(index: ProductInventoryProjectionIndex, input: ProductInventoryInput): FoodState {
+  const carried = foodStacksFor(index.byId.get(playerCarriedInventoryId(input.playerId)));
+  const storage = foodStacksFor(index.byId.get(playerStorageInventoryId(input.playerId)));
   const shopStocks: FoodState["shopStocks"] = { ...input.food.shopStocks };
   for (const business of input.worldCore.businesses) {
     if (!business.locationId) continue;
-    const inventory = state.inventories.find((item) => item.id === businessInventoryId(business.id));
+    const inventory = indexedInventory(index, business.id, "stockroom");
     if (!inventory) continue;
-    const stockEntries: Array<[string, number]> = FOOD_CATALOG.map((product) => [product.id, quantityInInventory(inventory, product.id, input.timestamp)]);
-    const stock = Object.fromEntries(stockEntries.filter((entry) => entry[1] > 0));
+    const quantities = index.quantitiesByInventoryId.get(inventory.id);
+    const stock = quantities
+      ? Object.fromEntries([...quantities.entries()].filter(([productId, quantity]) => FOOD_PRODUCT_IDS.has(productId) && quantity > 0))
+      : {};
     if (Object.keys(stock).length || shopStocks[business.locationId]) shopStocks[business.locationId] = stock;
   }
   return { ...input.food, carried, storage, shopStocks };
 }
 
-function projectHouseholds(state: ProductInventoryState, population: PopulationState, timestamp: number): PopulationState {
+function projectHouseholds(index: ProductInventoryProjectionIndex, population: PopulationState): PopulationState {
   const households = population.households.map((household) => {
-    const inventory = state.inventories.find((item) => item.id === householdInventoryId(household.id));
+    const inventory = indexedInventory(index, household.id, "pantry");
     if (!inventory) return household;
-    const pantry = PRODUCT_CATALOG.map((product) => ({ productId: product.id, units: quantityInInventory(inventory, product.id, timestamp) })).filter((item) => item.units > 0);
-    return { ...household, pantry, foodUnits: pantry.filter((item) => getProduct(item.productId).category === "food" || getProduct(item.productId).category === "drink").reduce((sum, item) => sum + item.units, 0) };
+    const quantities = index.quantitiesByInventoryId.get(inventory.id);
+    const pantry = PRODUCT_CATALOG
+      .map((product) => ({ productId: product.id, units: quantities?.get(product.id) ?? 0 }))
+      .filter((item) => item.units > 0);
+    return { ...household, pantry, foodUnits: pantry.filter((item) => {
+      const category = getProduct(item.productId).category;
+      return category === "food" || category === "drink";
+    }).reduce((sum, item) => sum + item.units, 0) };
   });
   return { ...population, households };
 }
 
-function projectVenueOperations(state: ProductInventoryState, urban: UrbanFabricState, worldCore: WorldCoreState, timestamp: number): UrbanFabricState {
+function projectVenueOperations(index: ProductInventoryProjectionIndex, urban: UrbanFabricState, worldCore: WorldCoreState): UrbanFabricState {
+  const businessLookup = buildWorldCoreBusinessLookup(worldCore);
   const operations = urban.venueOperations.operations.map((operation): VenueOperationState => {
-    const business = canonicalBusinessForVenue(worldCore, operation.venueId);
+    const business = canonicalBusinessForVenue(worldCore, operation.venueId, businessLookup);
     if (!business) return operation;
-    const inventory = state.inventories.find((item) => item.id === businessInventoryId(business.id));
+    const inventory = indexedInventory(index, business.id, "stockroom");
     if (!inventory) return operation;
-    return { ...operation, offers: operation.offers.map((offer) => offer.productId ? { ...offer, stock: quantityInInventory(inventory, offer.productId, timestamp) } : offer) };
+    return { ...operation, offers: operation.offers.map((offer) => offer.productId ? { ...offer, stock: indexedQuantity(index, inventory, offer.productId) } : offer) };
   });
   return { ...urban, venueOperations: { ...urban.venueOperations, operations, totals: { ...urban.venueOperations.totals, stockUnits: operations.reduce((sum, operation) => sum + operation.offers.reduce((inner, offer) => inner + offer.stock, 0), 0) } } };
 }
 
-function aggregateResource(inventory: InventoryState | undefined, resource: ProductionResource, timestamp: number): number {
-  if (!inventory) return 0;
-  return PRODUCT_CATALOG.filter((product) => product.legacyResource === resource).reduce((sum, product) => sum + quantityInInventory(inventory, product.id, timestamp), 0);
-}
-
-function projectProduction(state: ProductInventoryState, production: ProductionState, timestamp: number): ProductionState {
+function projectProduction(index: ProductInventoryProjectionIndex, production: ProductionState): ProductionState {
   const facilities = production.facilities.map((facility) => {
-    const inventory = state.inventories.find((item) => item.id === facilityInventoryId(facility.id));
+    const inventory = indexedInventory(index, facility.id, "warehouse");
     if (!inventory) return facility;
-    return { ...facility, inventory: facility.inventory.map((entry) => ({ ...entry, amount: aggregateResource(inventory, entry.resource, timestamp) })) };
+    const quantities = index.quantitiesByInventoryId.get(inventory.id);
+    return { ...facility, inventory: facility.inventory.map((entry) => ({
+      ...entry,
+      amount: PRODUCT_CATALOG.reduce((sum, product) => product.legacyResource === entry.resource ? sum + (quantities?.get(product.id) ?? 0) : sum, 0)
+    })) };
   });
   return { ...production, facilities };
 }
 
-function projectWorldCore(state: ProductInventoryState, worldCore: WorldCoreState, timestamp: number): WorldCoreState {
+function projectWorldCore(index: ProductInventoryProjectionIndex, worldCore: WorldCoreState, timestamp: number): WorldCoreState {
   const businesses = worldCore.businesses.map((business) => {
-    const inventory = state.inventories.find((item) => item.id === businessInventoryId(business.id));
+    const inventory = indexedInventory(index, business.id, "stockroom");
     if (!inventory) return business;
-    const units = inventory.stacks.reduce((sum, stack) => sum + (stack.status === "available" ? stack.quantity : 0), 0);
-    const target = Math.max(1, inventory.stacks.reduce((sum, stack) => sum + Math.max(stack.quantity, getProduct(stack.productId).stackLimit), 0));
+    const units = index.availableUnitsByInventoryId.get(inventory.id) ?? 0;
+    const target = Math.max(1, index.targetUnitsByInventoryId.get(inventory.id) ?? 0);
     return { ...business, stockUnits: units, stockPercent: clamp(Math.round(units / target * 100)), lastUpdatedAt: timestamp };
   });
   return { ...worldCore, businesses, lastUpdatedAt: timestamp };
 }
 
 export function projectProductInventoryState(state: ProductInventoryState, input: ProductInventoryInput): ProductInventoryProjectionResult {
-  const worldCore = projectWorldCore(state, input.worldCore, input.timestamp);
-  const food = projectFood(state, input);
-  const population = projectHouseholds(state, input.population, input.timestamp);
-  const production = projectProduction(state, input.production, input.timestamp);
-  const urban = projectVenueOperations(state, input.urban, worldCore, input.timestamp);
-  const projectedState = { ...state, adapterQuantities: {}, adapterBindings: {}, totals: totals(state), integrity: integrity(state, input.timestamp), lastUpdatedAt: input.timestamp };
+  const index = buildProductInventoryProjectionIndex(state, input.timestamp);
+  const worldCore = projectWorldCore(index, input.worldCore, input.timestamp);
+  const food = projectFood(index, input);
+  const population = projectHouseholds(index, input.population);
+  const production = projectProduction(index, input.production);
+  const urban = projectVenueOperations(index, input.urban, worldCore);
+  const projectionsAreCurrent = state.lastUpdatedAt === input.timestamp && state.integrity.checkedAt === input.timestamp;
+  const projectedState = {
+    ...state,
+    adapterQuantities: {},
+    adapterBindings: {},
+    totals: projectionsAreCurrent ? state.totals : totals(state),
+    integrity: projectionsAreCurrent ? state.integrity : integrity(state, input.timestamp),
+    lastUpdatedAt: input.timestamp
+  };
   return { state: projectedState, food, population, production, urban, worldCore };
 }
 

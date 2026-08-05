@@ -1,4 +1,4 @@
-# NEON LIFE — архитектура v0.32.0
+# NEON LIFE — архитектура v0.49.0
 
 ## Persistent Street Topology
 

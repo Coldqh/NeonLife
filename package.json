@@ -1,7 +1,7 @@
 {
   "name": "neon-life",
   "private": true,
-  "version": "0.48.0",
+  "version": "0.49.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -37,7 +37,9 @@
     "test:world-core": "node scripts/run-world-core-consolidation-test.mjs",
     "test:inventory": "node scripts/run-product-inventory-domain-test.mjs",
     "test:business": "node scripts/run-unified-business-economy-test.mjs",
-    "test:domain": "node scripts/run-all-domain-tests.mjs"
+    "test:domain": "node scripts/run-all-domain-tests.mjs",
+    "test:runtime": "node scripts/run-runtime-performance-test.mjs",
+    "test:save": "node scripts/run-save-codec-test.mjs"
   },
   "dependencies": {
     "react": "18.3.1",

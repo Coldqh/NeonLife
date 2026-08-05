@@ -1,5 +1,13 @@
-import { createSaveChecksum } from "./checksum";
+import { createSaveChecksum, createSaveChecksumFromJson } from "./checksum";
 import { migrateEnvelope } from "./migrations";
+import {
+  GZIP_JSON_ENCODING,
+  PLAIN_JSON_ENCODING,
+  decodeSavePayloadJson,
+  encodeSavePayloadJson,
+  type EncodedSavePayload,
+  type SavePayloadEncoding
+} from "./saveCodec";
 import {
   SAVE_SCHEMA_VERSION,
   SAVE_SLOT_IDS,
@@ -16,6 +24,18 @@ const SAVES_STORE = "saves";
 const META_STORE = "meta";
 const RECOVERY_STORE = "recovery";
 const ACTIVE_SLOT_KEY = "active-slot";
+type StoredSaveSummary = Omit<SaveSlotSummary, "exists">;
+
+interface EncodedSaveEnvelope {
+  slotId: SaveSlotId;
+  schemaVersion: number;
+  createdAt: string;
+  updatedAt: string;
+  checksum: string;
+  payloadEncoding: SavePayloadEncoding;
+  payloadData: Blob | string;
+  summary: StoredSaveSummary;
+}
 
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -31,6 +51,38 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
     transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed"));
   });
 }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isEncodedEnvelope(value: unknown): value is EncodedSaveEnvelope {
+  if (!isRecord(value)) return false;
+  return value.payloadEncoding === GZIP_JSON_ENCODING || value.payloadEncoding === PLAIN_JSON_ENCODING;
+}
+
+
+function isCurrentGameSession(value: unknown): value is GameSession {
+  if (!isRecord(value)) return false;
+  return value.schemaVersion === SAVE_SCHEMA_VERSION
+    && typeof value.timestamp === "number"
+    && isRecord(value.world)
+    && isRecord(value.player)
+    && Array.isArray(value.events)
+    && isRecord(value.district);
+}
+
+function summaryFor(slotId: SaveSlotId, updatedAt: string, payload: GameSession): StoredSaveSummary {
+  return {
+    slotId,
+    updatedAt,
+    playerName: payload.player.name,
+    cityName: payload.world.city.name,
+    seed: payload.world.meta.seed,
+    gameTimestamp: payload.timestamp
+  };
+}
+
 
 export function openSaveDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -75,20 +127,31 @@ export async function writeActiveSlot(database: IDBDatabase, slotId: SaveSlotId)
 export async function saveSession(database: IDBDatabase, slotId: SaveSlotId, payload: GameSession): Promise<SaveEnvelope> {
   const existing = await readRawEnvelope(database, slotId);
   const now = new Date().toISOString();
-  const envelope: SaveEnvelope = {
+  const normalizedPayload = { ...payload, schemaVersion: SAVE_SCHEMA_VERSION };
+  const payloadJson = JSON.stringify(normalizedPayload);
+  const checksum = createSaveChecksumFromJson(payloadJson);
+  const encoded = await encodeSavePayloadJson(payloadJson);
+  const createdAt = isRecord(existing) && typeof existing.createdAt === "string" ? existing.createdAt : now;
+  const stored: EncodedSaveEnvelope = {
     slotId,
     schemaVersion: SAVE_SCHEMA_VERSION,
-    createdAt: existing && typeof existing === "object" && "createdAt" in existing && typeof existing.createdAt === "string"
-      ? existing.createdAt
-      : now,
+    createdAt,
     updatedAt: now,
-    checksum: createSaveChecksum(payload),
-    payload: { ...payload, schemaVersion: SAVE_SCHEMA_VERSION }
+    checksum,
+    ...encoded,
+    summary: summaryFor(slotId, now, normalizedPayload)
   };
   const transaction = database.transaction(SAVES_STORE, "readwrite");
-  transaction.objectStore(SAVES_STORE).put(envelope);
+  transaction.objectStore(SAVES_STORE).put(stored);
   await transactionDone(transaction);
-  return envelope;
+  return {
+    slotId,
+    schemaVersion: SAVE_SCHEMA_VERSION,
+    createdAt,
+    updatedAt: now,
+    checksum,
+    payload: normalizedPayload
+  };
 }
 
 async function readRawEnvelope(database: IDBDatabase, slotId: SaveSlotId): Promise<unknown> {
@@ -100,18 +163,39 @@ export async function loadSession(database: IDBDatabase, slotId: SaveSlotId): Pr
   const raw = await readRawEnvelope(database, slotId);
   if (!raw) return null;
 
-  const rawRecord = raw as { checksum?: unknown; payload?: unknown; schemaVersion?: unknown };
-  if (typeof rawRecord.checksum === "string" && rawRecord.checksum && createSaveChecksum(rawRecord.payload) !== rawRecord.checksum) {
+  let decodedRaw = raw;
+  let encodedPayloadJson: string | null = null;
+  try {
+    if (isEncodedEnvelope(raw)) {
+      encodedPayloadJson = await decodeSavePayloadJson(raw as EncodedSavePayload);
+      if (raw.checksum && createSaveChecksumFromJson(encodedPayloadJson) !== raw.checksum) {
+        throw new Error("Checksum mismatch");
+      }
+      decodedRaw = { ...raw, payload: JSON.parse(encodedPayloadJson) };
+    } else {
+      const rawRecord = raw as { checksum?: unknown; payload?: unknown };
+      if (typeof rawRecord.checksum === "string" && rawRecord.checksum && createSaveChecksum(rawRecord.payload) !== rawRecord.checksum) {
+        throw new Error("Checksum mismatch");
+      }
+    }
+  } catch (error) {
     await archiveRecovery(database, {
       slotId,
       capturedAt: new Date().toISOString(),
-      reason: "Checksum mismatch",
+      reason: error instanceof Error ? error.message : "Save payload is unreadable",
       raw
     });
     return null;
   }
 
-  const envelope = migrateEnvelope(raw, slotId);
+  const rawSchemaVersion = isRecord(raw) && typeof raw.schemaVersion === "number" ? raw.schemaVersion : 0;
+  const decodedPayload = isRecord(decodedRaw) ? decodedRaw.payload : null;
+  if (rawSchemaVersion === SAVE_SCHEMA_VERSION && isCurrentGameSession(decodedPayload)) {
+    if (!isEncodedEnvelope(raw)) await saveSession(database, slotId, decodedPayload);
+    return decodedPayload;
+  }
+
+  const envelope = migrateEnvelope(decodedRaw, slotId);
   if (!envelope) {
     await archiveRecovery(database, {
       slotId,
@@ -122,10 +206,7 @@ export async function loadSession(database: IDBDatabase, slotId: SaveSlotId): Pr
     return null;
   }
 
-  const actualChecksum = createSaveChecksum(envelope.payload);
-  if (rawRecord.schemaVersion !== SAVE_SCHEMA_VERSION || envelope.checksum !== actualChecksum) {
-    await saveSession(database, slotId, envelope.payload);
-  }
+  await saveSession(database, slotId, envelope.payload);
   return envelope.payload;
 }
 
@@ -137,21 +218,32 @@ export async function deleteSession(database: IDBDatabase, slotId: SaveSlotId): 
 
 export async function listSaveSummaries(database: IDBDatabase): Promise<SaveSlotSummary[]> {
   const transaction = database.transaction(SAVES_STORE, "readonly");
-  const records = await requestResult<SaveEnvelope[]>(transaction.objectStore(SAVES_STORE).getAll());
-  const bySlot = new Map(records.map((record) => [record.slotId, record]));
-  return SAVE_SLOT_IDS.map((slotId) => {
-    const record = bySlot.get(slotId);
-    if (!record) return { slotId, exists: false };
-    return {
+  const records = await requestResult<unknown[]>(transaction.objectStore(SAVES_STORE).getAll());
+  const bySlot = new Map<SaveSlotId, SaveSlotSummary>();
+  for (const raw of records) {
+    if (!isRecord(raw) || !SAVE_SLOT_IDS.includes(raw.slotId as SaveSlotId)) continue;
+    const slotId = raw.slotId as SaveSlotId;
+    if (isEncodedEnvelope(raw) && isRecord(raw.summary)) {
+      bySlot.set(slotId, { ...raw.summary, slotId, exists: true } as SaveSlotSummary);
+      continue;
+    }
+    const payload = raw.payload;
+    if (!isRecord(payload)) continue;
+    const player = isRecord(payload.player) ? payload.player : {};
+    const world = isRecord(payload.world) ? payload.world : {};
+    const city = isRecord(world.city) ? world.city : {};
+    const meta = isRecord(world.meta) ? world.meta : {};
+    bySlot.set(slotId, {
       slotId,
       exists: true,
-      updatedAt: record.updatedAt,
-      playerName: record.payload.player.name,
-      cityName: record.payload.world.city.name,
-      seed: record.payload.world.meta.seed,
-      gameTimestamp: record.payload.timestamp
-    };
-  });
+      updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : undefined,
+      playerName: typeof player.name === "string" ? player.name : undefined,
+      cityName: typeof city.name === "string" ? city.name : undefined,
+      seed: typeof meta.seed === "string" ? meta.seed : undefined,
+      gameTimestamp: typeof payload.timestamp === "number" ? payload.timestamp : undefined
+    });
+  }
+  return SAVE_SLOT_IDS.map((slotId) => bySlot.get(slotId) ?? { slotId, exists: false });
 }
 
 export async function countRecoveryRecords(database: IDBDatabase): Promise<number> {

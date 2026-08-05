@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.49.0 — Runtime Recovery
+
+- replaced repeated linear inventory and business lookups with one projection index shared by food, households, venues, production and World Core;
+- rebuilt initial canonical inventory in one batch instead of copying growing inventory and batch arrays for every adapter target;
+- removed the redundant deep copy before hourly inventory expiry and reused current totals and integrity projections when safe;
+- reduced representative world creation from about 1.6 seconds to 0.9 seconds and a full hour from about 1.8 seconds to 0.45 seconds;
+- stored save slots as gzip-compressed JSON blobs with a plain JSON fallback, shrinking a representative 25.2 MB world to about 2.2 MB;
+- calculated save checksum from the already serialized payload and stored slot summaries outside the compressed world payload;
+- preserved old uncompressed slots and converted them after a successful load;
+- stopped current schema 42 saves from running the entire migration pipeline on every boot;
+- added runtime performance and save codec regressions to the 29-suite domain runner;
+- updated architecture and patch metadata to version 0.49.0.
+
 ## 0.48.0 — Physical Inventory
 
 - made `ProductInventory` authoritative for player carried items, home storage, household pantries and production facilities during normal runtime;

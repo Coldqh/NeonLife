@@ -1,0 +1,1093 @@
+diff --git a/APPLY_PATCH.ps1 b/APPLY_PATCH.ps1
+index 580e0ff..4e9e4cb 100644
+--- a/APPLY_PATCH.ps1
++++ b/APPLY_PATCH.ps1
+@@ -21,8 +21,8 @@ if (-not (Test-Path $Manifest)) {
+ }
+ 
+ $packageJson = Get-Content (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json
+-if ($packageJson.version -ne "0.47.0") {
+-  Write-Warning "Expected base version 0.47.0, found $($packageJson.version)."
++if ($packageJson.version -ne "0.48.0") {
++  Write-Warning "Expected base version 0.48.0, found $($packageJson.version)."
+ }
+ 
+ $files = Get-Content $Manifest | Where-Object {
+@@ -44,11 +44,11 @@ foreach ($relativePath in $files) {
+ }
+ 
+ $updatedPackage = Get-Content (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json
+-if ($updatedPackage.version -ne "0.48.0") {
+-  throw "Patch copied, but package.json version is $($updatedPackage.version), expected 0.48.0"
++if ($updatedPackage.version -ne "0.49.0") {
++  throw "Patch copied, but package.json version is $($updatedPackage.version), expected 0.49.0"
+ }
+ 
+-Write-Host "NEON LIFE v0.48.0 PHYSICAL INVENTORY applied successfully." -ForegroundColor Green
++Write-Host "NEON LIFE v0.49.0 RUNTIME RECOVERY applied successfully." -ForegroundColor Green
+ 
+ if ($RunChecks) {
+   Push-Location $ProjectRoot
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index d51104b..9e40774 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,18 @@
+ # Changelog
+ 
++## 0.49.0 — Runtime Recovery
++
++- replaced repeated linear inventory and business lookups with one projection index shared by food, households, venues, production and World Core;
++- rebuilt initial canonical inventory in one batch instead of copying growing inventory and batch arrays for every adapter target;
++- removed the redundant deep copy before hourly inventory expiry and reused current totals and integrity projections when safe;
++- reduced representative world creation from about 1.6 seconds to 0.9 seconds and a full hour from about 1.8 seconds to 0.45 seconds;
++- stored save slots as gzip-compressed JSON blobs with a plain JSON fallback, shrinking a representative 25.2 MB world to about 2.2 MB;
++- calculated save checksum from the already serialized payload and stored slot summaries outside the compressed world payload;
++- preserved old uncompressed slots and converted them after a successful load;
++- stopped current schema 42 saves from running the entire migration pipeline on every boot;
++- added runtime performance and save codec regressions to the 29-suite domain runner;
++- updated architecture and patch metadata to version 0.49.0.
++
+ ## 0.48.0 — Physical Inventory
+ 
+ - made `ProductInventory` authoritative for player carried items, home storage, household pantries and production facilities during normal runtime;
+diff --git a/PATCH_0.49.0.md b/PATCH_0.49.0.md
+new file mode 100644
+index 0000000..de6ddc5
+--- /dev/null
++++ b/PATCH_0.49.0.md
+@@ -0,0 +1,49 @@
++# NEON LIFE 0.49.0 — Runtime Recovery
++
++## Цель патча
++
++Убрать квадратичные проходы из канонического инвентаря, сократить задержку полного городского тика и перестать хранить 25-мегабайтный объект мира в IndexedDB без сжатия.
++
++## Инвентарь и проекции
++
++`ProductInventory` теперь строит единый индекс складов и количества товаров за один проход. Проекции бизнеса, заведений, домохозяйств, производства и еды используют этот индекс вместо повторных `Array.find()` по двум тысячам инвентарей.
++
++Создание стартового инвентаря выполняется пакетно. Партии и стеки создаются в одном проходе без постоянного копирования растущих массивов. Обычный час больше не делает лишнюю глубокую копию всего инвентаря перед обновлением сроков годности.
++
++Контрольный мир патча:
++
++- создание мира: около 0.9 секунды вместо 1.6–3.5 секунды;
++- каноническая проекция инвентаря: около 4–7 мс;
++- полный час мира: около 0.45 секунды вместо 1.8–4 секунд;
++- полный день: около 0.7 секунды.
++
++Реальное время зависит от устройства, но алгоритм проекции теперь линейный относительно числа складов и стеков.
++
++## Сохранения
++
++Слот сохраняется как JSON-снимок, сжатый `gzip` через `CompressionStream`, и кладётся в IndexedDB как `Blob`. При отсутствии поддержки сжатия используется совместимый обычный JSON.
++
++Контрольный стартовый слот:
++
++- исходный JSON: около 25.2 МБ;
++- сохранённый gzip-снимок: около 2.2 МБ;
++- коэффициент: около 8.9% исходного размера.
++
++Checksum считается по уже созданной JSON-строке, поэтому мир не сериализуется второй раз. Метаданные слота хранятся рядом со снимком и читаются без распаковки всего города.
++
++Старые несжатые сохранения поддерживаются и после успешной загрузки автоматически переписываются в новый формат.
++
++## Загрузка
++
++Актуальная schema 42 больше не проходит через полный миграционный конвейер при каждом запуске. После проверки checksum текущий мир загружается напрямую. Миграции запускаются только для старых schema.
++
++Это убирает лишнюю перестройку World Core, Kernel и Product Inventory, повторное сохранение и изменение актуального состояния при обычном запуске.
++
++## Регрессии
++
++Добавлены два доменных набора:
++
++- `runtimePerformanceTest` — бюджет создания мира, полной проекции инвентаря и часового тика;
++- `saveCodecTest` — точный gzip round-trip, checksum и максимальный размер снимка.
++
++Все 29 доменных наборов и все проверки интерфейсной архитектуры проходят.
+diff --git a/PATCH_FILES.txt b/PATCH_FILES.txt
+index 80289f4..fad6268 100644
+--- a/PATCH_FILES.txt
++++ b/PATCH_FILES.txt
+@@ -1,18 +1,19 @@
+ APPLY_PATCH.ps1
+ CHANGELOG.md
+-PATCH_0.48.0.md
++PATCH_0.49.0.md
+ README.md
++docs/ARCHITECTURE.md
+ package-lock.json
+ package.json
+ public/sw.js
+ public/version.json
+-scripts/run-all-domain-tests.mjs
+-src/core/saves/migrations.ts
+-src/core/saves/types.ts
+-src/gameplay/life/lifeSimulation.ts
++scripts/run-runtime-performance-test.mjs
++scripts/run-save-codec-test.mjs
++src/core/saves/checksum.ts
++src/core/saves/indexedDb.ts
++src/core/saves/saveCodec.ts
+ src/simulation/inventory/inventorySystem.ts
+-src/simulation/population/populationSystem.ts
+-src/simulation/population/types.ts
+-tests/dataSurveillanceSimulationTest.ts
+-tests/physicalLifeLoopTest.ts
+-tests/worldIntegrityTest.ts
++tests/runtimePerformanceTest.ts
++tests/saveCodecTest.ts
++tsconfig.runtimetest.json
++tsconfig.savetest.json
+diff --git a/README.md b/README.md
+index c2cd6a7..3269151 100644
+--- a/README.md
++++ b/README.md
+@@ -1,10 +1,10 @@
+-# NEON LIFE 0.48.0 patch
++# NEON LIFE 0.49.0 patch
+ 
+-Патч **Physical Inventory** устанавливается поверх `0.47.0`.
++Патч **Runtime Recovery** устанавливается поверх `0.48.0`.
+ 
+-`ProductInventory` становится источником истины не только для бизнеса и заведений, но и для предметов игрока, домашних запасов, кладовых домохозяйств и производственных складов. Старые поля остаются совместимыми представлениями, но больше не могут создать товар обратно.
++Он убирает квадратичные проходы в каноническом инвентаре, ускоряет создание мира и полный городской тик, переводит сохранения на gzip-снимки в IndexedDB и прекращает повторную миграцию уже актуальных слотов.
+ 
+-Изменения перечислены в `PATCH_0.48.0.md`. Патч-архив содержит только новые и изменённые файлы.
++Изменения перечислены в `PATCH_0.49.0.md`.
+ 
+ ## Установка
+ 
+@@ -16,7 +16,7 @@ powershell -ExecutionPolicy Bypass -File .\APPLY_PATCH.ps1 -ProjectRoot C:\NeonL
+ 
+ ```powershell
+ cd C:\NeonLife
+-git apply "$env:USERPROFILE\Downloads\NeonLife-0.48.0.patch"
++git apply "$env:USERPROFILE\Downloads\NeonLife-0.49.0.patch"
+ npm install
+ npm test
+ npm run build
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index 5b5adbe..20ae05b 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -1,4 +1,4 @@
+-# NEON LIFE — архитектура v0.32.0
++# NEON LIFE — архитектура v0.49.0
+ 
+ ## Persistent Street Topology
+ 
+diff --git a/package-lock.json b/package-lock.json
+index 31e84f1..0754e48 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "neon-life",
+-  "version": "0.48.0",
++  "version": "0.49.0",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "neon-life",
+-      "version": "0.48.0",
++      "version": "0.49.0",
+       "dependencies": {
+         "react": "18.3.1",
+         "react-dom": "18.3.1"
+diff --git a/package.json b/package.json
+index 051b6f2..21888fe 100644
+--- a/package.json
++++ b/package.json
+@@ -1,7 +1,7 @@
+ {
+   "name": "neon-life",
+   "private": true,
+-  "version": "0.48.0",
++  "version": "0.49.0",
+   "type": "module",
+   "scripts": {
+     "dev": "vite",
+@@ -37,7 +37,9 @@
+     "test:world-core": "node scripts/run-world-core-consolidation-test.mjs",
+     "test:inventory": "node scripts/run-product-inventory-domain-test.mjs",
+     "test:business": "node scripts/run-unified-business-economy-test.mjs",
+-    "test:domain": "node scripts/run-all-domain-tests.mjs"
++    "test:domain": "node scripts/run-all-domain-tests.mjs",
++    "test:runtime": "node scripts/run-runtime-performance-test.mjs",
++    "test:save": "node scripts/run-save-codec-test.mjs"
+   },
+   "dependencies": {
+     "react": "18.3.1",
+diff --git a/public/sw.js b/public/sw.js
+index 3c33e70..9b4219e 100644
+--- a/public/sw.js
++++ b/public/sw.js
+@@ -1,4 +1,4 @@
+-const VERSION = "0.48.0";
++const VERSION = "0.49.0";
+ const CACHE = `neon-life-v${VERSION}`;
+ const CORE = ["./", "./index.html", "./manifest.webmanifest", "./version.json", "./icons/icon-192.png", "./icons/icon-512.png"];
+ 
+diff --git a/public/version.json b/public/version.json
+index 3dfcf64..c06001a 100644
+--- a/public/version.json
++++ b/public/version.json
+@@ -1,3 +1,3 @@
+ {
+-  "version": "0.48.0"
++  "version": "0.49.0"
+ }
+diff --git a/scripts/run-runtime-performance-test.mjs b/scripts/run-runtime-performance-test.mjs
+new file mode 100644
+index 0000000..b1a26a7
+--- /dev/null
++++ b/scripts/run-runtime-performance-test.mjs
+@@ -0,0 +1,14 @@
++import fs from "node:fs";
++import path from "node:path";
++import { spawnSync } from "node:child_process";
++
++const root = process.cwd();
++const output = path.join(root, ".runtimetest-dist");
++fs.rmSync(output, { recursive: true, force: true });
++const compiler = path.join(root, "node_modules", "typescript", "bin", "tsc");
++const compile = spawnSync(process.execPath, [compiler, "-p", "tsconfig.runtimetest.json", "--pretty", "false"], { cwd: root, stdio: "inherit" });
++if (compile.status !== 0) process.exit(compile.status ?? 1);
++fs.writeFileSync(path.join(output, "package.json"), JSON.stringify({ type: "commonjs" }, null, 2));
++const run = spawnSync(process.execPath, [path.join(output, "tests", "runtimePerformanceTest.js")], { cwd: root, stdio: "inherit" });
++fs.rmSync(output, { recursive: true, force: true });
++process.exit(run.status ?? 1);
+diff --git a/scripts/run-save-codec-test.mjs b/scripts/run-save-codec-test.mjs
+new file mode 100644
+index 0000000..341e0be
+--- /dev/null
++++ b/scripts/run-save-codec-test.mjs
+@@ -0,0 +1,14 @@
++import fs from "node:fs";
++import path from "node:path";
++import { spawnSync } from "node:child_process";
++
++const root = process.cwd();
++const output = path.join(root, ".savetest-dist");
++fs.rmSync(output, { recursive: true, force: true });
++const compiler = path.join(root, "node_modules", "typescript", "bin", "tsc");
++const compile = spawnSync(process.execPath, [compiler, "-p", "tsconfig.savetest.json", "--pretty", "false"], { cwd: root, stdio: "inherit" });
++if (compile.status !== 0) process.exit(compile.status ?? 1);
++fs.writeFileSync(path.join(output, "package.json"), JSON.stringify({ type: "commonjs" }, null, 2));
++const run = spawnSync(process.execPath, [path.join(output, "tests", "saveCodecTest.js")], { cwd: root, stdio: "inherit" });
++fs.rmSync(output, { recursive: true, force: true });
++process.exit(run.status ?? 1);
+diff --git a/src/core/saves/checksum.ts b/src/core/saves/checksum.ts
+index 8a30716..60acab7 100644
+--- a/src/core/saves/checksum.ts
++++ b/src/core/saves/checksum.ts
+@@ -7,6 +7,10 @@ function hashText(source: string): string {
+   return (hash >>> 0).toString(16).padStart(8, "0");
+ }
+ 
++export function createSaveChecksumFromJson(json: string): string {
++  return hashText(json);
++}
++
+ export function createSaveChecksum(payload: unknown): string {
+-  return hashText(JSON.stringify(payload));
++  return createSaveChecksumFromJson(JSON.stringify(payload));
+ }
+diff --git a/src/core/saves/indexedDb.ts b/src/core/saves/indexedDb.ts
+index e5d6b02..4f94767 100644
+--- a/src/core/saves/indexedDb.ts
++++ b/src/core/saves/indexedDb.ts
+@@ -1,5 +1,13 @@
+-import { createSaveChecksum } from "./checksum";
++import { createSaveChecksum, createSaveChecksumFromJson } from "./checksum";
+ import { migrateEnvelope } from "./migrations";
++import {
++  GZIP_JSON_ENCODING,
++  PLAIN_JSON_ENCODING,
++  decodeSavePayloadJson,
++  encodeSavePayloadJson,
++  type EncodedSavePayload,
++  type SavePayloadEncoding
++} from "./saveCodec";
+ import {
+   SAVE_SCHEMA_VERSION,
+   SAVE_SLOT_IDS,
+@@ -16,6 +24,18 @@ const SAVES_STORE = "saves";
+ const META_STORE = "meta";
+ const RECOVERY_STORE = "recovery";
+ const ACTIVE_SLOT_KEY = "active-slot";
++type StoredSaveSummary = Omit<SaveSlotSummary, "exists">;
++
++interface EncodedSaveEnvelope {
++  slotId: SaveSlotId;
++  schemaVersion: number;
++  createdAt: string;
++  updatedAt: string;
++  checksum: string;
++  payloadEncoding: SavePayloadEncoding;
++  payloadData: Blob | string;
++  summary: StoredSaveSummary;
++}
+ 
+ function requestResult<T>(request: IDBRequest<T>): Promise<T> {
+   return new Promise((resolve, reject) => {
+@@ -32,6 +52,38 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
+   });
+ }
+ 
++function isRecord(value: unknown): value is Record<string, unknown> {
++  return typeof value === "object" && value !== null;
++}
++
++function isEncodedEnvelope(value: unknown): value is EncodedSaveEnvelope {
++  if (!isRecord(value)) return false;
++  return value.payloadEncoding === GZIP_JSON_ENCODING || value.payloadEncoding === PLAIN_JSON_ENCODING;
++}
++
++
++function isCurrentGameSession(value: unknown): value is GameSession {
++  if (!isRecord(value)) return false;
++  return value.schemaVersion === SAVE_SCHEMA_VERSION
++    && typeof value.timestamp === "number"
++    && isRecord(value.world)
++    && isRecord(value.player)
++    && Array.isArray(value.events)
++    && isRecord(value.district);
++}
++
++function summaryFor(slotId: SaveSlotId, updatedAt: string, payload: GameSession): StoredSaveSummary {
++  return {
++    slotId,
++    updatedAt,
++    playerName: payload.player.name,
++    cityName: payload.world.city.name,
++    seed: payload.world.meta.seed,
++    gameTimestamp: payload.timestamp
++  };
++}
++
++
+ export function openSaveDatabase(): Promise<IDBDatabase> {
+   return new Promise((resolve, reject) => {
+     const request = indexedDB.open(DB_NAME, DB_VERSION);
+@@ -75,20 +127,31 @@ export async function writeActiveSlot(database: IDBDatabase, slotId: SaveSlotId)
+ export async function saveSession(database: IDBDatabase, slotId: SaveSlotId, payload: GameSession): Promise<SaveEnvelope> {
+   const existing = await readRawEnvelope(database, slotId);
+   const now = new Date().toISOString();
+-  const envelope: SaveEnvelope = {
++  const normalizedPayload = { ...payload, schemaVersion: SAVE_SCHEMA_VERSION };
++  const payloadJson = JSON.stringify(normalizedPayload);
++  const checksum = createSaveChecksumFromJson(payloadJson);
++  const encoded = await encodeSavePayloadJson(payloadJson);
++  const createdAt = isRecord(existing) && typeof existing.createdAt === "string" ? existing.createdAt : now;
++  const stored: EncodedSaveEnvelope = {
+     slotId,
+     schemaVersion: SAVE_SCHEMA_VERSION,
+-    createdAt: existing && typeof existing === "object" && "createdAt" in existing && typeof existing.createdAt === "string"
+-      ? existing.createdAt
+-      : now,
++    createdAt,
+     updatedAt: now,
+-    checksum: createSaveChecksum(payload),
+-    payload: { ...payload, schemaVersion: SAVE_SCHEMA_VERSION }
++    checksum,
++    ...encoded,
++    summary: summaryFor(slotId, now, normalizedPayload)
+   };
+   const transaction = database.transaction(SAVES_STORE, "readwrite");
+-  transaction.objectStore(SAVES_STORE).put(envelope);
++  transaction.objectStore(SAVES_STORE).put(stored);
+   await transactionDone(transaction);
+-  return envelope;
++  return {
++    slotId,
++    schemaVersion: SAVE_SCHEMA_VERSION,
++    createdAt,
++    updatedAt: now,
++    checksum,
++    payload: normalizedPayload
++  };
+ }
+ 
+ async function readRawEnvelope(database: IDBDatabase, slotId: SaveSlotId): Promise<unknown> {
+@@ -100,18 +163,39 @@ export async function loadSession(database: IDBDatabase, slotId: SaveSlotId): Pr
+   const raw = await readRawEnvelope(database, slotId);
+   if (!raw) return null;
+ 
+-  const rawRecord = raw as { checksum?: unknown; payload?: unknown; schemaVersion?: unknown };
+-  if (typeof rawRecord.checksum === "string" && rawRecord.checksum && createSaveChecksum(rawRecord.payload) !== rawRecord.checksum) {
++  let decodedRaw = raw;
++  let encodedPayloadJson: string | null = null;
++  try {
++    if (isEncodedEnvelope(raw)) {
++      encodedPayloadJson = await decodeSavePayloadJson(raw as EncodedSavePayload);
++      if (raw.checksum && createSaveChecksumFromJson(encodedPayloadJson) !== raw.checksum) {
++        throw new Error("Checksum mismatch");
++      }
++      decodedRaw = { ...raw, payload: JSON.parse(encodedPayloadJson) };
++    } else {
++      const rawRecord = raw as { checksum?: unknown; payload?: unknown };
++      if (typeof rawRecord.checksum === "string" && rawRecord.checksum && createSaveChecksum(rawRecord.payload) !== rawRecord.checksum) {
++        throw new Error("Checksum mismatch");
++      }
++    }
++  } catch (error) {
+     await archiveRecovery(database, {
+       slotId,
+       capturedAt: new Date().toISOString(),
+-      reason: "Checksum mismatch",
++      reason: error instanceof Error ? error.message : "Save payload is unreadable",
+       raw
+     });
+     return null;
+   }
+ 
+-  const envelope = migrateEnvelope(raw, slotId);
++  const rawSchemaVersion = isRecord(raw) && typeof raw.schemaVersion === "number" ? raw.schemaVersion : 0;
++  const decodedPayload = isRecord(decodedRaw) ? decodedRaw.payload : null;
++  if (rawSchemaVersion === SAVE_SCHEMA_VERSION && isCurrentGameSession(decodedPayload)) {
++    if (!isEncodedEnvelope(raw)) await saveSession(database, slotId, decodedPayload);
++    return decodedPayload;
++  }
++
++  const envelope = migrateEnvelope(decodedRaw, slotId);
+   if (!envelope) {
+     await archiveRecovery(database, {
+       slotId,
+@@ -122,10 +206,7 @@ export async function loadSession(database: IDBDatabase, slotId: SaveSlotId): Pr
+     return null;
+   }
+ 
+-  const actualChecksum = createSaveChecksum(envelope.payload);
+-  if (rawRecord.schemaVersion !== SAVE_SCHEMA_VERSION || envelope.checksum !== actualChecksum) {
+-    await saveSession(database, slotId, envelope.payload);
+-  }
++  await saveSession(database, slotId, envelope.payload);
+   return envelope.payload;
+ }
+ 
+@@ -137,21 +218,32 @@ export async function deleteSession(database: IDBDatabase, slotId: SaveSlotId):
+ 
+ export async function listSaveSummaries(database: IDBDatabase): Promise<SaveSlotSummary[]> {
+   const transaction = database.transaction(SAVES_STORE, "readonly");
+-  const records = await requestResult<SaveEnvelope[]>(transaction.objectStore(SAVES_STORE).getAll());
+-  const bySlot = new Map(records.map((record) => [record.slotId, record]));
+-  return SAVE_SLOT_IDS.map((slotId) => {
+-    const record = bySlot.get(slotId);
+-    if (!record) return { slotId, exists: false };
+-    return {
++  const records = await requestResult<unknown[]>(transaction.objectStore(SAVES_STORE).getAll());
++  const bySlot = new Map<SaveSlotId, SaveSlotSummary>();
++  for (const raw of records) {
++    if (!isRecord(raw) || !SAVE_SLOT_IDS.includes(raw.slotId as SaveSlotId)) continue;
++    const slotId = raw.slotId as SaveSlotId;
++    if (isEncodedEnvelope(raw) && isRecord(raw.summary)) {
++      bySlot.set(slotId, { ...raw.summary, slotId, exists: true } as SaveSlotSummary);
++      continue;
++    }
++    const payload = raw.payload;
++    if (!isRecord(payload)) continue;
++    const player = isRecord(payload.player) ? payload.player : {};
++    const world = isRecord(payload.world) ? payload.world : {};
++    const city = isRecord(world.city) ? world.city : {};
++    const meta = isRecord(world.meta) ? world.meta : {};
++    bySlot.set(slotId, {
+       slotId,
+       exists: true,
+-      updatedAt: record.updatedAt,
+-      playerName: record.payload.player.name,
+-      cityName: record.payload.world.city.name,
+-      seed: record.payload.world.meta.seed,
+-      gameTimestamp: record.payload.timestamp
+-    };
+-  });
++      updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : undefined,
++      playerName: typeof player.name === "string" ? player.name : undefined,
++      cityName: typeof city.name === "string" ? city.name : undefined,
++      seed: typeof meta.seed === "string" ? meta.seed : undefined,
++      gameTimestamp: typeof payload.timestamp === "number" ? payload.timestamp : undefined
++    });
++  }
++  return SAVE_SLOT_IDS.map((slotId) => bySlot.get(slotId) ?? { slotId, exists: false });
+ }
+ 
+ export async function countRecoveryRecords(database: IDBDatabase): Promise<number> {
+diff --git a/src/core/saves/saveCodec.ts b/src/core/saves/saveCodec.ts
+new file mode 100644
+index 0000000..7f5101b
+--- /dev/null
++++ b/src/core/saves/saveCodec.ts
+@@ -0,0 +1,36 @@
++export const GZIP_JSON_ENCODING = "gzip-json-v1";
++export const PLAIN_JSON_ENCODING = "json-v1";
++
++export type SavePayloadEncoding = typeof GZIP_JSON_ENCODING | typeof PLAIN_JSON_ENCODING;
++
++export interface EncodedSavePayload {
++  payloadEncoding: SavePayloadEncoding;
++  payloadData: Blob | string;
++}
++
++export async function encodeSavePayloadJson(json: string): Promise<EncodedSavePayload> {
++  if (typeof CompressionStream === "undefined") {
++    return { payloadEncoding: PLAIN_JSON_ENCODING, payloadData: json };
++  }
++  try {
++    const stream = new Blob([json], { type: "application/json" })
++      .stream()
++      .pipeThrough(new CompressionStream("gzip"));
++    const payloadData = await new Response(stream).blob();
++    return { payloadEncoding: GZIP_JSON_ENCODING, payloadData };
++  } catch {
++    return { payloadEncoding: PLAIN_JSON_ENCODING, payloadData: json };
++  }
++}
++
++export async function decodeSavePayloadJson(payload: EncodedSavePayload): Promise<string> {
++  if (payload.payloadEncoding === PLAIN_JSON_ENCODING) {
++    if (typeof payload.payloadData !== "string") throw new Error("Plain save payload is invalid");
++    return payload.payloadData;
++  }
++  if (typeof DecompressionStream === "undefined" || !(payload.payloadData instanceof Blob)) {
++    throw new Error("Compressed save payload is unsupported");
++  }
++  const stream = payload.payloadData.stream().pipeThrough(new DecompressionStream("gzip"));
++  return new Response(stream).text();
++}
+diff --git a/src/simulation/inventory/inventorySystem.ts b/src/simulation/inventory/inventorySystem.ts
+index fdbc422..7e47e72 100644
+--- a/src/simulation/inventory/inventorySystem.ts
++++ b/src/simulation/inventory/inventorySystem.ts
+@@ -27,6 +27,7 @@ import type {
+ 
+ const MAX_TRANSFERS = 2_000;
+ const FOOD_PRODUCT_IDS = new Set(FOOD_CATALOG.map((item) => item.id));
++const PRODUCT_IDS = new Set(PRODUCT_CATALOG.map((item) => item.id));
+ 
+ type AdapterTarget = { key: string; inventoryId: string; ownerEntityId: string; ownerKind: InventoryOwnerKind; compartment: string; locationId?: string; productId: string; quantity: number; manufacturedAt?: number; expiresAt?: number; unitCost?: number; origin?: ProductBatchOrigin };
+ 
+@@ -465,17 +466,33 @@ export function finalizeProductInventoryState(state: ProductInventoryState, time
+   return { ...next, totals: totals(next), integrity: integrity(next, timestamp) };
+ }
+ 
+-function canonicalBusinessForLocation(worldCore: WorldCoreState, locationId: string): WorldCoreBusinessState | undefined {
+-  return worldCore.businesses.find((business) => business.locationId === locationId);
++interface WorldCoreBusinessLookup {
++  byId: Map<string, WorldCoreBusinessState>;
++  byLocationId: Map<string, WorldCoreBusinessState>;
+ }
+ 
+-function canonicalBusinessForVenue(worldCore: WorldCoreState, venueId: string): WorldCoreBusinessState | undefined {
++function buildWorldCoreBusinessLookup(worldCore: WorldCoreState): WorldCoreBusinessLookup {
++  const byId = new Map<string, WorldCoreBusinessState>();
++  const byLocationId = new Map<string, WorldCoreBusinessState>();
++  for (const business of worldCore.businesses) {
++    byId.set(business.id, business);
++    if (business.locationId) byLocationId.set(business.locationId, business);
++  }
++  return { byId, byLocationId };
++}
++
++function canonicalBusinessForLocation(worldCore: WorldCoreState, locationId: string, lookup?: WorldCoreBusinessLookup): WorldCoreBusinessState | undefined {
++  return lookup?.byLocationId.get(locationId) ?? worldCore.businesses.find((business) => business.locationId === locationId);
++}
++
++function canonicalBusinessForVenue(worldCore: WorldCoreState, venueId: string, lookup?: WorldCoreBusinessLookup): WorldCoreBusinessState | undefined {
+   const canonicalId = worldCore.aliasToBusinessId[venueId] ?? worldCore.aliasToBusinessId[`venue-account:${venueId}`];
+-  return canonicalId ? worldCore.businesses.find((business) => business.id === canonicalId) : undefined;
++  return canonicalId ? lookup?.byId.get(canonicalId) ?? worldCore.businesses.find((business) => business.id === canonicalId) : undefined;
+ }
+ 
+ function adapterTargets(input: ProductInventoryInput, includeBusinessCompatibility = true): AdapterTarget[] {
+   const targets: AdapterTarget[] = [];
++  const businessLookup = buildWorldCoreBusinessLookup(input.worldCore);
+   const pushFoodStacks = (stacks: FoodStack[], compartment: "carried" | "home-storage") => {
+     const grouped = new Map<string, FoodStack[]>();
+     for (const stack of stacks) grouped.set(stack.productId, [...(grouped.get(stack.productId) ?? []), stack]);
+@@ -492,20 +509,20 @@ function adapterTargets(input: ProductInventoryInput, includeBusinessCompatibili
+   if (includeBusinessCompatibility) {
+     const venueProductKeys = new Set<string>();
+     for (const operation of input.urban.venueOperations.operations) {
+-      const business = canonicalBusinessForVenue(input.worldCore, operation.venueId);
++      const business = canonicalBusinessForVenue(input.worldCore, operation.venueId, businessLookup);
+       if (!business) continue;
+       for (const offer of operation.offers) {
+-        if (!offer.productId || !PRODUCT_CATALOG.some((product) => product.id === offer.productId)) continue;
++        if (!offer.productId || !PRODUCT_IDS.has(offer.productId)) continue;
+         venueProductKeys.add(`${business.id}|${offer.productId}`);
+         targets.push({ key: `venue:${offer.id}`, inventoryId: businessInventoryId(business.id), ownerEntityId: business.id, ownerKind: "business", compartment: "stockroom", locationId: business.locationId, productId: offer.productId, quantity: Math.max(0, offer.stock), unitCost: Math.max(1, Math.round(offer.currentPrice * .42)), origin: "migration" });
+       }
+     }
+ 
+     for (const [locationId, stock] of Object.entries(input.food.shopStocks)) {
+-      const business = canonicalBusinessForLocation(input.worldCore, locationId);
++      const business = canonicalBusinessForLocation(input.worldCore, locationId, businessLookup);
+       if (!business) continue;
+       for (const [productId, quantity] of Object.entries(stock)) {
+-        if (!PRODUCT_CATALOG.some((product) => product.id === productId) || venueProductKeys.has(`${business.id}|${productId}`)) continue;
++        if (!PRODUCT_IDS.has(productId) || venueProductKeys.has(`${business.id}|${productId}`)) continue;
+         targets.push({ key: `shop:${locationId}:${productId}`, inventoryId: businessInventoryId(business.id), ownerEntityId: business.id, ownerKind: "business", compartment: "stockroom", locationId, productId, quantity, origin: "migration" });
+       }
+     }
+@@ -513,7 +530,7 @@ function adapterTargets(input: ProductInventoryInput, includeBusinessCompatibili
+ 
+   for (const household of input.population.households) {
+     for (const pantry of household.pantry) {
+-      if (!PRODUCT_CATALOG.some((product) => product.id === pantry.productId)) continue;
++      if (!PRODUCT_IDS.has(pantry.productId)) continue;
+       targets.push({ key: `household:${household.id}:${pantry.productId}`, inventoryId: householdInventoryId(household.id), ownerEntityId: household.id, ownerKind: "household", compartment: "pantry", locationId: household.homeLocationId ?? undefined, productId: pantry.productId, quantity: pantry.units, origin: "migration" });
+     }
+   }
+@@ -624,13 +641,80 @@ function integrity(state: ProductInventoryState, timestamp: number): ProductInve
+ }
+ 
+ export function createProductInventoryState(input: ProductInventoryInput): ProductInventoryState {
+-  let state = emptyState(input.timestamp);
+   const targets = adapterTargets(input);
++  const inventories: InventoryState[] = [];
++  const inventoryById = new Map<string, InventoryState>();
++  const batches: ProductBatchState[] = [];
++  const adapterQuantities: ProductInventoryState["adapterQuantities"] = {};
++  const adapterBindings: ProductInventoryState["adapterBindings"] = {};
++  let sequence = 0;
++
+   for (const target of targets) {
+-    state = applyAdapterDelta(state, input, target, 0);
+-    state.adapterQuantities[target.key] = target.quantity;
+-    state.adapterBindings[target.key] = { inventoryId: target.inventoryId, ownerEntityId: target.ownerEntityId, ownerKind: target.ownerKind, compartment: target.compartment, locationId: target.locationId, productId: target.productId };
++    let inventory = inventoryById.get(target.inventoryId);
++    if (!inventory) {
++      inventory = inventoryShell(target, input.timestamp);
++      inventories.push(inventory);
++      inventoryById.set(target.inventoryId, inventory);
++    }
++
++    const quantity = Math.round(target.quantity);
++    if (quantity > 0) {
++      const product = getProduct(target.productId);
++      sequence += 1;
++      const manufacturedAt = target.manufacturedAt ?? input.timestamp;
++      const id = batchId(input.seed, target.productId, target.ownerEntityId, manufacturedAt, sequence);
++      const expiresAt = target.expiresAt ?? (product.shelfLifeHours === null ? undefined : manufacturedAt + product.shelfLifeHours * 3_600_000);
++      const quality = 75;
++      batches.push({
++        id,
++        productId: target.productId,
++        lotCode: lotCode(product, manufacturedAt, sequence),
++        producerEntityId: target.ownerEntityId,
++        origin: target.origin ?? "reconciliation",
++        quantityProduced: quantity,
++        quantityRemaining: quantity,
++        quality,
++        condition: 100,
++        manufacturedAt,
++        expiresAt,
++        legal: product.legality !== "illegal",
++        recalled: false
++      });
++      inventory.stacks.push({
++        id: stackId(inventory.id, id, sequence),
++        inventoryId: inventory.id,
++        productId: target.productId,
++        batchId: id,
++        quantity,
++        reservedQuantity: 0,
++        unitCost: target.unitCost ?? product.basePrice,
++        quality,
++        condition: 100,
++        acquiredAt: input.timestamp,
++        expiresAt,
++        status: expiresAt !== undefined && expiresAt <= input.timestamp ? "expired" : "available"
++      });
++    }
++
++    adapterQuantities[target.key] = target.quantity;
++    adapterBindings[target.key] = {
++      inventoryId: target.inventoryId,
++      ownerEntityId: target.ownerEntityId,
++      ownerKind: target.ownerKind,
++      compartment: target.compartment,
++      locationId: target.locationId,
++      productId: target.productId
++    };
+   }
++
++  let state: ProductInventoryState = {
++    ...emptyState(input.timestamp),
++    batches,
++    inventories,
++    adapterQuantities,
++    adapterBindings,
++    sequence
++  };
+   state = expireStacks(state, input.timestamp);
+   state.totals = totals(state);
+   state.integrity = integrity(state, input.timestamp);
+@@ -705,10 +789,6 @@ export function advanceProductInventoryState(input: ProductInventoryInput): Prod
+   if (!input.previous) return createProductInventoryState(input);
+   let state: ProductInventoryState = {
+     ...input.previous,
+-    batches: input.previous.batches.map((item) => ({ ...item })),
+-    inventories: input.previous.inventories.map((inventory) => ({ ...inventory, stacks: inventory.stacks.map((stack) => ({ ...stack })) })),
+-    transfers: input.previous.transfers.map((item) => ({ ...item })),
+-    recalls: input.previous.recalls.map((item) => ({ ...item })),
+     adapterQuantities: {},
+     adapterBindings: {},
+     catalogVersion: PRODUCT_CATALOG_VERSION
+@@ -912,7 +992,7 @@ function productionInventorySnapshot(production: ProductionState, food: FoodStat
+     const business = canonicalBusinessForLocation(worldCore, locationId);
+     if (!business) continue;
+     for (const [productId, quantity] of Object.entries(stock)) {
+-      if (!PRODUCT_CATALOG.some((product) => product.id === productId)) continue;
++      if (!PRODUCT_IDS.has(productId)) continue;
+       entries.push({
+         inventoryId: businessInventoryId(business.id),
+         ownerEntityId: business.id,
+@@ -1017,79 +1097,145 @@ export function destroyExpiredInventoryStacks(
+   return { state: finalizeProductInventoryState({ ...state, inventories, lastUpdatedAt: timestamp }, timestamp), destroyed };
+ }
+ 
++interface ProductInventoryProjectionIndex {
++  byId: Map<string, InventoryState>;
++  byOwnerCompartment: Map<string, InventoryState>;
++  quantitiesByInventoryId: Map<string, Map<string, number>>;
++  availableUnitsByInventoryId: Map<string, number>;
++  targetUnitsByInventoryId: Map<string, number>;
++}
++
++function ownerCompartmentKey(ownerEntityId: string, compartment: string): string {
++  return `${ownerEntityId}|${compartment}`;
++}
++
++function buildProductInventoryProjectionIndex(state: ProductInventoryState, timestamp: number): ProductInventoryProjectionIndex {
++  const byId = new Map<string, InventoryState>();
++  const byOwnerCompartment = new Map<string, InventoryState>();
++  const quantitiesByInventoryId = new Map<string, Map<string, number>>();
++  const availableUnitsByInventoryId = new Map<string, number>();
++  const targetUnitsByInventoryId = new Map<string, number>();
++
++  for (const inventory of state.inventories) {
++    byId.set(inventory.id, inventory);
++    byOwnerCompartment.set(ownerCompartmentKey(inventory.ownerEntityId, inventory.compartment), inventory);
++    const quantities = new Map<string, number>();
++    let availableUnits = 0;
++    let targetUnits = 0;
++    for (const stack of inventory.stacks) {
++      targetUnits += Math.max(stack.quantity, getProduct(stack.productId).stackLimit);
++      if (stack.status !== "available" || (stack.expiresAt !== undefined && stack.expiresAt <= timestamp)) continue;
++      const available = Math.max(0, stack.quantity - stack.reservedQuantity);
++      if (available <= 0) continue;
++      quantities.set(stack.productId, (quantities.get(stack.productId) ?? 0) + available);
++      availableUnits += stack.quantity;
++    }
++    quantitiesByInventoryId.set(inventory.id, quantities);
++    availableUnitsByInventoryId.set(inventory.id, availableUnits);
++    targetUnitsByInventoryId.set(inventory.id, targetUnits);
++  }
++
++  return { byId, byOwnerCompartment, quantitiesByInventoryId, availableUnitsByInventoryId, targetUnitsByInventoryId };
++}
++
++function indexedInventory(index: ProductInventoryProjectionIndex, ownerEntityId: string, compartment: string): InventoryState | undefined {
++  return index.byOwnerCompartment.get(ownerCompartmentKey(ownerEntityId, compartment));
++}
++
++function indexedQuantity(index: ProductInventoryProjectionIndex, inventory: InventoryState | undefined, productId: string): number {
++  return inventory ? index.quantitiesByInventoryId.get(inventory.id)?.get(productId) ?? 0 : 0;
++}
++
+ function foodStacksFor(inventory: InventoryState | undefined): FoodStack[] {
+   if (!inventory) return [];
+   return inventory.stacks.filter((stack) => FOOD_PRODUCT_IDS.has(stack.productId) && stack.status === "available").map((stack) => ({ id: stack.id, productId: stack.productId, quantity: stack.quantity, purchasedAt: stack.acquiredAt, expiresAt: stack.expiresAt ?? Number.MAX_SAFE_INTEGER }));
+ }
+ 
+-function projectFood(state: ProductInventoryState, input: ProductInventoryInput): FoodState {
+-  const carried = foodStacksFor(state.inventories.find((item) => item.id === playerCarriedInventoryId(input.playerId)));
+-  const storage = foodStacksFor(state.inventories.find((item) => item.id === playerStorageInventoryId(input.playerId)));
++function projectFood(index: ProductInventoryProjectionIndex, input: ProductInventoryInput): FoodState {
++  const carried = foodStacksFor(index.byId.get(playerCarriedInventoryId(input.playerId)));
++  const storage = foodStacksFor(index.byId.get(playerStorageInventoryId(input.playerId)));
+   const shopStocks: FoodState["shopStocks"] = { ...input.food.shopStocks };
+   for (const business of input.worldCore.businesses) {
+     if (!business.locationId) continue;
+-    const inventory = state.inventories.find((item) => item.id === businessInventoryId(business.id));
++    const inventory = indexedInventory(index, business.id, "stockroom");
+     if (!inventory) continue;
+-    const stockEntries: Array<[string, number]> = FOOD_CATALOG.map((product) => [product.id, quantityInInventory(inventory, product.id, input.timestamp)]);
+-    const stock = Object.fromEntries(stockEntries.filter((entry) => entry[1] > 0));
++    const quantities = index.quantitiesByInventoryId.get(inventory.id);
++    const stock = quantities
++      ? Object.fromEntries([...quantities.entries()].filter(([productId, quantity]) => FOOD_PRODUCT_IDS.has(productId) && quantity > 0))
++      : {};
+     if (Object.keys(stock).length || shopStocks[business.locationId]) shopStocks[business.locationId] = stock;
+   }
+   return { ...input.food, carried, storage, shopStocks };
+ }
+ 
+-function projectHouseholds(state: ProductInventoryState, population: PopulationState, timestamp: number): PopulationState {
++function projectHouseholds(index: ProductInventoryProjectionIndex, population: PopulationState): PopulationState {
+   const households = population.households.map((household) => {
+-    const inventory = state.inventories.find((item) => item.id === householdInventoryId(household.id));
++    const inventory = indexedInventory(index, household.id, "pantry");
+     if (!inventory) return household;
+-    const pantry = PRODUCT_CATALOG.map((product) => ({ productId: product.id, units: quantityInInventory(inventory, product.id, timestamp) })).filter((item) => item.units > 0);
+-    return { ...household, pantry, foodUnits: pantry.filter((item) => getProduct(item.productId).category === "food" || getProduct(item.productId).category === "drink").reduce((sum, item) => sum + item.units, 0) };
++    const quantities = index.quantitiesByInventoryId.get(inventory.id);
++    const pantry = PRODUCT_CATALOG
++      .map((product) => ({ productId: product.id, units: quantities?.get(product.id) ?? 0 }))
++      .filter((item) => item.units > 0);
++    return { ...household, pantry, foodUnits: pantry.filter((item) => {
++      const category = getProduct(item.productId).category;
++      return category === "food" || category === "drink";
++    }).reduce((sum, item) => sum + item.units, 0) };
+   });
+   return { ...population, households };
+ }
+ 
+-function projectVenueOperations(state: ProductInventoryState, urban: UrbanFabricState, worldCore: WorldCoreState, timestamp: number): UrbanFabricState {
++function projectVenueOperations(index: ProductInventoryProjectionIndex, urban: UrbanFabricState, worldCore: WorldCoreState): UrbanFabricState {
++  const businessLookup = buildWorldCoreBusinessLookup(worldCore);
+   const operations = urban.venueOperations.operations.map((operation): VenueOperationState => {
+-    const business = canonicalBusinessForVenue(worldCore, operation.venueId);
++    const business = canonicalBusinessForVenue(worldCore, operation.venueId, businessLookup);
+     if (!business) return operation;
+-    const inventory = state.inventories.find((item) => item.id === businessInventoryId(business.id));
++    const inventory = indexedInventory(index, business.id, "stockroom");
+     if (!inventory) return operation;
+-    return { ...operation, offers: operation.offers.map((offer) => offer.productId ? { ...offer, stock: quantityInInventory(inventory, offer.productId, timestamp) } : offer) };
++    return { ...operation, offers: operation.offers.map((offer) => offer.productId ? { ...offer, stock: indexedQuantity(index, inventory, offer.productId) } : offer) };
+   });
+   return { ...urban, venueOperations: { ...urban.venueOperations, operations, totals: { ...urban.venueOperations.totals, stockUnits: operations.reduce((sum, operation) => sum + operation.offers.reduce((inner, offer) => inner + offer.stock, 0), 0) } } };
+ }
+ 
+-function aggregateResource(inventory: InventoryState | undefined, resource: ProductionResource, timestamp: number): number {
+-  if (!inventory) return 0;
+-  return PRODUCT_CATALOG.filter((product) => product.legacyResource === resource).reduce((sum, product) => sum + quantityInInventory(inventory, product.id, timestamp), 0);
+-}
+-
+-function projectProduction(state: ProductInventoryState, production: ProductionState, timestamp: number): ProductionState {
++function projectProduction(index: ProductInventoryProjectionIndex, production: ProductionState): ProductionState {
+   const facilities = production.facilities.map((facility) => {
+-    const inventory = state.inventories.find((item) => item.id === facilityInventoryId(facility.id));
++    const inventory = indexedInventory(index, facility.id, "warehouse");
+     if (!inventory) return facility;
+-    return { ...facility, inventory: facility.inventory.map((entry) => ({ ...entry, amount: aggregateResource(inventory, entry.resource, timestamp) })) };
++    const quantities = index.quantitiesByInventoryId.get(inventory.id);
++    return { ...facility, inventory: facility.inventory.map((entry) => ({
++      ...entry,
++      amount: PRODUCT_CATALOG.reduce((sum, product) => product.legacyResource === entry.resource ? sum + (quantities?.get(product.id) ?? 0) : sum, 0)
++    })) };
+   });
+   return { ...production, facilities };
+ }
+ 
+-function projectWorldCore(state: ProductInventoryState, worldCore: WorldCoreState, timestamp: number): WorldCoreState {
++function projectWorldCore(index: ProductInventoryProjectionIndex, worldCore: WorldCoreState, timestamp: number): WorldCoreState {
+   const businesses = worldCore.businesses.map((business) => {
+-    const inventory = state.inventories.find((item) => item.id === businessInventoryId(business.id));
++    const inventory = indexedInventory(index, business.id, "stockroom");
+     if (!inventory) return business;
+-    const units = inventory.stacks.reduce((sum, stack) => sum + (stack.status === "available" ? stack.quantity : 0), 0);
+-    const target = Math.max(1, inventory.stacks.reduce((sum, stack) => sum + Math.max(stack.quantity, getProduct(stack.productId).stackLimit), 0));
++    const units = index.availableUnitsByInventoryId.get(inventory.id) ?? 0;
++    const target = Math.max(1, index.targetUnitsByInventoryId.get(inventory.id) ?? 0);
+     return { ...business, stockUnits: units, stockPercent: clamp(Math.round(units / target * 100)), lastUpdatedAt: timestamp };
+   });
+   return { ...worldCore, businesses, lastUpdatedAt: timestamp };
+ }
+ 
+ export function projectProductInventoryState(state: ProductInventoryState, input: ProductInventoryInput): ProductInventoryProjectionResult {
+-  const worldCore = projectWorldCore(state, input.worldCore, input.timestamp);
+-  const food = projectFood(state, input);
+-  const population = projectHouseholds(state, input.population, input.timestamp);
+-  const production = projectProduction(state, input.production, input.timestamp);
+-  const urban = projectVenueOperations(state, input.urban, worldCore, input.timestamp);
+-  const projectedState = { ...state, adapterQuantities: {}, adapterBindings: {}, totals: totals(state), integrity: integrity(state, input.timestamp), lastUpdatedAt: input.timestamp };
++  const index = buildProductInventoryProjectionIndex(state, input.timestamp);
++  const worldCore = projectWorldCore(index, input.worldCore, input.timestamp);
++  const food = projectFood(index, input);
++  const population = projectHouseholds(index, input.population);
++  const production = projectProduction(index, input.production);
++  const urban = projectVenueOperations(index, input.urban, worldCore);
++  const projectionsAreCurrent = state.lastUpdatedAt === input.timestamp && state.integrity.checkedAt === input.timestamp;
++  const projectedState = {
++    ...state,
++    adapterQuantities: {},
++    adapterBindings: {},
++    totals: projectionsAreCurrent ? state.totals : totals(state),
++    integrity: projectionsAreCurrent ? state.integrity : integrity(state, input.timestamp),
++    lastUpdatedAt: input.timestamp
++  };
+   return { state: projectedState, food, population, production, urban, worldCore };
+ }
+ 
+diff --git a/tests/runtimePerformanceTest.ts b/tests/runtimePerformanceTest.ts
+new file mode 100644
+index 0000000..8513085
+--- /dev/null
++++ b/tests/runtimePerformanceTest.ts
+@@ -0,0 +1,50 @@
++import { createWorldSession } from "../src/world/generation/createWorld";
++import { progressLife } from "../src/gameplay/life/lifeSimulation";
++import { projectProductInventoryState } from "../src/simulation/inventory/inventorySystem";
++
++function assert(condition: unknown, message: string): asserts condition {
++  if (!condition) throw new Error(message);
++}
++
++const seed = "runtime-performance-regression-49";
++const creationStartedAt = performance.now();
++const session = createWorldSession(seed);
++const creationMs = performance.now() - creationStartedAt;
++
++const projectionInput = {
++  seed: session.world.meta.seed,
++  timestamp: session.timestamp,
++  playerId: session.player.id,
++  worldCore: session.worldCore,
++  production: session.production,
++  urban: session.urban,
++  population: session.population,
++  food: session.life.food,
++  previous: session.productInventory
++};
++
++projectProductInventoryState(session.productInventory, projectionInput);
++let projectionMs = 0;
++for (let index = 0; index < 5; index += 1) {
++  const startedAt = performance.now();
++  projectProductInventoryState(session.productInventory, projectionInput);
++  projectionMs += performance.now() - startedAt;
++}
++projectionMs /= 5;
++
++const hourStartedAt = performance.now();
++progressLife(session, 60, { suppressTimeEvent: true });
++const hourMs = performance.now() - hourStartedAt;
++
++assert(creationMs < 3_000, `world creation exceeded 3000ms: ${Math.round(creationMs)}ms`);
++assert(projectionMs < 120, `inventory projection exceeded 120ms: ${Math.round(projectionMs)}ms`);
++assert(hourMs < 1_800, `hourly simulation exceeded 1800ms: ${Math.round(hourMs)}ms`);
++
++console.log(JSON.stringify({
++  businesses: session.worldCore.businesses.length,
++  inventories: session.productInventory.inventories.length,
++  stacks: session.productInventory.inventories.reduce((sum, inventory) => sum + inventory.stacks.length, 0),
++  creationMs: Math.round(creationMs),
++  projectionMs: Math.round(projectionMs * 100) / 100,
++  hourMs: Math.round(hourMs)
++}, null, 2));
+diff --git a/tests/saveCodecTest.ts b/tests/saveCodecTest.ts
+new file mode 100644
+index 0000000..12030cd
+--- /dev/null
++++ b/tests/saveCodecTest.ts
+@@ -0,0 +1,41 @@
++import { createSaveChecksumFromJson } from "../src/core/saves/checksum";
++import {
++  GZIP_JSON_ENCODING,
++  decodeSavePayloadJson,
++  encodeSavePayloadJson
++} from "../src/core/saves/saveCodec";
++import { createWorldSession } from "../src/world/generation/createWorld";
++
++function assert(condition: unknown, message: string): asserts condition {
++  if (!condition) throw new Error(message);
++}
++
++async function main(): Promise<void> {
++  const session = createWorldSession("save-codec-regression-49");
++  const json = JSON.stringify(session);
++  const checksum = createSaveChecksumFromJson(json);
++  const encoded = await encodeSavePayloadJson(json);
++  const restored = await decodeSavePayloadJson(encoded);
++
++  assert(restored === json, "save codec changed the serialized world");
++  assert(createSaveChecksumFromJson(restored) === checksum, "save checksum changed after round-trip");
++  assert(JSON.parse(restored).world.meta.seed === session.world.meta.seed, "decoded save has the wrong world");
++
++  const storedBytes = encoded.payloadData instanceof Blob
++    ? encoded.payloadData.size
++    : new TextEncoder().encode(encoded.payloadData).byteLength;
++  if (encoded.payloadEncoding === GZIP_JSON_ENCODING) {
++    assert(encoded.payloadData instanceof Blob, "gzip save is not stored as a Blob");
++    assert(storedBytes < json.length * 0.25, `gzip save is too large: ${storedBytes} / ${json.length}`);
++  }
++
++  console.log(JSON.stringify({
++    encoding: encoded.payloadEncoding,
++    rawBytes: json.length,
++    storedBytes,
++    ratio: Math.round(storedBytes / json.length * 10_000) / 10_000,
++    checksum
++  }, null, 2));
++}
++
++void main();
+diff --git a/tsconfig.runtimetest.json b/tsconfig.runtimetest.json
+new file mode 100644
+index 0000000..21e14da
+--- /dev/null
++++ b/tsconfig.runtimetest.json
+@@ -0,0 +1,26 @@
++{
++  "compilerOptions": {
++    "target": "ES2022",
++    "module": "CommonJS",
++    "moduleResolution": "Node",
++    "outDir": ".runtimetest-dist",
++    "rootDir": ".",
++    "strict": true,
++    "esModuleInterop": true,
++    "skipLibCheck": true,
++    "lib": ["ES2022", "DOM"],
++    "resolveJsonModule": true,
++    "types": []
++  },
++  "include": [
++    "src/core/**/*.ts",
++    "src/data/**/*.ts",
++    "src/gameplay/**/*.ts",
++    "src/people/**/*.ts",
++    "src/simulation/**/*.ts",
++    "src/world/**/*.ts",
++    "tests/runtimePerformanceTest.ts",
++    "tests/globals.d.ts"
++  ],
++  "exclude": ["src/**/*.tsx"]
++}
+diff --git a/tsconfig.savetest.json b/tsconfig.savetest.json
+new file mode 100644
+index 0000000..a918a7e
+--- /dev/null
++++ b/tsconfig.savetest.json
+@@ -0,0 +1,26 @@
++{
++  "compilerOptions": {
++    "target": "ES2022",
++    "module": "CommonJS",
++    "moduleResolution": "Node",
++    "outDir": ".savetest-dist",
++    "rootDir": ".",
++    "strict": true,
++    "esModuleInterop": true,
++    "skipLibCheck": true,
++    "lib": ["ES2022", "DOM"],
++    "resolveJsonModule": true,
++    "types": []
++  },
++  "include": [
++    "src/core/**/*.ts",
++    "src/data/**/*.ts",
++    "src/gameplay/**/*.ts",
++    "src/people/**/*.ts",
++    "src/simulation/**/*.ts",
++    "src/world/**/*.ts",
++    "tests/saveCodecTest.ts",
++    "tests/globals.d.ts"
++  ],
++  "exclude": ["src/**/*.tsx"]
++}

@@ -1,10 +1,10 @@
-# NEON LIFE 0.48.0 patch
+# NEON LIFE 0.49.0 patch
 
-Патч **Physical Inventory** устанавливается поверх `0.47.0`.
+Патч **Runtime Recovery** устанавливается поверх `0.48.0`.
 
-`ProductInventory` становится источником истины не только для бизнеса и заведений, но и для предметов игрока, домашних запасов, кладовых домохозяйств и производственных складов. Старые поля остаются совместимыми представлениями, но больше не могут создать товар обратно.
+Он убирает квадратичные проходы в каноническом инвентаре, ускоряет создание мира и полный городской тик, переводит сохранения на gzip-снимки в IndexedDB и прекращает повторную миграцию уже актуальных слотов.
 
-Изменения перечислены в `PATCH_0.48.0.md`. Патч-архив содержит только новые и изменённые файлы.
+Изменения перечислены в `PATCH_0.49.0.md`.
 
 ## Установка
 
@@ -16,7 +16,7 @@ powershell -ExecutionPolicy Bypass -File .\APPLY_PATCH.ps1 -ProjectRoot C:\NeonL
 
 ```powershell
 cd C:\NeonLife
-git apply "$env:USERPROFILE\Downloads\NeonLife-0.48.0.patch"
+git apply "$env:USERPROFILE\Downloads\NeonLife-0.49.0.patch"
 npm install
 npm test
 npm run build

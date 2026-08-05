@@ -7,6 +7,10 @@ function hashText(source: string): string {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
+export function createSaveChecksumFromJson(json: string): string {
+  return hashText(json);
+}
+
 export function createSaveChecksum(payload: unknown): string {
-  return hashText(JSON.stringify(payload));
+  return createSaveChecksumFromJson(JSON.stringify(payload));
 }
