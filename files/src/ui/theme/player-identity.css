@@ -1,0 +1,62 @@
+/* v0.39.4 — the player is always identified by green, never by danger red. */
+:root { --nl-player: #43e58f; --nl-player-soft: rgba(67, 229, 143, .22); --nl-player-glow: rgba(67, 229, 143, .62); }
+
+.local-map__player circle,
+.local-map__player-ring {
+  fill: var(--nl-player-soft) !important;
+  stroke: var(--nl-player) !important;
+  filter: drop-shadow(0 0 1.2px var(--nl-player-glow));
+}
+.local-map__player path,
+.local-map__player-core {
+  fill: #bfffdc !important;
+  stroke: #11864f !important;
+}
+
+.building-profile__unit-grid > div.is-player,
+.floor-unit-grid button.is-player,
+.unit-plan > button:not(.interior-actor).is-player {
+  background: rgba(67, 229, 143, .14) !important;
+  border-color: var(--nl-player) !important;
+  box-shadow: inset 0 0 0 1px var(--nl-player), 0 0 20px rgba(67, 229, 143, .18) !important;
+}
+.interior-floor-rail button.is-current,
+.floor-corridor b,
+.floor-unit-grid button.is-player > b,
+.unit-plan > button.is-player > b {
+  color: var(--nl-player) !important;
+  border-color: rgba(67, 229, 143, .55) !important;
+}
+.seat-grid button.is-player {
+  background: var(--nl-player) !important;
+  border-color: #bfffdc !important;
+  color: #03110a !important;
+  box-shadow: 0 0 18px rgba(67, 229, 143, .28);
+}
+
+/* v0.51 — character stats and owned equipment live in the profile. */
+.profile-characteristics,
+.profile-equipment { display: grid; gap: 14px; }
+.profile-skill-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
+.profile-skill-grid article { display: grid; gap: 6px; padding: 11px; background: rgba(8, 18, 31, .82); border: 1px solid rgba(110, 139, 176, .18); border-radius: 10px; }
+.profile-skill-grid span { color: #8795aa; font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.profile-skill-grid strong { font-size: 18px; }
+.profile-skill-grid i { height: 4px; overflow: hidden; background: #151f2d; border-radius: 999px; }
+.profile-skill-grid i b { display: block; height: 100%; background: #43e58f; }
+.profile-owned-equipment { display: grid; gap: 8px; }
+.profile-owned-equipment article { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 11px; background: rgba(8, 18, 31, .82); border: 1px solid rgba(110, 139, 176, .18); border-radius: 10px; }
+.profile-owned-equipment span,
+.profile-owned-equipment strong,
+.profile-owned-equipment small { display: block; }
+.profile-owned-equipment span { color: #7f8ea4; font-size: 8px; font-weight: 800; letter-spacing: .1em; }
+.profile-owned-equipment strong { margin-top: 3px; }
+.profile-owned-equipment small { margin-top: 3px; color: #94a2b6; font-size: 10px; }
+.profile-owned-equipment button { padding: 9px 12px; color: #fff; background: rgba(34, 135, 86, .22); border: 1px solid rgba(67, 229, 143, .55); border-radius: 8px; }
+.profile-owned-equipment button:disabled { color: #617083; background: #101722; border-color: #263244; }
+.profile-equipment__hint { margin: 0; color: #8492a6; font-size: 10px; }
+
+@media (max-width: 720px) {
+  .profile-skill-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .profile-owned-equipment article { grid-template-columns: 1fr; }
+  .profile-owned-equipment button { width: 100%; }
+}

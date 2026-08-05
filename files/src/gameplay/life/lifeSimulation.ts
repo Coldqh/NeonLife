@@ -1,0 +1,3245 @@
+import type { EventCategory, WorldEvent } from "../../core/events/types";
+import { createStableEntityId } from "../../core/ids/entityId";
+import { SeededRandom } from "../../core/random/seededRandom";
+import { processEventQueue } from "../../core/simulation/eventQueue";
+import { advanceGameTime } from "../../core/time/gameTime";
+import { getFoodProduct } from "../../data/products/foodCatalog";
+import { advanceHumanNetwork, getPerson, recordPlayerAction, toKnownNpc } from "../../people/network/humanNetwork";
+import { advancePopulation, synchronizeActivePeopleFromPopulation } from "../../simulation/population/populationSystem";
+import { advanceSimulationKernel, kernelSystemEntityId } from "../../simulation/kernel/simulationKernel";
+import { projectCanonicalCreditsFromKernel } from "../../simulation/kernel/canonicalProjection";
+import type { KernelTransactionReason } from "../../simulation/kernel/types";
+import { advanceInfrastructure, applyInfrastructureToDistrictPulse } from "../../simulation/infrastructure/infrastructureSystem";
+import { advanceProductionAndLogistics } from "../../simulation/production/productionSystem";
+import { advanceOrganizationEcosystem } from "../../simulation/organizations/organizationSystem";
+import { advanceGovernmentCrime } from "../../simulation/government/governmentSystem";
+import { advanceHealthCyberware } from "../../simulation/health/healthSystem";
+import { advanceDataSurveillance } from "../../simulation/data/dataSystem";
+import { advanceMetropolitanState } from "../../simulation/spatial/metropolitanSystem";
+import {
+  advanceUrbanFabricState,
+  ensureBuildingAccessDetail,
+  ensureUnitInteriorDetail,
+  synchronizeMetropolitanFromUrban
+} from "../../simulation/urban/urbanSystem";
+import { advanceMetropolitanMobilityState, synchronizeMetropolitanFromMobility } from "../../simulation/mobility/mobilitySystem";
+import { advanceLocalSceneState } from "../../simulation/localScene/localSceneSystem";
+import type { SpatialPositionState } from "../../simulation/localScene/types";
+import {
+  advancePhysicalVehiclesState,
+  estimatePhysicalVehicleTravel,
+  getPhysicalVehicle,
+  physicalVehiclePositionAtLocation,
+  playerVehiclePosition,
+  refreshPhysicalVehicleSpatialPresentation
+} from "../../simulation/vehicles/physicalVehicleSystem";
+import type { VehicleCommand } from "../../simulation/vehicles/types";
+import {
+  advanceTransitOperationsState,
+  estimateTransitJourney,
+  getTransitAdvancePosition,
+  getTransitBoardingVehicle,
+  getTransitCurrentFare,
+  getTransitDestinationPosition,
+  getTransitLegMinutes,
+  getTransitRemainingMinutes,
+  getTransitStop,
+  phoneActivityLabel
+} from "../../simulation/transit/transitOperationsSystem";
+import type { TransitCommand, TransitPhoneActivity } from "../../simulation/transit/types";
+import { advanceStreetTopologyState, alignUrbanFabricToStreetTopology, snapPhysicalVehicleParkingToStreetTopology, snapTransitStopsToStreetTopology } from "../../simulation/streets/streetTopologySystem";
+import { advanceLocalMovementRoute, localMovementCurrentStreet, localMovementTargetForStop, planLocalMovement, refreshLocalMovementRoute, WALKING_SPEED_M_PER_MINUTE } from "../../simulation/localMovement/localMovementSystem";
+import type { LocalMovementTargetState } from "../../simulation/localMovement/types";
+import { advanceStreetSceneState, applyStreetIncidentAction } from "../../simulation/streetScene/streetSceneSystem";
+import { advanceSocialState } from "../../simulation/social/socialSystem";
+import { advanceWorldCoreState, projectWorldCoreState, remapWorldCoreTransactions, synchronizeWorldCoreFromKernel, worldCoreManagedLocationIds } from "../../simulation/worldCore/worldCoreSystem";
+import {
+  advanceProductInventoryState,
+  applyPopulationInventoryCommands,
+  businessInventoryId,
+  commitProductionInventoryChanges,
+  consumeInventoryProduct,
+  destroyExpiredInventoryStacks,
+  ensureCanonicalInventory,
+  finalizeProductInventoryState,
+  findInventory,
+  getInventoryQuantity,
+  playerCarriedInventoryId,
+  playerStorageInventoryId,
+  projectProductInventoryState,
+  transferProduct
+} from "../../simulation/inventory/inventorySystem";
+import { advanceBusinessEconomyState, projectBusinessEconomyToWorldCore, synchronizeBusinessEconomyFromKernel } from "../../simulation/business/businessEconomySystem";
+import { actOnPlayerCustodyState, advancePlayerCrimeState, recordPlayerCrimeAction, releasePlayerCustodyState } from "../../simulation/crime/playerCrimeSystem";
+import { joinVenueQueueState, leaveVenueQueueState, purchaseVenueOfferState, venueIsOpenAt } from "../../simulation/venues/venueOperationsSystem";
+import type { StreetIncidentAction } from "../../simulation/streetScene/types";
+import {
+  advanceVehicleCrimeState,
+  appendVehicleCrimeObservations,
+  attemptVehicleCrimeAction,
+  getVehicleCrimeInspection,
+  getVehicleWantedState,
+  inspectVehicleCrimeOpportunity,
+  recordVehicleCabinTheft,
+  resolveVehicleFenceAction,
+  synchronizeVehicleCrimeStatus
+} from "../../simulation/crime/vehicleCrimeSystem";
+import {
+  advanceBuildingAccessState,
+  findAccessDoor,
+  recordAccessDenied,
+  setAccessDoorOpen
+} from "../../simulation/access/buildingAccessSystem";
+import { canPrepare, getCarriedMassGrams } from "../food/foodSystem";
+import { calculateSleepRecovery, getHousingDaysLeft } from "../housing/housingSystem";
+import { getEquipment, getPlayerJob, registerEquipmentPurchase, resolvePlayerLoopAction, resolveStreetFightAgainstActor, TRAINING_ACTIONS } from "../playerLoop/playerLoopSystem";
+import type { PlayerLoopAction } from "../playerLoop/types";
+import { getTravelOptions, isLocationOpen } from "../travel/travelSystem";
+import { advanceDistrictPulse } from "../../world/city/districtPulse";
+import {
+  acceptNpcRequest as acceptNpcRequestState,
+  advancePressureState,
+  closePressureDay,
+  completeNpcRequest as completeNpcRequestState,
+  declineNpcRequest as declineNpcRequestState,
+  extendRentObligation,
+  payObligation as payObligationState,
+  scheduleNextRentObligation,
+  trackPressureMetrics
+} from "../pressure/pressureSystem";
+import type { GameSession } from "../../world/state/types";
+import { currentPhysicalLocation, getPlayerExactLocationId, getPlayerHomeUnit, isPlayerInsideHome, isPlayerInsideLocation } from "./playerPresence";
+export { getPlayerExactLocationId } from "./playerPresence";
+import {
+  advanceLocalEconomy,
+  applyEconomyPressureToPeople,
+  applyRequestToEconomy,
+  businessCanServe,
+  getBusinessAtLocation,
+  localPrice,
+  registerBusinessSale
+} from "../economy/localEconomy";
+
+function clamp(value: number): number {
+  return Math.max(0, Math.min(100, value));
+}
+
+function venueLedgerReason(kind: GameSession["urban"]["venueOperations"]["ledger"][number]["kind"], category?: GameSession["urban"]["venues"][number]["category"]): KernelTransactionReason {
+  if (kind === "payroll") return "wage";
+  if (kind === "utilities") return "utility-service";
+  if (kind === "rent") return "rent";
+  if (kind === "supplies") return "wholesale-delivery";
+  if (kind === "tax") return "tax";
+  return category && ["food", "bar", "convenience", "market"].includes(category) ? "food-sale" : "retail-service";
+}
+
+function streetGeometryChanged(previous: GameSession["streets"], next: GameSession["streets"]): boolean {
+  if (previous.topologyVersion !== next.topologyVersion || previous.deltas.length !== next.deltas.length) return true;
+  if (previous.materializedSectors.length !== next.materializedSectors.length) return true;
+  const checksums = new Map(previous.materializedSectors.map((item) => [item.sectorId, item.checksum]));
+  return next.materializedSectors.some((item) => checksums.get(item.sectorId) !== item.checksum);
+}
+
+function urbanLayoutChanged(previous: GameSession["urban"], next: GameSession["urban"]): boolean {
+  if (previous.buildings.length !== next.buildings.length) return true;
+  const byId = new Map(previous.buildings.map((building) => [building.id, building]));
+  return next.buildings.some((building) => {
+    const old = byId.get(building.id);
+    return !old
+      || old.bounds.xM !== building.bounds.xM
+      || old.bounds.yM !== building.bounds.yM
+      || old.bounds.widthM !== building.bounds.widthM
+      || old.bounds.heightM !== building.bounds.heightM;
+  });
+}
+
+function idSetChanged<T extends { id: string }>(previous: T[], next: T[]): boolean {
+  if (previous.length !== next.length) return true;
+  const ids = new Set(previous.map((item) => item.id));
+  return next.some((item) => !ids.has(item.id));
+}
+
+function createEvent(session: GameSession, timestamp: number, category: EventCategory, title: string, detail: string | undefined, importance: 1 | 2 | 3): WorldEvent {
+  return {
+    id: createStableEntityId("event", `${session.world.meta.seed}:${timestamp}:${category}:${title}:${session.events.length}`),
+    timestamp,
+    category,
+    title,
+    detail,
+    importance
+  };
+}
+
+function locationNameForSession(session: GameSession, locationId: string): string {
+  return session.world.locations.find((location) => location.id === locationId)?.name ?? "UNKNOWN NODE";
+}
+
+interface ProgressOptions {
+  category?: EventCategory;
+  title?: string;
+  detail?: string;
+  importance?: 1 | 2 | 3;
+  balanceDelta?: number;
+  fatigueDelta?: number;
+  stressDelta?: number;
+  hungerDelta?: number;
+  healthDelta?: number;
+  activity?: string;
+  targetLocationId?: string;
+  playerPosition?: SpatialPositionState;
+  vehicleCommand?: VehicleCommand;
+  transitCommand?: TransitCommand;
+  suppressTimeEvent?: boolean;
+  deliveryCompleted?: boolean;
+  requestsCompleted?: number;
+  relationChanges?: number;
+  worldEvents?: number;
+  trackBalance?: boolean;
+  balanceCounterpartyEntityId?: string;
+  balanceReason?: KernelTransactionReason;
+}
+
+
+const LOCAL_TICK_MAX_MINUTES = 59;
+const HOUR_MS = 60 * 60_000;
+
+function crossesHourBoundary(timestamp: number, minutes: number): boolean {
+  return Math.floor(timestamp / HOUR_MS) !== Math.floor(advanceGameTime(timestamp, minutes) / HOUR_MS);
+}
+
+function canUseLocalTick(session: GameSession, minutes: number, options: ProgressOptions): boolean {
+  if (minutes < 0 || minutes > LOCAL_TICK_MAX_MINUTES) return false;
+  if (crossesHourBoundary(session.timestamp, minutes)) return false;
+  if (session.kernel.accounts.some((account) => account.entityId.startsWith("consumer-pool:") || account.entityId.startsWith("workforce-pool:"))) return false;
+  // Monetary and delivery operations must still pass through the full canonical
+  // economy / inventory / kernel projection until those domains expose atomic commands.
+  if ((options.balanceDelta ?? 0) !== 0 || options.deliveryCompleted || options.requestsCompleted) return false;
+  return true;
+}
+
+function progressLocalLife(session: GameSession, minutes: number, options: ProgressOptions): GameSession {
+  const nextTimestamp = advanceGameTime(session.timestamp, minutes);
+  const queued = processEventQueue(session, nextTimestamp);
+  const pulse = advanceDistrictPulse(session.district, nextTimestamp);
+  let peopleState = session.people;
+  const pressureAdvance = advancePressureState(session.pressure, nextTimestamp, session.world.meta.seed, peopleState.people);
+  for (const notice of pressureAdvance.notices) {
+    if (!notice.personId || !notice.memorySummary) continue;
+    peopleState = recordPlayerAction(
+      peopleState,
+      session.world.meta.seed,
+      notice.personId,
+      nextTimestamp,
+      notice.memorySummary,
+      {
+        trust: notice.trustDelta,
+        respect: notice.respectDelta,
+        irritation: notice.irritationDelta,
+        importance: notice.importance * 28,
+        emotionalValue: notice.importance === 3 ? -42 : -18
+      }
+    );
+  }
+
+  const requestedTarget = options.targetLocationId
+    ? session.world.locations.find((location) => location.id === options.targetLocationId)
+    : undefined;
+  const evictionTarget = pressureAdvance.evicted
+    ? session.world.locations.find((location) => location.type === "transport")
+    : undefined;
+  const targetLocation = evictionTarget ?? requestedTarget;
+  const targetDistrict = targetLocation
+    ? session.world.districts.find((district) => district.id === targetLocation.districtId)
+    : undefined;
+
+  let urbanState = session.urban;
+  if (options.playerPosition?.buildingId) {
+    urbanState = ensureBuildingAccessDetail(
+      urbanState,
+      session.world.meta.seed,
+      nextTimestamp,
+      options.playerPosition.buildingId,
+      session.player.id,
+      session.life.housing.locationId
+    );
+    if (options.playerPosition.unitId) {
+      urbanState = ensureUnitInteriorDetail(urbanState, session.world.meta.seed, nextTimestamp, options.playerPosition.unitId);
+    }
+  }
+
+  const provisionalLocalScene = advanceLocalSceneState(session.localScene, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    activeLocationId: session.life.currentLocationId,
+    targetLocationId: targetLocation?.id,
+    locations: session.world.locations,
+    people: peopleState,
+    population: session.population,
+    metropolitan: session.metropolitan,
+    urban: urbanState,
+    mobility: session.mobility,
+    playerPosition: options.playerPosition
+  });
+  const advancedVehicles = advancePhysicalVehiclesState(session.vehicles, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    activeLocationId: session.life.currentLocationId,
+    targetLocationId: targetLocation?.id,
+    playerPosition: provisionalLocalScene.playerPosition,
+    metropolitan: session.metropolitan,
+    urban: urbanState,
+    mobility: session.mobility,
+    population: session.population,
+    organizations: session.world.organizations,
+    command: options.vehicleCommand
+  });
+  const vehiclesState = refreshPhysicalVehicleSpatialPresentation(advancedVehicles, provisionalLocalScene.playerPosition, nextTimestamp);
+  const crimeAdvance = advanceVehicleCrimeState(session.vehicleCrime, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    data: session.data,
+    government: session.government,
+    vehicles: vehiclesState,
+    population: session.population,
+    organizations: session.world.organizations
+  });
+  if (crimeAdvance.transactions.length > 0) {
+    return progressWorldLife(session, minutes, options);
+  }
+  const crimeVehiclesState = synchronizeVehicleCrimeStatus(crimeAdvance.state, vehiclesState);
+  const transitState = advanceTransitOperationsState(session.transit, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    activeLocationId: session.life.currentLocationId,
+    playerPosition: provisionalLocalScene.playerPosition,
+    locations: session.world.locations,
+    districts: session.world.districts,
+    people: peopleState,
+    population: crimeAdvance.population,
+    metropolitan: session.metropolitan,
+    mobility: session.mobility,
+    physicalVehicles: crimeVehiclesState,
+    command: options.transitCommand
+  });
+  const localSceneState = advanceLocalSceneState(provisionalLocalScene, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    activeLocationId: session.life.currentLocationId,
+    targetLocationId: targetLocation?.id,
+    locations: session.world.locations,
+    people: peopleState,
+    population: crimeAdvance.population,
+    metropolitan: session.metropolitan,
+    urban: urbanState,
+    mobility: session.mobility,
+    playerPosition: transitState.player.position
+  });
+  const streetAdvance = advanceStreetSceneState(session.streetScene, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    metropolitan: session.metropolitan,
+    urban: urbanState,
+    streets: session.streets,
+    localScene: localSceneState,
+    vehicles: crimeVehiclesState
+  });
+  const socialAdvance = advanceSocialState(session.social, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    people: peopleState,
+    locations: session.world.locations,
+    localScene: localSceneState,
+    streetScene: streetAdvance.state
+  });
+  peopleState = socialAdvance.people;
+  const playerCrimeAdvance = advancePlayerCrimeState(session.playerCrime, {
+    seed: session.world.meta.seed,
+    timestamp: nextTimestamp,
+    playerId: session.player.id,
+    playerPosition: localSceneState.playerPosition,
+    localScene: localSceneState,
+    streetScene: streetAdvance.state,
+    data: crimeAdvance.data,
+    urban: urbanState,
+    government: crimeAdvance.government,
+    districts: session.world.districts,
+    organizations: crimeAdvance.organizations
+  });
+
+  const generated: WorldEvent[] = [];
+  if (options.title && options.category) {
+    generated.push(createEvent(session, nextTimestamp, options.category, options.title, options.detail, options.importance ?? 1));
+  }
+  for (const notice of pressureAdvance.notices) generated.push(createEvent(session, nextTimestamp, notice.category, notice.title, notice.detail, notice.importance));
+  for (const notice of crimeAdvance.newlyReported) {
+    generated.push(createEvent(session, nextTimestamp, "local", notice.status === "investigating" ? "Открыто дело об угоне машины." : "Владелец заявил об угоне.", `${notice.observedPlate} · улики ${notice.evidence}%`, notice.status === "investigating" ? 3 : 2));
+  }
+  for (const notice of streetAdvance.notices) generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
+  for (const notice of socialAdvance.notices) generated.push(createEvent(session, nextTimestamp, "contact", notice.title, notice.detail, notice.importance));
+  for (const notice of playerCrimeAdvance.notices) generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
+
+  const housingDaysLeft = getHousingDaysLeft(session.life.housing, nextTimestamp);
+  const nextPlayer = {
+    ...session.player,
+    housingDaysLeft,
+    district: targetDistrict?.name ?? session.player.district,
+    sector: targetDistrict?.code ?? session.player.sector,
+    condition: {
+      health: clamp(session.player.condition.health + (options.healthDelta ?? 0)),
+      fatigue: clamp(session.player.condition.fatigue + Math.max(0, minutes / 120) + (options.fatigueDelta ?? 0)),
+      stress: clamp(session.player.condition.stress + (options.stressDelta ?? 0)),
+      hunger: clamp(session.player.condition.hunger + Math.max(0, minutes / 150) + (options.hungerDelta ?? 0))
+    }
+  };
+  const pressure = trackPressureMetrics(pressureAdvance.state, {
+    balanceDelta: options.trackBalance === false ? 0 : options.balanceDelta,
+    deliveries: options.deliveryCompleted ? 1 : 0,
+    requestsCompleted: options.requestsCompleted,
+    relationChanges: options.relationChanges,
+    worldEvents: options.worldEvents ?? (queued.events.length + pulse.events.length + generated.length)
+  });
+  const activeJob = getPlayerJob(session.playerLoop);
+  const playerWithWork = { ...nextPlayer, occupation: activeJob?.title.toUpperCase() ?? "UNEMPLOYED" };
+  const buildingAccessState = advanceBuildingAccessState(session.buildingAccess, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    player: playerWithWork,
+    playerHomeLocationId: session.life.housing.locationId,
+    locations: session.world.locations,
+    population: crimeAdvance.population,
+    urban: urbanState,
+    localScene: localSceneState
+  });
+  const selectedPerson = getPerson(peopleState, session.world.primaryContactId)
+    ?? getPerson(peopleState, peopleState.selectedPersonId);
+
+  return {
+    ...session,
+    timestamp: nextTimestamp,
+    world: {
+      ...session.world,
+      meta: { ...session.world.meta, currentTimestamp: nextTimestamp },
+      organizations: crimeAdvance.organizations,
+      activeDistrictId: targetDistrict?.id ?? session.world.activeDistrictId,
+      primaryContactId: selectedPerson?.id ?? session.world.primaryContactId
+    },
+    primaryContact: selectedPerson ? toKnownNpc(selectedPerson, session.world.locations, nextTimestamp) : session.primaryContact,
+    people: peopleState,
+    pressure,
+    population: crimeAdvance.population,
+    government: crimeAdvance.government,
+    data: crimeAdvance.data,
+    urban: urbanState,
+    localScene: localSceneState,
+    streetScene: streetAdvance.state,
+    social: socialAdvance.state,
+    buildingAccess: buildingAccessState,
+    vehicles: crimeVehiclesState,
+    transit: transitState,
+    vehicleCrime: crimeAdvance.state,
+    playerCrime: playerCrimeAdvance.state,
+    district: pulse.state,
+    eventQueue: queued.queue,
+    currentActivity: pressureAdvance.evicted
+      ? `Без постоянного жилья · ${targetLocation?.name ?? "TRANSIT NODE"}`
+      : options.activity ?? session.currentActivity,
+    life: {
+      ...session.life,
+      currentLocationId: targetLocation?.id ?? localSceneState.playerPosition.locationId ?? session.life.currentLocationId
+    },
+    playerLoop: session.playerLoop,
+    player: playerWithWork,
+    events: [...generated, ...queued.events.reverse(), ...pulse.events.reverse(), ...session.events].slice(0, 100)
+  };
+}
+
+function withCanonicalInventory(session: GameSession, productInventory = session.productInventory, timestamp = session.timestamp): GameSession {
+  const normalized = advanceProductInventoryState({
+    seed: session.world.meta.seed,
+    timestamp,
+    playerId: session.player.id,
+    worldCore: session.worldCore,
+    production: session.production,
+    urban: session.urban,
+    population: session.population,
+    food: session.life.food,
+    previous: finalizeProductInventoryState(productInventory, timestamp)
+  });
+  const projection = projectProductInventoryState(normalized, {
+    seed: session.world.meta.seed,
+    timestamp,
+    playerId: session.player.id,
+    worldCore: session.worldCore,
+    production: session.production,
+    urban: session.urban,
+    population: session.population,
+    food: session.life.food,
+    previous: normalized
+  });
+  return {
+    ...session,
+    productInventory: projection.state,
+    worldCore: projection.worldCore,
+    production: projection.production,
+    population: projection.population,
+    urban: projection.urban,
+    life: { ...session.life, food: projection.food }
+  };
+}
+
+export function progressLife(session: GameSession, minutes: number, options: ProgressOptions = {}): GameSession {
+  const safeMinutes = Math.max(0, minutes);
+  return canUseLocalTick(session, safeMinutes, options)
+    ? progressLocalLife(session, safeMinutes, options)
+    : progressWorldLife(session, safeMinutes, options);
+}
+
+function progressWorldLife(session: GameSession, minutes: number, options: ProgressOptions = {}): GameSession {
+  session = withCanonicalInventory(session);
+  const nextTimestamp = advanceGameTime(session.timestamp, minutes);
+  const pulse = advanceDistrictPulse(session.district, nextTimestamp);
+  const queued = processEventQueue(session, nextTimestamp);
+  const network = advanceHumanNetwork(session.people, nextTimestamp, session.world.meta.seed, session.world.locations);
+  const populationAdvance = advancePopulation(
+    session.population,
+    nextTimestamp,
+    session.world.meta.seed,
+    session.world.districts,
+    session.world.locations,
+    session.world.organizations,
+    session.economy,
+    session.life.food
+  );
+  const populationSyncedPeople = synchronizeActivePeopleFromPopulation(network.state, populationAdvance.state);
+  const economyAdvance = advanceLocalEconomy(
+    populationAdvance.economy,
+    nextTimestamp,
+    session.world.meta.seed,
+    session.world.locations,
+    populationSyncedPeople.people,
+    populationAdvance.state,
+    populationAdvance.food,
+    pulse.state,
+    worldCoreManagedLocationIds(session.worldCore)
+  );
+  const infrastructureAdvance = advanceInfrastructure(
+    session.infrastructure,
+    nextTimestamp,
+    session.world.meta.seed,
+    session.world.city,
+    session.world.districts,
+    session.world.locations,
+    session.world.organizations,
+    populationAdvance.state,
+    economyAdvance.state
+  );
+  const productionAdvance = advanceProductionAndLogistics(
+    session.production,
+    nextTimestamp,
+    session.world.meta.seed,
+    session.world.districts,
+    session.world.locations,
+    session.world.organizations,
+    infrastructureAdvance.population,
+    infrastructureAdvance.economy,
+    economyAdvance.food,
+    infrastructureAdvance.state
+  );
+  const budgetAdjustedOrganizations = session.world.organizations.map((organization) => {
+    const populationDelta = populationAdvance.organizationBudgetDeltas.find((item) => item.organizationId === organization.id)?.delta ?? 0;
+    const infrastructureDelta = infrastructureAdvance.organizationBudgetDeltas.find((item) => item.organizationId === organization.id)?.delta ?? 0;
+    const productionDelta = productionAdvance.organizationBudgetDeltas.find((item) => item.organizationId === organization.id)?.delta ?? 0;
+    const budgetChange = populationDelta + infrastructureDelta + productionDelta;
+    return budgetChange ? { ...organization, budget: Math.max(0, organization.budget + budgetChange) } : organization;
+  });
+  const organizationAdvance = advanceOrganizationEcosystem(session.organizationEcosystem, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    organizations: budgetAdjustedOrganizations,
+    population: infrastructureAdvance.population,
+    economy: productionAdvance.economy,
+    infrastructure: infrastructureAdvance.state,
+    production: productionAdvance.state,
+    kernel: session.kernel,
+    districts: session.world.districts,
+    locations: session.world.locations
+  });
+  const governmentAdvance = advanceGovernmentCrime(session.government, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    cityId: session.world.city.id,
+    districts: session.world.districts,
+    locations: session.world.locations,
+    organizations: organizationAdvance.organizations,
+    population: organizationAdvance.population,
+    economy: organizationAdvance.economy,
+    infrastructure: organizationAdvance.infrastructure,
+    production: organizationAdvance.production,
+    organizationEcosystem: organizationAdvance.state
+  });
+  const healthAdvance = advanceHealthCyberware(session.health, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    districts: session.world.districts,
+    locations: session.world.locations,
+    organizations: governmentAdvance.organizations,
+    population: governmentAdvance.population,
+    economy: governmentAdvance.economy,
+    infrastructure: governmentAdvance.infrastructure,
+    production: governmentAdvance.production,
+    government: governmentAdvance.state
+  });
+  const dataAdvance = advanceDataSurveillance(session.data, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    cityId: session.world.city.id,
+    districts: session.world.districts,
+    locations: session.world.locations,
+    organizations: healthAdvance.organizations,
+    population: healthAdvance.population,
+    economy: healthAdvance.economy,
+    infrastructure: governmentAdvance.infrastructure,
+    organizationEcosystem: organizationAdvance.state,
+    government: healthAdvance.government,
+    health: healthAdvance.state
+  });
+  const metropolitanAdvance = advanceMetropolitanState(session.metropolitan, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    activeLocationId: session.life.currentLocationId,
+    targetLocationId: options.targetLocationId,
+    focusSectorId: options.playerPosition?.sectorId,
+    districts: session.world.districts,
+    locations: session.world.locations,
+    representedPopulationByDistrict: dataAdvance.population.lifecycle.representedPopulationByDistrict,
+    transportServiceLevel: governmentAdvance.infrastructure.networks.find((item) => item.kind === "transport")?.averageServiceLevel ?? 100,
+    dataServiceLevel: governmentAdvance.infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100,
+    recentEventCount: session.events.length,
+    recentObservationCount: dataAdvance.state.observations.length
+  });
+  const urbanAdvance = advanceUrbanFabricState(session.urban, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    activeLocationId: session.life.currentLocationId,
+    targetLocationId: options.targetLocationId,
+    metropolitan: metropolitanAdvance.state,
+    districts: session.world.districts,
+    locations: session.world.locations,
+    organizations: dataAdvance.organizations,
+    population: dataAdvance.population,
+    transportServiceLevel: governmentAdvance.infrastructure.networks.find((item) => item.kind === "transport")?.averageServiceLevel ?? 100,
+    dataServiceLevel: governmentAdvance.infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100,
+    externallyManagedBusinessEconomy: true
+  });
+  let urbanState = urbanAdvance.state;
+  if (options.playerPosition?.buildingId) {
+    urbanState = ensureBuildingAccessDetail(
+      urbanState,
+      session.world.meta.seed,
+      nextTimestamp,
+      options.playerPosition.buildingId,
+      session.player.id,
+      session.life.housing.locationId
+    );
+    if (options.playerPosition.unitId) {
+      urbanState = ensureUnitInteriorDetail(urbanState, session.world.meta.seed, nextTimestamp, options.playerPosition.unitId);
+    }
+  }
+  const streetInput = {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    metropolitan: metropolitanAdvance.state,
+    urban: urbanState,
+    preferredSectorId: options.playerPosition?.sectorId
+  };
+  let streetsState = advanceStreetTopologyState(session.streets, streetInput);
+  const layoutChanged = urbanLayoutChanged(session.urban, urbanState);
+  const requiresAddressRepair = urbanState.buildings.some((building) => !building.streetName || !building.parcelId || !building.primaryEntranceId);
+  if (layoutChanged || streetGeometryChanged(session.streets, streetsState) || requiresAddressRepair) {
+    urbanState = alignUrbanFabricToStreetTopology(urbanState, streetsState, streetInput);
+    streetsState = advanceStreetTopologyState(streetsState, { ...streetInput, urban: urbanState });
+  }
+  const geometryChanged = streetGeometryChanged(session.streets, streetsState);
+  const urbanSynchronizedMetropolitan = synchronizeMetropolitanFromUrban(metropolitanAdvance.state, urbanState);
+  const mobilityState = advanceMetropolitanMobilityState(session.mobility, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    metropolitan: urbanSynchronizedMetropolitan,
+    urban: urbanState,
+    districts: session.world.districts,
+    locations: session.world.locations,
+    organizations: dataAdvance.organizations,
+    population: dataAdvance.population,
+    economy: healthAdvance.economy,
+    production: healthAdvance.production,
+    transportServiceLevel: governmentAdvance.infrastructure.networks.find((item) => item.kind === "transport")?.averageServiceLevel ?? 100,
+    dataServiceLevel: governmentAdvance.infrastructure.networks.find((item) => item.kind === "data")?.averageServiceLevel ?? 100,
+    activeLocationId: session.life.currentLocationId,
+    targetLocationId: options.targetLocationId
+  });
+  const metropolitanState = synchronizeMetropolitanFromMobility(urbanSynchronizedMetropolitan, mobilityState);
+  const populationState = {
+    ...dataAdvance.population,
+    lifecycle: {
+      ...dataAdvance.population.lifecycle,
+      representedPopulationByDistrict: urbanAdvance.representedPopulationByDistrict
+    }
+  };
+  const compactedDataState = metropolitanAdvance.compactedObservationBudget < dataAdvance.state.observations.length
+    ? { ...dataAdvance.state, observations: dataAdvance.state.observations.slice(-Math.max(250, metropolitanAdvance.compactedObservationBudget)) }
+    : dataAdvance.state;
+  const infrastructurePulse = applyInfrastructureToDistrictPulse(pulse.state, governmentAdvance.infrastructure, session.world.activeDistrictId);
+  const infrastructureSyncedPeople = synchronizeActivePeopleFromPopulation(populationSyncedPeople, dataAdvance.population);
+  let peopleState = applyEconomyPressureToPeople(infrastructureSyncedPeople, healthAdvance.economy, economyAdvance.notices);
+  const pressureAdvance = advancePressureState(session.pressure, nextTimestamp, session.world.meta.seed, peopleState.people);
+  for (const notice of pressureAdvance.notices) {
+    if (!notice.personId || !notice.memorySummary) continue;
+    peopleState = recordPlayerAction(
+      peopleState,
+      session.world.meta.seed,
+      notice.personId,
+      nextTimestamp,
+      notice.memorySummary,
+      {
+        trust: notice.trustDelta,
+        respect: notice.respectDelta,
+        irritation: notice.irritationDelta,
+        importance: notice.importance * 28,
+        emotionalValue: notice.importance === 3 ? -42 : -18
+      }
+    );
+  }
+
+  const requestedTarget = options.targetLocationId
+    ? session.world.locations.find((location) => location.id === options.targetLocationId)
+    : undefined;
+  const evictionTarget = pressureAdvance.evicted
+    ? session.world.locations.find((location) => location.type === "transport")
+    : undefined;
+  const targetLocation = evictionTarget ?? requestedTarget;
+  const targetDistrict = targetLocation
+    ? session.world.districts.find((district) => district.id === targetLocation.districtId)
+    : undefined;
+  const provisionalLocalScene = advanceLocalSceneState(session.localScene, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    activeLocationId: session.life.currentLocationId,
+    targetLocationId: targetLocation?.id,
+    locations: session.world.locations,
+    people: peopleState,
+    population: populationState,
+    metropolitan: metropolitanState,
+    urban: urbanState,
+    mobility: mobilityState,
+    playerPosition: options.playerPosition
+  });
+  const advancedVehicles = advancePhysicalVehiclesState(session.vehicles, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    activeLocationId: session.life.currentLocationId,
+    targetLocationId: targetLocation?.id,
+    playerPosition: provisionalLocalScene.playerPosition,
+    metropolitan: metropolitanState,
+    urban: urbanState,
+    mobility: mobilityState,
+    population: populationState,
+    organizations: dataAdvance.organizations,
+    command: options.vehicleCommand
+  });
+  const parkingNetworkChanged = geometryChanged || idSetChanged(session.vehicles.parkingNodes, advancedVehicles.parkingNodes);
+  const streetAlignedVehicles = parkingNetworkChanged
+    ? snapPhysicalVehicleParkingToStreetTopology(advancedVehicles, streetsState, { timestamp: nextTimestamp, seed: session.world.meta.seed, metropolitan: metropolitanState, urban: urbanState })
+    : advancedVehicles;
+  const vehiclesState = refreshPhysicalVehicleSpatialPresentation(streetAlignedVehicles, provisionalLocalScene.playerPosition, nextTimestamp);
+  const crimeAdvance = advanceVehicleCrimeState(session.vehicleCrime, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    data: compactedDataState,
+    government: dataAdvance.government,
+    vehicles: vehiclesState,
+    population: populationState,
+    organizations: dataAdvance.organizations
+  });
+  const crimeVehiclesState = synchronizeVehicleCrimeStatus(crimeAdvance.state, vehiclesState);
+  const advancedTransit = advanceTransitOperationsState(session.transit, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    activeLocationId: session.life.currentLocationId,
+    playerPosition: provisionalLocalScene.playerPosition,
+    locations: session.world.locations,
+    districts: session.world.districts,
+    people: peopleState,
+    population: populationState,
+    metropolitan: metropolitanState,
+    mobility: mobilityState,
+    physicalVehicles: crimeVehiclesState,
+    command: options.transitCommand
+  });
+  const transitNetworkChanged = geometryChanged || idSetChanged(session.transit.stops, advancedTransit.stops);
+  const transitState = transitNetworkChanged
+    ? snapTransitStopsToStreetTopology(advancedTransit, streetsState, { timestamp: nextTimestamp, seed: session.world.meta.seed, metropolitan: metropolitanState, urban: urbanState })
+    : advancedTransit;
+  const localSceneState = advanceLocalSceneState(provisionalLocalScene, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    activeLocationId: session.life.currentLocationId,
+    targetLocationId: targetLocation?.id,
+    locations: session.world.locations,
+    people: peopleState,
+    population: populationState,
+    metropolitan: metropolitanState,
+    urban: urbanState,
+    mobility: mobilityState,
+    playerPosition: transitState.player.position
+  });
+
+  const streetAdvance = advanceStreetSceneState(session.streetScene, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    metropolitan: metropolitanState,
+    urban: urbanState,
+    streets: streetsState,
+    localScene: localSceneState,
+    vehicles: crimeVehiclesState
+  });
+  const socialAdvance = advanceSocialState(session.social, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    people: peopleState,
+    locations: session.world.locations,
+    localScene: localSceneState,
+    streetScene: streetAdvance.state
+  });
+  peopleState = socialAdvance.people;
+  const playerCrimeAdvance = advancePlayerCrimeState(session.playerCrime, {
+    seed: session.world.meta.seed,
+    timestamp: nextTimestamp,
+    playerId: session.player.id,
+    playerPosition: localSceneState.playerPosition,
+    localScene: localSceneState,
+    streetScene: streetAdvance.state,
+    data: crimeAdvance.data,
+    urban: urbanState,
+    government: governmentAdvance.state,
+    districts: session.world.districts,
+    organizations: crimeAdvance.organizations
+  });
+
+  const generated: WorldEvent[] = [];
+  if (options.title && options.category) {
+    generated.push(createEvent(
+      session,
+      nextTimestamp,
+      options.category,
+      options.title,
+      options.detail,
+      options.importance ?? 1
+    ));
+  }
+  if (minutes >= 60 && !options.suppressTimeEvent) {
+    generated.push(createEvent(session, nextTimestamp, "system", `Прошло ${minutes} минут.`, options.activity, 1));
+  }
+  for (const notice of network.notices) {
+    generated.push(createEvent(session, nextTimestamp, "contact", notice.title, notice.detail, notice.importance));
+  }
+  for (const notice of economyAdvance.notices) {
+    generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
+  }
+  for (const notice of populationAdvance.notices) {
+    generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
+  }
+  for (const notice of infrastructureAdvance.notices) {
+    generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
+  }
+  for (const notice of productionAdvance.notices) {
+    generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
+  }
+  for (const notice of organizationAdvance.notices) {
+    generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
+  }
+  for (const notice of governmentAdvance.notices) {
+    generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
+  }
+  for (const notice of healthAdvance.notices) {
+    generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
+  }
+  for (const notice of dataAdvance.notices) {
+    generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
+  }
+  for (const notice of pressureAdvance.notices) {
+    generated.push(createEvent(session, nextTimestamp, notice.category, notice.title, notice.detail, notice.importance));
+  }
+  for (const incident of crimeAdvance.newlyReported) {
+    generated.push(createEvent(
+      session,
+      nextTimestamp,
+      "local",
+      incident.status === "investigating" ? "Открыто дело об угоне машины." : "Владелец заявил об угоне.",
+      `${incident.observedPlate} · улики ${incident.evidence}% · свидетели ${incident.witnessReportIds.length} · камеры ${incident.cameraObservationIds.length}`,
+      incident.status === "investigating" ? 3 : 2
+    ));
+  }
+  for (const notice of streetAdvance.notices) {
+    generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
+  }
+  for (const notice of socialAdvance.notices) {
+    generated.push(createEvent(session, nextTimestamp, "contact", notice.title, notice.detail, notice.importance));
+  }
+  for (const notice of playerCrimeAdvance.notices) {
+    generated.push(createEvent(session, nextTimestamp, "local", notice.title, notice.detail, notice.importance));
+  }
+
+  // Needs must not depend on whether time advanced in one large action or
+  // many small actions. Player condition supports fractional accumulation.
+  const baselineFatigue = Math.max(0, minutes / 120);
+  const baselineHunger = Math.max(0, minutes / 150);
+  const housingDaysLeft = getHousingDaysLeft(session.life.housing, nextTimestamp);
+  const selectedPerson = getPerson(peopleState, session.world.primaryContactId)
+    ?? getPerson(peopleState, peopleState.selectedPersonId);
+  const worldEventCount = options.worldEvents ?? (queued.events.length + pulse.events.length + network.notices.length + economyAdvance.notices.length + populationAdvance.notices.length + infrastructureAdvance.notices.length + productionAdvance.notices.length + organizationAdvance.notices.length + governmentAdvance.notices.length + healthAdvance.notices.length + dataAdvance.notices.length + pressureAdvance.notices.length + crimeAdvance.newlyReported.length + streetAdvance.notices.length + socialAdvance.notices.length + playerCrimeAdvance.notices.length);
+  const pressure = trackPressureMetrics(pressureAdvance.state, {
+    balanceDelta: options.trackBalance === false ? 0 : options.balanceDelta,
+    deliveries: options.deliveryCompleted ? 1 : 0,
+    requestsCompleted: options.requestsCompleted,
+    relationChanges: options.relationChanges,
+    worldEvents: worldEventCount
+  });
+  const nextOrganizations = crimeAdvance.organizations;
+  const representedPopulation = urbanAdvance.representedPopulationByDistrict;
+  const nextDistricts = session.world.districts.map((district) => ({
+    ...district,
+    population: Math.round(representedPopulation[district.id] ?? district.population)
+  }));
+  const nextCity = {
+    ...session.world.city,
+    population: nextDistricts.reduce((sum, district) => sum + district.population, 0),
+    networkStatus: governmentAdvance.infrastructure.networks.find((item) => item.kind === "data")?.status === "offline"
+      ? "offline" as const
+      : governmentAdvance.infrastructure.networks.some((item) => item.status === "restricted" || item.status === "offline") ? "degraded" as const : "stable" as const
+  };
+  const nextPlayer = {
+    ...session.player,
+    balance: Math.max(0, session.player.balance + (options.balanceDelta ?? 0)),
+    housingDaysLeft,
+    district: targetDistrict?.name ?? session.player.district,
+    sector: targetDistrict?.code ?? session.player.sector,
+    condition: {
+      health: clamp(session.player.condition.health + (options.healthDelta ?? 0)),
+      fatigue: clamp(session.player.condition.fatigue + baselineFatigue + (options.fatigueDelta ?? 0)),
+      stress: clamp(session.player.condition.stress + (options.stressDelta ?? 0)),
+      hunger: clamp(session.player.condition.hunger + baselineHunger + (options.hungerDelta ?? 0))
+    }
+  };
+  const activeJob = getPlayerJob(session.playerLoop);
+  const playerWithWork = { ...nextPlayer, occupation: activeJob?.title.toUpperCase() ?? "UNEMPLOYED" };
+  const buildingAccessState = advanceBuildingAccessState(session.buildingAccess, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    player: playerWithWork,
+    playerHomeLocationId: session.life.housing.locationId,
+    locations: session.world.locations,
+    population: populationState,
+    urban: urbanState,
+    localScene: localSceneState
+  });
+  const rawKernelDrafts = [...populationAdvance.transactions, ...economyAdvance.transactions, ...infrastructureAdvance.transactions, ...productionAdvance.transactions, ...organizationAdvance.transactions, ...governmentAdvance.transactions, ...healthAdvance.transactions, ...dataAdvance.transactions, ...crimeAdvance.transactions];
+  const previousVenueLedgerTimestamp = session.urban.venueOperations.lastUpdatedAt ?? session.timestamp;
+  const venueById = new Map(urbanState.venueOperations.registry.map((entry) => [entry.venue.id, entry.venue]));
+  for (const entry of urbanState.venueOperations.ledger) {
+    if (!entry.postToKernel || entry.timestamp <= previousVenueLedgerTimestamp) continue;
+    rawKernelDrafts.push({
+      idempotencyKey: entry.idempotencyKey,
+      timestamp: entry.timestamp,
+      debitEntityId: entry.debitEntityId,
+      creditEntityId: entry.creditEntityId,
+      resource: "credits",
+      amount: entry.amount,
+      reason: venueLedgerReason(entry.kind, venueById.get(entry.venueId)?.category),
+      description: entry.description
+    });
+  }
+  if ((options.balanceDelta ?? 0) !== 0) {
+    const amount = Math.abs(options.balanceDelta ?? 0);
+    const counterpartyEntityId = options.balanceCounterpartyEntityId ?? kernelSystemEntityId(session.world.meta.seed, "clearing");
+    rawKernelDrafts.push({
+      idempotencyKey: `${session.world.meta.seed}:player:${nextTimestamp}:${options.title ?? options.activity ?? "action"}:${options.balanceDelta}`,
+      timestamp: nextTimestamp,
+      debitEntityId: (options.balanceDelta ?? 0) < 0 ? session.player.id : counterpartyEntityId,
+      creditEntityId: (options.balanceDelta ?? 0) < 0 ? counterpartyEntityId : session.player.id,
+      resource: "credits",
+      amount,
+      reason: options.balanceReason ?? "player-action",
+      description: options.title ?? options.activity ?? "Player balance action."
+    });
+  }
+  const preKernelWorldCore = advanceWorldCoreState({
+    seed: session.world.meta.seed,
+    timestamp: nextTimestamp,
+    playerId: session.player.id,
+    locations: session.world.locations,
+    organizations: nextOrganizations,
+    economy: healthAdvance.economy,
+    population: crimeAdvance.population,
+    urban: urbanState,
+    kernel: session.kernel,
+    previous: session.worldCore
+  });
+  let preBusinessInventory = advanceProductInventoryState({
+    seed: session.world.meta.seed,
+    timestamp: nextTimestamp,
+    playerId: session.player.id,
+    worldCore: preKernelWorldCore,
+    production: healthAdvance.production,
+    urban: urbanState,
+    population: crimeAdvance.population,
+    food: productionAdvance.food,
+    previous: session.productInventory
+  });
+  preBusinessInventory = applyPopulationInventoryCommands(
+    preBusinessInventory,
+    populationAdvance.inventoryCommands,
+    preKernelWorldCore,
+    session.world.meta.seed,
+    nextTimestamp
+  );
+  preBusinessInventory = commitProductionInventoryChanges(
+    preBusinessInventory,
+    session.world.meta.seed,
+    preKernelWorldCore,
+    session.production,
+    healthAdvance.production,
+    populationAdvance.food,
+    productionAdvance.food,
+    nextTimestamp
+  );
+  const businessAdvance = advanceBusinessEconomyState({
+    seed: session.world.meta.seed,
+    timestamp: nextTimestamp,
+    playerId: session.player.id,
+    districts: nextDistricts,
+    locations: session.world.locations,
+    organizations: nextOrganizations,
+    metropolitan: metropolitanState,
+    urban: urbanState,
+    population: crimeAdvance.population,
+    government: crimeAdvance.government,
+    infrastructure: governmentAdvance.infrastructure,
+    economy: healthAdvance.economy,
+    worldCore: preKernelWorldCore,
+    productInventory: preBusinessInventory,
+    kernel: session.kernel,
+    previous: session.businessEconomy
+  });
+  for (const transaction of businessAdvance.drafts) rawKernelDrafts.push(transaction);
+  const kernelDrafts = remapWorldCoreTransactions(businessAdvance.worldCore, rawKernelDrafts);
+  const kernel = advanceSimulationKernel(session.kernel, {
+    timestamp: nextTimestamp,
+    seed: session.world.meta.seed,
+    city: nextCity,
+    districts: nextDistricts,
+    locations: session.world.locations,
+    organizations: nextOrganizations,
+    player: playerWithWork,
+    population: crimeAdvance.population,
+    economy: businessAdvance.economy,
+    infrastructure: governmentAdvance.infrastructure,
+    production: healthAdvance.production,
+    organizationEcosystem: organizationAdvance.state,
+    government: crimeAdvance.government,
+    health: healthAdvance.state,
+    data: crimeAdvance.data,
+    vehicles: crimeVehiclesState,
+    worldCore: businessAdvance.worldCore,
+    businessEconomy: businessAdvance.state,
+    productInventory: businessAdvance.productInventory,
+    food: productionAdvance.food,
+    drafts: kernelDrafts
+  });
+  let worldCore = synchronizeWorldCoreFromKernel(businessAdvance.worldCore, kernel);
+  const businessEconomy = synchronizeBusinessEconomyFromKernel(businessAdvance.state, kernel, nextTimestamp);
+  worldCore = projectBusinessEconomyToWorldCore(businessEconomy, worldCore, nextTimestamp);
+  const coreProjection = projectWorldCoreState({
+    seed: session.world.meta.seed,
+    timestamp: nextTimestamp,
+    playerId: session.player.id,
+    locations: session.world.locations,
+    organizations: nextOrganizations,
+    economy: businessAdvance.economy,
+    population: crimeAdvance.population,
+    urban: businessAdvance.urban,
+    kernel,
+    previous: worldCore
+  }, worldCore);
+  const inventoryProjection = projectProductInventoryState(businessAdvance.productInventory, {
+    seed: session.world.meta.seed,
+    timestamp: nextTimestamp,
+    playerId: session.player.id,
+    worldCore,
+    production: healthAdvance.production,
+    urban: coreProjection.urban,
+    population: coreProjection.population,
+    food: productionAdvance.food,
+    previous: businessAdvance.productInventory
+  });
+  const canonicalCredits = projectCanonicalCreditsFromKernel(kernel, {
+    timestamp: nextTimestamp,
+    player: playerWithWork,
+    organizations: nextOrganizations,
+    population: inventoryProjection.population,
+    economy: coreProjection.economy,
+    production: inventoryProjection.production,
+    organizationEcosystem: organizationAdvance.state,
+    government: crimeAdvance.government,
+    health: healthAdvance.state,
+    urban: inventoryProjection.urban,
+    worldCore: inventoryProjection.worldCore
+  });
+
+  return {
+    ...session,
+    timestamp: nextTimestamp,
+    world: {
+      ...session.world,
+      meta: { ...session.world.meta, currentTimestamp: nextTimestamp },
+      city: nextCity,
+      districts: nextDistricts,
+      organizations: canonicalCredits.organizations,
+      activeDistrictId: targetDistrict?.id ?? session.world.activeDistrictId,
+      primaryContactId: selectedPerson?.id ?? session.world.primaryContactId
+    },
+    primaryContact: selectedPerson
+      ? toKnownNpc(selectedPerson, session.world.locations, nextTimestamp)
+      : session.primaryContact,
+    people: peopleState,
+    pressure,
+    economy: canonicalCredits.economy,
+    population: canonicalCredits.population,
+    kernel,
+    worldCore: inventoryProjection.worldCore,
+    productInventory: inventoryProjection.state,
+    businessEconomy,
+    infrastructure: governmentAdvance.infrastructure,
+    production: canonicalCredits.production,
+    organizationEcosystem: canonicalCredits.organizationEcosystem,
+    government: canonicalCredits.government,
+    health: canonicalCredits.health,
+    data: crimeAdvance.data,
+    metropolitan: metropolitanState,
+    urban: canonicalCredits.urban,
+    streets: streetsState,
+    mobility: mobilityState,
+    localScene: localSceneState,
+    streetScene: streetAdvance.state,
+    social: socialAdvance.state,
+    buildingAccess: buildingAccessState,
+    vehicles: crimeVehiclesState,
+    transit: transitState,
+    vehicleCrime: crimeAdvance.state,
+    playerCrime: playerCrimeAdvance.state,
+    district: infrastructurePulse,
+    eventQueue: queued.queue,
+    currentActivity: pressureAdvance.evicted
+      ? `Без постоянного жилья · ${targetLocation?.name ?? "TRANSIT NODE"}`
+      : options.activity ?? session.currentActivity,
+    life: {
+      ...session.life,
+      food: inventoryProjection.food,
+      currentLocationId: targetLocation?.id ?? localSceneState.playerPosition.locationId ?? session.life.currentLocationId
+    },
+    playerLoop: session.playerLoop,
+    player: canonicalCredits.player,
+    events: [...generated, ...queued.events.reverse(), ...pulse.events.reverse(), ...session.events].slice(0, 100)
+  };
+}
+
+
+export function actOnStreetIncident(session: GameSession, incidentId: string, action: StreetIncidentAction): GameSession {
+  const incident = session.streetScene.incidents.find((item) => item.id === incidentId);
+  if (!incident || incident.status === "resolved") return session;
+  const distance = Math.hypot(incident.xM - session.localScene.playerPosition.xM, incident.yM - session.localScene.playerPosition.yM);
+  if (session.localScene.playerPosition.state !== "outside" || distance > 24) return session;
+  const minutes = action === "observe" ? 2 : action === "call-help" ? 1 : action === "intervene" ? 6 : 0;
+  const progressed = minutes > 0 ? progressLife(session, minutes, {
+    category: "local",
+    title: action === "observe" ? `Осмотр: ${incident.title}` : action === "call-help" ? `Вызвана помощь: ${incident.title}` : action === "intervene" ? `Вмешательство: ${incident.title}` : undefined,
+    detail: action === "intervene" ? "Игрок физически вмешался в уличную ситуацию." : incident.detail,
+    importance: action === "intervene" ? 2 : 1,
+    fatigueDelta: action === "intervene" ? 2 : 0,
+    stressDelta: action === "intervene" ? 3 : 0,
+    suppressTimeEvent: true,
+    activity: action === "intervene" ? `Вмешательство: ${incident.title}` : `Наблюдение: ${incident.title}`
+  }) : session;
+  return {
+    ...progressed,
+    streetScene: applyStreetIncidentAction(progressed.streetScene, incidentId, action, progressed.timestamp)
+  };
+}
+
+function applyLocalMovementDistrict(session: GameSession): GameSession {
+  const position = session.localScene.playerPosition;
+  const sector = session.metropolitan.sectors.find((item) => item.id === position.sectorId);
+  const mapDistrict = sector ? session.metropolitan.mapDistricts.find((item) => item.id === sector.mapDistrictId) : undefined;
+  const district = mapDistrict ? session.world.districts.find((item) => item.id === mapDistrict.administrativeDistrictId) : undefined;
+  if (!sector && !district) return session;
+  return {
+    ...session,
+    world: { ...session.world, activeDistrictId: district?.id ?? session.world.activeDistrictId },
+    player: {
+      ...session.player,
+      district: district?.name ?? session.player.district,
+      sector: sector?.code ?? session.player.sector
+    }
+  };
+}
+
+export function reconcileLocalMovement(session: GameSession): GameSession {
+  const route = session.localMovement;
+  if (!route) return session;
+  const valid = route.version === 1
+    && route.points.length >= 2
+    && route.currentLegIndex >= 0
+    && route.currentLegIndex < route.points.length
+    && route.points.every((point) => Number.isFinite(point.xM) && Number.isFinite(point.yM))
+    && Number.isFinite(route.totalDistanceM)
+    && Number.isFinite(route.travelledM)
+    && Number.isFinite(route.streetDeltaCount)
+    && typeof route.streetRevision === "string";
+  if (!valid) return { ...session, localMovement: undefined };
+  if (route.status === "arrived") return session;
+  const refreshed = refreshLocalMovementRoute(session, route);
+  return refreshed ? { ...session, localMovement: refreshed } : { ...session, localMovement: undefined, currentActivity: "На улице" };
+}
+
+export function startLocalMovement(session: GameSession, target: LocalMovementTargetState): GameSession {
+  if (session.localMovement || session.transit.player.journey || session.localScene.playerPosition.state !== "outside") return session;
+  const route = planLocalMovement(session, target);
+  if (!route) return session;
+  return { ...session, localMovement: route, currentActivity: `Пешком: ${route.target.label}` };
+}
+
+export function advanceLocalMovement(session: GameSession, minutes = 1): GameSession {
+  const route = session.localMovement;
+  if (!route || route.status !== "walking" || minutes <= 0) return session;
+  const result = advanceLocalMovementRoute(session, route, minutes);
+  const arrived = result.route.status === "arrived";
+  const position: SpatialPositionState = {
+    sectorId: result.position.sectorId,
+    xM: result.position.xM,
+    yM: result.position.yM,
+    ...(arrived && result.route.target.locationId ? { locationId: result.route.target.locationId } : {}),
+    state: "outside",
+    updatedAt: session.timestamp + minutes * 60_000
+  };
+  const transitJourney = session.transit.player.journey;
+  const linkedTransitWalk = Boolean(result.route.target.stopId
+    && transitJourney?.phase === "walking"
+    && transitJourney.currentStopId === result.route.target.stopId);
+  const transitWalkMinutes = linkedTransitWalk && transitJourney
+    ? (arrived
+      ? transitJourney.walkingMinutesRemaining
+      : Math.min(minutes, Math.max(0, transitJourney.walkingMinutesRemaining - 1)))
+    : 0;
+  const progressed = progressLife({ ...session, localMovement: route }, minutes, {
+    category: arrived ? "personal" : undefined,
+    title: arrived ? `Прибытие: ${result.route.target.label}.` : undefined,
+    detail: arrived ? `Пешком · ${Math.round(result.route.totalDistanceM)} м.` : undefined,
+    importance: 1,
+    activity: arrived ? `У цели: ${result.route.target.label}` : `Идёт по ${localMovementCurrentStreet(result.route)}`,
+    targetLocationId: arrived ? result.route.target.locationId : undefined,
+    playerPosition: position,
+    fatigueDelta: minutes >= 8 ? 1 : 0,
+    transitCommand: transitWalkMinutes > 0 ? { kind: "walk", minutes: transitWalkMinutes } : undefined,
+    suppressTimeEvent: true
+  });
+  return applyLocalMovementDistrict({ ...progressed, localMovement: result.route });
+}
+
+export function skipLocalMovement(session: GameSession): GameSession {
+  const route = session.localMovement;
+  if (!route || route.status !== "walking") return session;
+  const minutes = Math.max(1, Math.ceil(route.remainingDistanceM / WALKING_SPEED_M_PER_MINUTE));
+  return advanceLocalMovement(session, minutes);
+}
+
+export function cancelLocalMovement(session: GameSession): GameSession {
+  const route = session.localMovement;
+  if (!route || route.status === "arrived") return session;
+  const withoutMovement = { ...session, localMovement: undefined, currentActivity: "На улице" };
+  const journey = session.transit.player.journey;
+  return route.target.stopId && journey?.phase === "walking" && journey.currentStopId === route.target.stopId
+    ? cancelTransitJourney(withoutMovement)
+    : withoutMovement;
+}
+
+export function finishLocalMovement(session: GameSession): GameSession {
+  if (!session.localMovement || session.localMovement.status !== "arrived") return session;
+  return { ...session, localMovement: undefined };
+}
+
+export function travelToLocation(session: GameSession, locationId: string): GameSession {
+  if (session.localScene.playerPosition.state === "vehicle" || session.transit.player.journey || session.localMovement) return session;
+  const option = getTravelOptions(session).find((item) => item.location.id === locationId);
+  if (!option) return session;
+  if (option.mode === "bus" || option.mode === "metro") return startTransitJourney(session, locationId);
+  if (session.player.balance < option.cost) return session;
+  const open = isLocationOpen(option.location, session.timestamp + option.durationMinutes * 60_000);
+  const progressed = progressLife(session, option.durationMinutes, {
+    category: "personal",
+    title: `Прибытие: ${option.location.name}.`,
+    detail: `${option.districtName} · ${option.mode.toUpperCase()} ${option.routeCode} · ${option.distanceKm} км · ₵ ${option.cost} · трафик ${option.congestionPercent}%${open ? "" : " · объект закрыт"}`,
+    importance: open ? 1 : 2,
+    balanceDelta: -option.cost,
+    fatigueDelta: 2,
+    stressDelta: option.sameDistrict ? 0 : 1,
+    activity: `На месте: ${option.location.name}`,
+    targetLocationId: option.location.id
+  });
+  return progressed;
+}
+
+
+function transitInput(session: GameSession, timestamp = session.timestamp, playerPosition: SpatialPositionState = session.localScene.playerPosition) {
+  return {
+    timestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    activeLocationId: session.life.currentLocationId,
+    playerPosition,
+    locations: session.world.locations,
+    districts: session.world.districts,
+    people: session.people,
+    population: session.population,
+    metropolitan: session.metropolitan,
+    mobility: session.mobility,
+    physicalVehicles: session.vehicles
+  };
+}
+
+function transitStopPosition(session: GameSession, stopId: string, state: "outside" | "in-transit", timestamp: number, routeId?: string, vehicleId?: string): SpatialPositionState | null {
+  const stop = getTransitStop(session.transit, stopId);
+  if (!stop) return null;
+  return {
+    sectorId: stop.sectorId,
+    xM: stop.xM,
+    yM: stop.yM,
+    transitRouteId: routeId,
+    vehicleId,
+    state,
+    updatedAt: timestamp
+  };
+}
+
+export function startTransitJourney(session: GameSession, locationId: string): GameSession {
+  if (session.transit.player.journey || session.localScene.playerPosition.state === "vehicle") return session;
+  const option = getTravelOptions(session).find((item) => item.location.id === locationId);
+  if (!option || (option.mode !== "bus" && option.mode !== "metro")) return session;
+  const estimate = estimateTransitJourney(session.transit, transitInput(session), session.life.currentLocationId, locationId, option.mode)
+    ?? estimateTransitJourney(session.transit, transitInput(session), session.life.currentLocationId, locationId);
+  if (!estimate || session.player.balance < estimate.totalFare) return session;
+  const position = transitStopPosition(session, estimate.originStopId, "outside", session.timestamp);
+  const stop = getTransitStop(session.transit, estimate.originStopId);
+  if (!position || !stop) return session;
+  const firstRoute = session.transit.routes.find((route) => route.id === estimate.segments[0]?.routeId);
+  const stopTarget = estimate.walkingMinutes > 0 ? localMovementTargetForStop(session, estimate.originStopId) : null;
+  const streetRoute = stopTarget ? planLocalMovement(session, stopTarget) : null;
+  const progressed = progressLife(session, 0, {
+    category: "personal",
+    title: `Маршрут построен: ${stop.name}.`,
+    detail: `${firstRoute?.code ?? option.routeCode} · пешком ${streetRoute?.estimatedMinutes ?? estimate.walkingMinutes} мин. · ожидание ${estimate.waitingMinutes} мин. · ${estimate.segments.length > 1 ? `${estimate.segments.length - 1} пересадка` : "прямой маршрут"}`,
+    importance: firstRoute?.status === "delayed" || firstRoute?.status === "crowded" ? 2 : 1,
+    fatigueDelta: 0,
+    stressDelta: 0,
+    activity: estimate.walkingMinutes > 0 ? `Идёт к остановке: ${stop.name}` : `На остановке: ${stop.name}`,
+    playerPosition: estimate.walkingMinutes > 0 ? session.localScene.playerPosition : position,
+    transitCommand: {
+      kind: "begin",
+      destinationLocationId: locationId,
+      segments: estimate.segments,
+      expectedArrivalAt: estimate.expectedArrivalAt,
+      walkingMinutes: estimate.walkingMinutes,
+      waitingMinutes: estimate.waitingMinutes
+    }
+  });
+  return streetRoute && progressed.transit.player.journey?.phase === "walking"
+    ? { ...progressed, localMovement: streetRoute }
+    : progressed;
+}
+
+export function walkTransitJourney(session: GameSession, requestedMinutes = 1): GameSession {
+  const journey = session.transit.player.journey;
+  if (!journey || journey.phase !== "walking" || journey.walkingMinutesRemaining <= 0) return session;
+  const stop = getTransitStop(session.transit, journey.currentStopId);
+  if (!stop) return session;
+  const minutes = Math.max(1, Math.min(journey.walkingMinutesRemaining, requestedMinutes));
+  const ratio = minutes / Math.max(1, journey.walkingMinutesRemaining);
+  const current = session.localScene.playerPosition;
+  const position: SpatialPositionState = {
+    sectorId: ratio >= 1 ? stop.sectorId : current.sectorId,
+    xM: Math.round((current.xM + (stop.xM - current.xM) * ratio) * 10) / 10,
+    yM: Math.round((current.yM + (stop.yM - current.yM) * ratio) * 10) / 10,
+    state: "outside",
+    updatedAt: session.timestamp + minutes * 60_000
+  };
+  return progressLife(session, minutes, {
+    category: "personal",
+    title: ratio >= 1 ? `Ты дошёл до остановки ${stop.name}.` : `Путь к остановке ${stop.name}.`,
+    detail: ratio >= 1 ? `Ожидание рейса: ${journey.waitingMinutesRemaining} мин.` : `Осталось ${journey.walkingMinutesRemaining - minutes} мин. пешком`,
+    importance: 1,
+    fatigueDelta: minutes >= 8 ? 1 : 0,
+    activity: ratio >= 1 ? `На остановке: ${stop.name}` : `Идёт к остановке: ${stop.name}`,
+    playerPosition: position,
+    transitCommand: { kind: "walk", minutes }
+  });
+}
+
+export function waitTransitJourney(session: GameSession, requestedMinutes = 1): GameSession {
+  const journey = session.transit.player.journey;
+  if (!journey || journey.phase !== "waiting" || journey.waitingMinutesRemaining <= 0) return session;
+  const minutes = Math.max(1, Math.min(journey.waitingMinutesRemaining, requestedMinutes));
+  const stop = getTransitStop(session.transit, journey.currentStopId);
+  return progressLife(session, minutes, {
+    category: "personal",
+    title: journey.waitingMinutesRemaining - minutes <= 0 ? "Транспорт подошёл." : `Ожидание: ${stop?.name ?? "остановка"}.`,
+    detail: journey.waitingMinutesRemaining - minutes <= 0 ? "Можно садиться." : `До прибытия около ${journey.waitingMinutesRemaining - minutes} мин.`,
+    importance: 1,
+    activity: `На остановке: ${stop?.name ?? "транспорт"}`,
+    playerPosition: session.localScene.playerPosition,
+    transitCommand: { kind: "wait", minutes }
+  });
+}
+
+export function cancelTransitJourney(session: GameSession): GameSession {
+  const journey = session.transit.player.journey;
+  if (!journey || journey.phase === "onboard" || journey.phase === "arrived") return session;
+  return progressLife(session, 1, {
+    category: "personal",
+    title: "Маршрут отменён.",
+    detail: "Ты остаёшься в текущей точке.",
+    importance: 1,
+    activity: "Маршрут отменён",
+    playerPosition: session.localScene.playerPosition,
+    transitCommand: { kind: "cancel" }
+  });
+}
+
+export function boardTransitVehicle(session: GameSession): GameSession {
+  const journey = session.transit.player.journey;
+  if (!journey || journey.phase !== "waiting" || journey.waitingMinutesRemaining > 0) return session;
+  const vehicle = getTransitBoardingVehicle(session.transit);
+  const fare = getTransitCurrentFare(session.transit);
+  if (!vehicle || session.player.balance < fare) return session;
+  const segment = journey.segments[journey.activeSegmentIndex];
+  const route = session.transit.routes.find((item) => item.id === segment.routeId);
+  const position = transitStopPosition(session, journey.currentStopId, "in-transit", session.timestamp, segment.routeId, vehicle.id);
+  if (!position) return session;
+  return progressLife(session, 2, {
+    category: "personal",
+    title: `Посадка: ${route?.code ?? "TRANSIT"} ${vehicle.fleetNumber}.`,
+    detail: `${vehicle.mode.toUpperCase()} · водитель ${vehicle.crew.name} · ₵ ${fare} · заполнение ${route?.crowdingPercent ?? 0}%`,
+    importance: route?.status === "crowded" ? 2 : 1,
+    balanceDelta: -fare,
+    fatigueDelta: 0,
+    activity: `В салоне ${vehicle.fleetNumber}`,
+    playerPosition: position,
+    transitCommand: { kind: "board", vehicleId: vehicle.id }
+  });
+}
+
+export function takeTransitSeat(session: GameSession, seatId: string): GameSession {
+  const journey = session.transit.player.journey;
+  const seat = session.transit.cabin?.seats.find((item) => item.id === seatId);
+  if (!journey || journey.phase !== "onboard" || !seat || seat.occupiedBy !== null) return session;
+  return progressLife(session, 1, {
+    category: "personal",
+    title: "Свободное место занято.",
+    detail: `${seat.kind === "priority" ? "Приоритетное" : "Обычное"} место · ряд ${seat.index + 1}`,
+    importance: 1,
+    fatigueDelta: -1,
+    activity: "Сидит в общественном транспорте",
+    playerPosition: session.transit.player.position,
+    transitCommand: { kind: "take-seat", seatId }
+  });
+}
+
+export function standInTransit(session: GameSession): GameSession {
+  const journey = session.transit.player.journey;
+  if (!journey?.seatId || journey.phase !== "onboard") return session;
+  return progressLife(session, 1, {
+    category: "personal",
+    title: "Место освобождено.",
+    detail: "Игрок продолжает поездку стоя.",
+    importance: 1,
+    activity: "Стоит в салоне",
+    playerPosition: session.transit.player.position,
+    transitCommand: { kind: "stand" }
+  });
+}
+
+export function yieldTransitSeat(session: GameSession, passengerId: string): GameSession {
+  const journey = session.transit.player.journey;
+  const passenger = session.transit.cabin?.passengers.find((item) => item.id === passengerId);
+  if (!journey?.seatId || journey.phase !== "onboard" || !passenger?.standing || passenger.priorityNeed === "none") return session;
+  return progressLife(session, 1, {
+    category: "contact",
+    title: `Место уступлено: ${passenger.name}.`,
+    detail: `${passenger.priorityNeed.toUpperCase()} · отношение пассажира улучшилось`,
+    importance: 1,
+    stressDelta: -1,
+    relationChanges: 1,
+    activity: "Стоит в салоне",
+    playerPosition: session.transit.player.position,
+    transitCommand: { kind: "yield-seat", passengerId }
+  });
+}
+
+export function rideTransitToNextStop(session: GameSession): GameSession {
+  const journey = session.transit.player.journey;
+  if (!journey || journey.phase !== "onboard") return session;
+  const minutes = getTransitLegMinutes(session.transit);
+  const position = getTransitAdvancePosition(session.transit, transitInput(session, session.timestamp + minutes * 60_000));
+  const nextStop = getTransitStop(session.transit, journey.nextStopId);
+  return progressLife(session, minutes, {
+    category: "personal",
+    title: `Следующая остановка: ${nextStop?.name ?? "маршрут продолжается"}.`,
+    detail: `${minutes} мин. · ${session.transit.cabin?.totalPassengerCount ?? 0} пассажиров`,
+    importance: 1,
+    fatigueDelta: journey.seatId ? -1 : 0,
+    activity: nextStop ? `У остановки: ${nextStop.name}` : "В пути",
+    playerPosition: position,
+    transitCommand: { kind: "advance" }
+  });
+}
+
+export function interactWithTransitPassenger(session: GameSession, passengerId: string): GameSession {
+  const journey = session.transit.player.journey;
+  const passenger = session.transit.cabin?.passengers.find((item) => item.id === passengerId);
+  if (!journey || journey.phase !== "onboard" || !passenger) return session;
+  const minutes = getTransitLegMinutes(session.transit);
+  const position = getTransitAdvancePosition(session.transit, transitInput(session, session.timestamp + minutes * 60_000));
+  let progressed = progressLife(session, minutes, {
+    category: "contact",
+    title: `Разговор в салоне: ${passenger.name}.`,
+    detail: `${passenger.roleLabel} · настроение ${passenger.mood.toUpperCase()} · разговор до следующей остановки`,
+    importance: 1,
+    stressDelta: passenger.mood === "friendly" ? -1 : passenger.mood === "irritated" ? 1 : 0,
+    relationChanges: passenger.activePersonId ? 1 : 0,
+    activity: `Разговор с ${passenger.name}`,
+    playerPosition: position,
+    transitCommand: { kind: "interact-advance", passengerId }
+  });
+  if (passenger.activePersonId) {
+    const people = recordPlayerAction(
+      progressed.people,
+      progressed.world.meta.seed,
+      passenger.activePersonId,
+      progressed.timestamp,
+      "Игрок поговорил с ним во время поездки в общественном транспорте.",
+      { trust: passenger.mood === "friendly" ? 2 : 1, irritation: passenger.mood === "irritated" ? 1 : 0, importance: 28, emotionalValue: passenger.mood === "friendly" ? 8 : 2 }
+    );
+    const contact = getPerson(people, passenger.activePersonId);
+    progressed = {
+      ...progressed,
+      people,
+      primaryContact: contact ? toKnownNpc(contact, progressed.world.locations, progressed.timestamp) : progressed.primaryContact,
+      world: { ...progressed.world, primaryContactId: contact?.id ?? progressed.world.primaryContactId }
+    };
+  }
+  return progressed;
+}
+
+export function usePhoneInTransit(session: GameSession, activity: TransitPhoneActivity): GameSession {
+  const journey = session.transit.player.journey;
+  if (!journey || journey.phase !== "onboard") return session;
+  const minutes = getTransitLegMinutes(session.transit);
+  const position = getTransitAdvancePosition(session.transit, transitInput(session, session.timestamp + minutes * 60_000));
+  const stressDelta = activity === "messages" ? -2 : activity === "city-feed" ? -1 : activity === "job-board" ? 0 : 1;
+  return progressLife(session, minutes, {
+    category: activity === "job-board" ? "work" : "personal",
+    title: `Телефон в дороге: ${phoneActivityLabel(activity)}.`,
+    detail: `${minutes} полезных минут · поездка продолжается до следующей остановки`,
+    importance: 1,
+    stressDelta,
+    activity: `Телефон: ${phoneActivityLabel(activity)}`,
+    playerPosition: position,
+    transitCommand: { kind: "phone-advance", activity, productiveMinutes: minutes }
+  });
+}
+
+export function alightTransitVehicle(session: GameSession): GameSession {
+  const journey = session.transit.player.journey;
+  if (!journey || journey.phase !== "arrived") return session;
+  const destination = session.world.locations.find((item) => item.id === journey.destinationLocationId);
+  const position = getTransitDestinationPosition(session.transit, transitInput(session, session.timestamp + 60_000));
+  if (!destination) return session;
+  return progressLife(session, 1, {
+    category: "personal",
+    title: `Выход: ${destination.name}.`,
+    detail: `${journey.segments.length > 1 ? `${journey.segments.length - 1} пересадка · ` : ""}${journey.interactions} разговоров · ${journey.phoneMinutes} мин. в телефоне`,
+    importance: 1,
+    fatigueDelta: journey.seatId ? 0 : 1,
+    activity: `На месте: ${destination.name}`,
+    targetLocationId: destination.id,
+    playerPosition: position,
+    transitCommand: { kind: "alight" }
+  });
+}
+
+export function skipTransitJourney(session: GameSession): GameSession {
+  const journey = session.transit.player.journey;
+  if (!journey) return session;
+  const destination = session.world.locations.find((item) => item.id === journey.destinationLocationId);
+  if (!destination) return session;
+  const minutes = getTransitRemainingMinutes(session.transit);
+  const remainingFare = Math.max(0, journey.segments.reduce((sum, segment) => sum + segment.fare, 0) - journey.farePaid);
+  if (session.player.balance < remainingFare) return session;
+  const position = getTransitDestinationPosition(session.transit, transitInput(session, session.timestamp + minutes * 60_000));
+  return progressLife(session, minutes, {
+    category: "personal",
+    title: `Поездка пропущена: ${destination.name}.`,
+    detail: `${minutes} мин. промотано · оставшаяся оплата ₵ ${remainingFare}`,
+    importance: 1,
+    balanceDelta: -remainingFare,
+    fatigueDelta: journey.seatId ? 0 : 1,
+    activity: `На месте: ${destination.name}`,
+    targetLocationId: destination.id,
+    playerPosition: position,
+    transitCommand: { kind: "skip" }
+  });
+}
+
+
+function buildingStreetPosition(session: GameSession, buildingId: string, timestamp: number): SpatialPositionState | null {
+  const building = session.urban.buildings.find((item) => item.id === buildingId);
+  const sector = building ? session.metropolitan.sectors.find((item) => item.id === building.sectorId) : undefined;
+  if (!building || !sector) return null;
+  const xM = Math.max(sector.bounds.xM + 1, Math.min(sector.bounds.xM + sector.bounds.widthM - 1, building.bounds.xM + building.bounds.widthM / 2));
+  const yM = Math.max(sector.bounds.yM + 1, Math.min(sector.bounds.yM + sector.bounds.heightM - 1, building.bounds.yM - 2));
+  return {
+    sectorId: building.sectorId,
+    xM: Math.round(xM * 10) / 10,
+    yM: Math.round(yM * 10) / 10,
+    locationId: building.anchorLocationId ?? session.localScene.playerPosition.locationId ?? session.life.currentLocationId,
+    state: "outside",
+    updatedAt: timestamp
+  };
+}
+
+function buildingInteriorPosition(session: GameSession, buildingId: string, floor: number, timestamp: number, unitId?: string, roomId?: string): SpatialPositionState | null {
+  const building = session.urban.buildings.find((item) => item.id === buildingId);
+  if (!building) return null;
+  return {
+    sectorId: building.sectorId,
+    xM: Math.round((building.bounds.xM + building.bounds.widthM / 2) * 10) / 10,
+    yM: Math.round((building.bounds.yM + building.bounds.heightM / 2) * 10) / 10,
+    locationId: building.anchorLocationId ?? session.localScene.playerPosition.locationId ?? session.life.currentLocationId,
+    buildingId,
+    unitId,
+    roomId,
+    floor,
+    interiorZone: roomId ? "room" : unitId ? "unit" : floor === 1 ? "lobby" : "corridor",
+    state: "inside",
+    updatedAt: timestamp
+  };
+}
+
+function accessInput(session: GameSession) {
+  return {
+    timestamp: session.timestamp,
+    seed: session.world.meta.seed,
+    player: session.player,
+    playerHomeLocationId: session.life.housing.locationId,
+    locations: session.world.locations,
+    population: session.population,
+    urban: session.urban,
+    localScene: session.localScene
+  };
+}
+
+export function approachLocalBuilding(session: GameSession, buildingId: string): GameSession {
+  if (session.localScene.playerPosition.state !== "outside") return session;
+  const local = session.localScene.buildings.find((item) => item.buildingId === buildingId);
+  const position = buildingStreetPosition(session, buildingId, session.timestamp);
+  if (!local || !position) return session;
+  const minutes = Math.max(1, Math.min(15, Math.ceil(local.distanceToPlayerM / 78)));
+  const building = session.urban.buildings.find((item) => item.id === buildingId);
+  return progressLife(session, minutes, {
+    category: "personal",
+    title: `Подход к зданию ${building?.addressCode ?? buildingId.slice(-6).toUpperCase()}.`,
+    detail: `${building?.use.toUpperCase() ?? "BUILDING"} · пешком ${Math.round(local.distanceToPlayerM)} м`,
+    importance: 1,
+    fatigueDelta: minutes >= 8 ? 1 : 0,
+    activity: `У входа: ${building?.addressCode ?? "UNKNOWN BUILDING"}`,
+    playerPosition: position
+  });
+}
+
+export function enterLocalBuilding(session: GameSession, buildingId: string, entrance: "public" | "service" = "public"): GameSession {
+  const local = session.localScene.buildings.find((item) => item.buildingId === buildingId);
+  const building = session.urban.buildings.find((item) => item.id === buildingId);
+  if (!local || !building || session.localScene.playerPosition.state !== "outside" || local.distanceToPlayerM > 20) return session;
+  const urban = ensureBuildingAccessDetail(
+    session.urban,
+    session.world.meta.seed,
+    session.timestamp,
+    buildingId,
+    session.player.id,
+    session.life.housing.locationId
+  );
+  const prepared: GameSession = { ...session, urban };
+  const access = advanceBuildingAccessState(session.buildingAccess, accessInput(prepared));
+  const entry = access.buildingEntries.find((item) => item.buildingId === buildingId);
+  const doorId = entrance === "service" ? entry?.serviceDoorId : entry?.publicDoorId;
+  const door = findAccessDoor(access, doorId);
+  if (!door || door.locked || door.decision === "closed" || door.decision === "unavailable") {
+    const denied = recordAccessDenied(access, session.timestamp);
+    return progressLife({ ...prepared, buildingAccess: denied }, 1, {
+      category: "personal",
+      title: "Вход закрыт.",
+      detail: `${building.addressCode} · ${door?.reason ?? "Нет доступного входа"}${door?.alarmed ? " · сигнализация активна" : ""}`,
+      importance: door?.alarmed ? 2 : 1,
+      activity: `У входа: ${building.addressCode}`,
+      playerPosition: buildingStreetPosition(prepared, buildingId, session.timestamp) ?? session.localScene.playerPosition
+    });
+  }
+  const opened = setAccessDoorOpen(access, door.id, true, session.timestamp);
+  const position = buildingInteriorPosition(prepared, buildingId, 1, session.timestamp);
+  if (!position) return session;
+  return progressLife({ ...prepared, buildingAccess: opened }, 2, {
+    category: "personal",
+    title: `Вход: ${building.addressCode}.`,
+    detail: `${door.label} · ${door.playerAuthorized ? "доступ подтверждён" : "дверь открыта"} · security ${building.security}%`,
+    importance: 1,
+    activity: `Внутри: ${building.addressCode} · этаж 1`,
+    playerPosition: position
+  });
+}
+
+export function leaveLocalBuilding(session: GameSession): GameSession {
+  const positionState = session.localScene.playerPosition;
+  const buildingId = positionState.buildingId;
+  if (!buildingId || positionState.state !== "inside" || positionState.unitId || positionState.roomId) return session;
+  const building = session.urban.buildings.find((item) => item.id === buildingId);
+  const position = buildingStreetPosition(session, buildingId, session.timestamp);
+  if (!building || !position) return session;
+  return progressLife(session, 2, {
+    category: "personal",
+    title: `Выход: ${building.addressCode}.`,
+    detail: `${building.use.toUpperCase()} · улица`,
+    importance: 1,
+    activity: `У входа: ${building.addressCode}`,
+    playerPosition: position
+  });
+}
+
+export function moveInsideBuilding(session: GameSession, floor: number, method: "stairs" | "elevator"): GameSession {
+  const playerPosition = session.localScene.playerPosition;
+  const buildingId = playerPosition.buildingId;
+  const building = buildingId ? session.urban.buildings.find((item) => item.id === buildingId) : undefined;
+  if (!building || playerPosition.state !== "inside" || playerPosition.unitId || playerPosition.roomId) return session;
+  const minimumFloor = building.basementLevels > 0 ? -building.basementLevels : 1;
+  if (floor === 0 || floor < minimumFloor || floor > building.floors) return session;
+  if (method === "elevator" && (building.elevatorCount <= 0 || building.utilityService < 25)) return session;
+  if (method === "stairs" && building.stairwellCount <= 0) return session;
+  const currentFloor = session.localScene.playerPosition.floor ?? 1;
+  const difference = Math.abs(floor - currentFloor);
+  const minutes = method === "elevator" ? Math.max(1, Math.ceil(difference / 10)) : Math.max(1, Math.ceil(difference / 2));
+  const position = buildingInteriorPosition(session, building.id, floor, session.timestamp);
+  if (!position) return session;
+  return progressLife(session, minutes, {
+    category: "personal",
+    title: `${method === "elevator" ? "Лифт" : "Лестница"}: этаж ${floor}.`,
+    detail: `${building.addressCode} · ${difference} этажей`,
+    importance: 1,
+    fatigueDelta: method === "stairs" && difference >= 4 ? 1 : 0,
+    activity: `Внутри: ${building.addressCode} · этаж ${floor}`,
+    playerPosition: position
+  });
+}
+
+export function enterBuildingUnit(session: GameSession, unitId: string): GameSession {
+  const buildingId = session.localScene.playerPosition.buildingId;
+  const unit = session.urban.units.find((item) => item.id === unitId);
+  if (!buildingId || !unit || unit.buildingId !== buildingId || unit.floor !== (session.localScene.playerPosition.floor ?? 1)) return session;
+  let urban = ensureUnitInteriorDetail(session.urban, session.world.meta.seed, session.timestamp, unitId);
+  const prepared: GameSession = { ...session, urban };
+  const access = advanceBuildingAccessState(session.buildingAccess, accessInput(prepared));
+  const unitAccess = access.units.find((item) => item.unitId === unitId);
+  const door = findAccessDoor(access, unitAccess?.doorId);
+  if (!unitAccess || !door || door.locked) {
+    const denied = recordAccessDenied(access, session.timestamp);
+    return progressLife({ ...prepared, buildingAccess: denied }, 1, {
+      category: "personal",
+      title: `Дверь ${unit.unitNumber} закрыта.`,
+      detail: `${unitAccess?.reason ?? "Нет доступа"}${door?.alarmed ? " · сигнализация активна" : ""}`,
+      importance: door?.alarmed ? 2 : 1,
+      activity: `Коридор · этаж ${unit.floor}`,
+      playerPosition: session.localScene.playerPosition
+    });
+  }
+  const opened = setAccessDoorOpen(access, door.id, true, session.timestamp);
+  const position = buildingInteriorPosition(prepared, buildingId, unit.floor, session.timestamp, unitId);
+  if (!position) return session;
+  return progressLife({ ...prepared, buildingAccess: opened }, 1, {
+    category: "personal",
+    title: `Вход в помещение ${unit.unitNumber}.`,
+    detail: `${unit.use.toUpperCase()} · ${unit.areaM2} м² · ${unitAccess.playerAuthorized ? "доступ подтверждён" : "дверь открыта"}`,
+    importance: 1,
+    activity: `Помещение ${unit.unitNumber} · этаж ${unit.floor}`,
+    playerPosition: position
+  });
+}
+
+export function enterPlayerHomeUnit(session: GameSession): GameSession {
+  const homeUnit = getPlayerHomeUnit(session);
+  const position = session.localScene.playerPosition;
+  if (!homeUnit || session.pressure.housingStatus === "evicted" || position.state !== "inside" || position.buildingId !== homeUnit.buildingId) return session;
+  if (position.unitId === homeUnit.id) return session;
+  let prepared = session;
+  if ((position.floor ?? 1) !== homeUnit.floor) {
+    const building = session.urban.buildings.find((item) => item.id === homeUnit.buildingId);
+    const method = building && building.elevatorCount > 0 && building.utilityService >= 25 ? "elevator" as const : "stairs" as const;
+    prepared = moveInsideBuilding(session, homeUnit.floor, method);
+  }
+  return enterBuildingUnit(prepared, homeUnit.id);
+}
+
+export function leaveBuildingUnit(session: GameSession): GameSession {
+  const position = session.localScene.playerPosition;
+  if (!position.buildingId || !position.unitId) return session;
+  const unit = session.urban.units.find((item) => item.id === position.unitId);
+  const next = buildingInteriorPosition(session, position.buildingId, position.floor ?? unit?.floor ?? 1, session.timestamp);
+  if (!next) return session;
+  return progressLife(session, 1, {
+    category: "personal",
+    title: `Выход из помещения ${unit?.unitNumber ?? "UNKNOWN"}.`,
+    detail: `Коридор · этаж ${next.floor ?? 1}`,
+    importance: 1,
+    activity: `Коридор · этаж ${next.floor ?? 1}`,
+    playerPosition: next
+  });
+}
+
+export function enterInteriorRoom(session: GameSession, roomId: string): GameSession {
+  const position = session.localScene.playerPosition;
+  if (!position.buildingId || !position.unitId || position.roomId) return session;
+  const room = session.buildingAccess.rooms.find((item) => item.roomId === roomId && item.unitId === position.unitId);
+  if (!room || room.decision !== "open") return session;
+  const next = buildingInteriorPosition(session, position.buildingId, position.floor ?? room.floor, session.timestamp, position.unitId, roomId);
+  if (!next) return session;
+  return progressLife(session, 1, {
+    category: "personal",
+    title: `Комната: ${room.kind.replace(/-/g, " ").toUpperCase()}.`,
+    detail: `Помещение ${session.urban.units.find((item) => item.id === position.unitId)?.unitNumber ?? "UNKNOWN"}`,
+    importance: 1,
+    activity: room.kind.replace(/-/g, " ").toUpperCase(),
+    playerPosition: next
+  });
+}
+
+export function leaveInteriorRoom(session: GameSession): GameSession {
+  const position = session.localScene.playerPosition;
+  if (!position.buildingId || !position.unitId || !position.roomId) return session;
+  const next = buildingInteriorPosition(session, position.buildingId, position.floor ?? 1, session.timestamp, position.unitId);
+  if (!next) return session;
+  return progressLife(session, 1, {
+    category: "personal",
+    title: "Выход в помещение.",
+    detail: `Этаж ${next.floor ?? 1}`,
+    importance: 1,
+    activity: "Внутри помещения",
+    playerPosition: next
+  });
+}
+
+function physicalVehicleInput(session: GameSession, timestamp = session.timestamp, targetLocationId?: string, playerPosition: SpatialPositionState = session.localScene.playerPosition) {
+  return {
+    timestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    activeLocationId: session.life.currentLocationId,
+    targetLocationId,
+    playerPosition,
+    metropolitan: session.metropolitan,
+    urban: session.urban,
+    mobility: session.mobility,
+    population: session.population,
+    organizations: session.world.organizations
+  };
+}
+
+export function approachPhysicalVehicle(session: GameSession, vehicleId: string): GameSession {
+  if (session.localScene.playerPosition.state !== "outside") return session;
+  const vehicle = getPhysicalVehicle(session.vehicles, vehicleId);
+  if (!vehicle || !vehicle.visible || vehicle.state === "moving" || vehicle.position.sectorId !== session.localScene.playerPosition.sectorId) return session;
+  const minutes = Math.max(1, Math.min(12, Math.ceil(vehicle.distanceToPlayerM / 82)));
+  const position = playerVehiclePosition(vehicle, session.timestamp, "outside");
+  return progressLife(session, minutes, {
+    category: "personal",
+    title: `Подход к машине ${vehicle.plate}.`,
+    detail: `${vehicle.modelName} · ${Math.round(vehicle.distanceToPlayerM)} м · ${vehicle.state.toUpperCase()}`,
+    importance: 1,
+    fatigueDelta: minutes >= 8 ? 1 : 0,
+    activity: `У машины: ${vehicle.modelName} ${vehicle.plate}`,
+    playerPosition: position
+  });
+}
+
+export function enterPhysicalVehicle(session: GameSession, vehicleId: string): GameSession {
+  if (session.localScene.playerPosition.state !== "outside") return session;
+  const vehicle = getPhysicalVehicle(session.vehicles, vehicleId);
+  if (!vehicle || vehicle.distanceToPlayerM > 6 || vehicle.state === "moving" || vehicle.state === "disabled") return session;
+  const seat = vehicle.access === "owned" || vehicle.access === "authorized" ? "driver" as const : "passenger" as const;
+  if (seat === "passenger" && (vehicle.locked || vehicle.access !== "public")) return session;
+  if (seat === "driver" && !vehicle.playerCanDrive) return session;
+  const position = playerVehiclePosition(vehicle, session.timestamp, "vehicle");
+  return progressLife(session, 1, {
+    category: "personal",
+    title: `Посадка: ${vehicle.modelName}.`,
+    detail: `${vehicle.plate} · ${seat === "driver" ? "место водителя" : "пассажирское место"} · топливо ${vehicle.fuelL}/${vehicle.fuelCapacityL} л`,
+    importance: 1,
+    activity: `В машине: ${vehicle.modelName}`,
+    playerPosition: position,
+    vehicleCommand: { kind: "enter", vehicleId, seat }
+  });
+}
+
+export function leavePhysicalVehicle(session: GameSession): GameSession {
+  const vehicleId = session.vehicles.player.currentVehicleId;
+  const vehicle = getPhysicalVehicle(session.vehicles, vehicleId);
+  if (!vehicle || session.localScene.playerPosition.state !== "vehicle") return session;
+  const position = playerVehiclePosition(vehicle, session.timestamp, "outside");
+  return progressLife(session, 1, {
+    category: "personal",
+    title: `Выход из машины ${vehicle.plate}.`,
+    detail: `${vehicle.modelName} · машина припаркована`,
+    importance: 1,
+    activity: `У машины: ${vehicle.modelName} ${vehicle.plate}`,
+    playerPosition: position,
+    vehicleCommand: { kind: "exit", vehicleId: vehicle.id }
+  });
+}
+
+export function drivePhysicalVehicleToLocation(session: GameSession, locationId: string): GameSession {
+  const vehicleId = session.vehicles.player.currentVehicleId;
+  const vehicle = getPhysicalVehicle(session.vehicles, vehicleId);
+  if (!vehicle || session.vehicles.player.seat !== "driver" || session.localScene.playerPosition.state !== "vehicle") return session;
+  if (!vehicle.playerCanDrive || vehicle.condition < 18) return session;
+  const target = session.world.locations.find((location) => location.id === locationId);
+  if (!target || target.id === session.life.currentLocationId) return session;
+  const estimate = estimatePhysicalVehicleTravel(session.vehicles, physicalVehicleInput(session), vehicle.id, session.life.currentLocationId, target.id);
+  if (!estimate || vehicle.fuelL + 0.001 < estimate.fuelUsedL) return session;
+  const arrivalTimestamp = session.timestamp + estimate.durationMinutes * 60_000;
+  const position = physicalVehiclePositionAtLocation(
+    physicalVehicleInput(session, arrivalTimestamp, target.id),
+    vehicle.id,
+    target.id,
+    "vehicle"
+  );
+  const district = session.world.districts.find((item) => item.id === target.districtId);
+  return progressLife(session, estimate.durationMinutes, {
+    category: "personal",
+    title: `Прибытие на машине: ${target.name}.`,
+    detail: `${vehicle.modelName} ${vehicle.plate} · ${Math.round(estimate.distanceM / 100) / 10} км · ${estimate.averageSpeedKph} км/ч · топливо −${estimate.fuelUsedL} л · трафик ${estimate.congestionPercent}%`,
+    importance: estimate.congestionPercent >= 85 ? 2 : 1,
+    fatigueDelta: 1,
+    stressDelta: estimate.congestionPercent >= 75 ? 1 : 0,
+    activity: `В машине у ${target.name}`,
+    targetLocationId: target.id,
+    playerPosition: position,
+    vehicleCommand: {
+      kind: "drive",
+      vehicleId: vehicle.id,
+      destinationLocationId: target.id,
+      distanceM: estimate.distanceM,
+      durationMinutes: estimate.durationMinutes,
+      fuelUsedL: estimate.fuelUsedL
+    }
+  });
+}
+
+export function servicePhysicalVehicle(session: GameSession, vehicleId: string): GameSession {
+  if (session.localScene.playerPosition.state !== "outside") return session;
+  const exactLocationId = getPlayerExactLocationId(session);
+  const currentLocation = session.world.locations.find((location) => location.id === exactLocationId);
+  const vehicle = getPhysicalVehicle(session.vehicles, vehicleId);
+  if (!vehicle || currentLocation?.type !== "workshop" || vehicle.distanceToPlayerM > 30 || vehicle.state === "moving") return session;
+  if (vehicle.access !== "owned" && vehicle.access !== "authorized") return session;
+  const fuelAddedL = Math.max(0, Math.round((vehicle.fuelCapacityL - vehicle.fuelL) * 10) / 10);
+  const conditionRestored = Math.max(0, Math.round((92 - vehicle.condition) * 10) / 10);
+  if (fuelAddedL <= 0 && conditionRestored <= 0) return session;
+  const cost = Math.max(12, Math.ceil(fuelAddedL * 3.2 + conditionRestored * 8.5));
+  if (session.player.balance < cost) return session;
+  return progressLife(session, 45, {
+    category: "personal",
+    title: `Обслуживание машины ${vehicle.plate}.`,
+    detail: `Топливо +${fuelAddedL} л · состояние +${conditionRestored}% · ₵ ${cost}`,
+    importance: 1,
+    balanceDelta: -cost,
+    activity: `Сервис завершён: ${vehicle.modelName}`,
+    playerPosition: session.localScene.playerPosition,
+    vehicleCommand: { kind: "service", vehicleId, fuelAddedL, conditionRestored }
+  });
+}
+
+
+function vehicleCrimeDistrictId(session: GameSession, vehicleId: string): string {
+  const vehicle = getPhysicalVehicle(session.vehicles, vehicleId);
+  const sector = session.metropolitan.sectors.find((item) => item.id === vehicle?.position.sectorId);
+  return sector?.districtId ?? session.world.activeDistrictId;
+}
+
+function vehicleCrimeInput(session: GameSession, vehicleId: string) {
+  const vehicle = getPhysicalVehicle(session.vehicles, vehicleId);
+  if (!vehicle) return null;
+  return {
+    timestamp: session.timestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    vehicle,
+    vehicles: session.vehicles,
+    localScene: session.localScene,
+    data: session.data,
+    districtId: vehicleCrimeDistrictId(session, vehicleId)
+  };
+}
+
+export function inspectPhysicalVehicleForTheft(session: GameSession, vehicleId: string): GameSession {
+  if (session.localScene.playerPosition.state !== "outside") return session;
+  const input = vehicleCrimeInput(session, vehicleId);
+  if (!input || input.vehicle.distanceToPlayerM > 6 || input.vehicle.state === "moving" || input.vehicle.access === "owned") return session;
+  const inspected = inspectVehicleCrimeOpportunity(session.vehicleCrime, input);
+  return progressLife({ ...session, vehicleCrime: inspected.state }, 2, {
+    category: "personal",
+    title: `Осмотр машины ${input.vehicle.plate}.`,
+    detail: `Замок ${inspected.inspection.lockDifficulty}% · зажигание ${inspected.inspection.ignitionDifficulty}% · сигнализация ${inspected.inspection.alarmRisk}% · камеры ${inspected.inspection.cameraRisk}% · свидетели ${inspected.inspection.witnessRisk}%`,
+    importance: 1,
+    stressDelta: 1,
+    activity: `Осмотр машины: ${input.vehicle.modelName}`,
+    playerPosition: session.localScene.playerPosition
+  });
+}
+
+export function forceOpenPhysicalVehicle(session: GameSession, vehicleId: string): GameSession {
+  if (session.localScene.playerPosition.state !== "outside") return session;
+  const input = vehicleCrimeInput(session, vehicleId);
+  if (!input || input.vehicle.distanceToPlayerM > 6 || !input.vehicle.locked || input.vehicle.state === "moving" || input.vehicle.access === "owned") return session;
+  if (!getVehicleCrimeInspection(session.vehicleCrime, vehicleId)) return session;
+  const result = attemptVehicleCrimeAction(session.vehicleCrime, { ...input, action: "break-in" });
+  const data = appendVehicleCrimeObservations(session.data, result.observations, session.timestamp);
+  return progressLife({ ...session, vehicleCrime: result.state, data }, 4, {
+    category: "personal",
+    title: result.success ? `Замок машины ${input.vehicle.plate} вскрыт.` : `Вскрытие машины ${input.vehicle.plate} сорвалось.`,
+    detail: `${result.detail} · улики ${result.evidence}%`,
+    importance: result.alarmTriggered ? 3 : result.success ? 2 : 1,
+    stressDelta: result.alarmTriggered ? 8 : 3,
+    activity: result.success ? `Открытая машина: ${input.vehicle.modelName}` : `У машины: ${input.vehicle.modelName}`,
+    playerPosition: session.localScene.playerPosition,
+    vehicleCommand: { kind: "crime-unlock", vehicleId, success: result.success, alarmTriggered: result.alarmTriggered, incidentId: result.incidentId }
+  });
+}
+
+export function hotwirePhysicalVehicle(session: GameSession, vehicleId: string): GameSession {
+  if (session.localScene.playerPosition.state !== "outside") return session;
+  const input = vehicleCrimeInput(session, vehicleId);
+  if (!input || input.vehicle.distanceToPlayerM > 6 || input.vehicle.locked || input.vehicle.state === "moving" || input.vehicle.state === "disabled" || input.vehicle.access === "owned") return session;
+  if (!getVehicleCrimeInspection(session.vehicleCrime, vehicleId)) return session;
+  const result = attemptVehicleCrimeAction(session.vehicleCrime, { ...input, action: "hotwire" });
+  const data = appendVehicleCrimeObservations(session.data, result.observations, session.timestamp);
+  const position = result.success ? playerVehiclePosition(input.vehicle, session.timestamp + 6 * 60_000, "vehicle") : session.localScene.playerPosition;
+  const playerCrime = recordPlayerCrimeAction(session.playerCrime, {
+    seed: session.world.meta.seed,
+    timestamp: session.timestamp,
+    playerId: session.player.id,
+    playerPosition: session.localScene.playerPosition,
+    localScene: session.localScene,
+    streetScene: session.streetScene,
+    data,
+    urban: session.urban,
+    government: session.government,
+    districts: session.world.districts,
+    organizations: session.world.organizations,
+    kind: "vehicle-theft",
+    sectorId: input.vehicle.position.sectorId,
+    districtId: input.districtId,
+    xM: input.vehicle.position.xM,
+    yM: input.vehicle.position.yM,
+    vehicleId,
+    success: result.success,
+    violence: result.alarmTriggered ? 24 : 8,
+    stolenValue: result.success ? getVehicleCrimeInspection(session.vehicleCrime, vehicleId)?.estimatedFenceValue ?? 250 : 0,
+    alarmTriggered: result.alarmTriggered,
+    stolenProperty: result.success ? {
+      sourceVehicleId: vehicleId,
+      name: `${input.vehicle.modelName} · ${input.vehicle.plate}`,
+      value: getVehicleCrimeInspection(session.vehicleCrime, vehicleId)?.estimatedFenceValue ?? 250,
+      quantity: 1,
+      evidenceStrength: result.evidence
+    } : undefined
+  });
+  return progressLife({ ...session, vehicleCrime: result.state, playerCrime, data }, 6, {
+    category: "personal",
+    title: result.success ? `Машина ${input.vehicle.plate} угнана.` : `Зажигание ${input.vehicle.plate} не поддалось.`,
+    detail: `${result.detail} · заявление владельца ${result.ownerReportDueAt ? "ожидается" : "не создано"}`,
+    importance: result.success || result.alarmTriggered ? 3 : 2,
+    stressDelta: result.success ? 7 : 5,
+    activity: result.success ? `В угнанной машине: ${input.vehicle.modelName}` : `У машины: ${input.vehicle.modelName}`,
+    playerPosition: position,
+    vehicleCommand: { kind: "crime-steal", vehicleId, success: result.success, alarmTriggered: result.alarmTriggered, incidentId: result.incidentId }
+  });
+}
+
+export function stealPhysicalVehicleContents(session: GameSession, vehicleId: string): GameSession {
+  if (session.localScene.playerPosition.state !== "outside") return session;
+  const vehicle = getPhysicalVehicle(session.vehicles, vehicleId);
+  if (!vehicle || vehicle.distanceToPlayerM > 6 || vehicle.locked || vehicle.cabinLootCredits <= 0 || vehicle.state === "moving") return session;
+  const credits = vehicle.cabinLootCredits;
+  const result = recordVehicleCabinTheft(session.vehicleCrime, {
+    timestamp: session.timestamp,
+    seed: session.world.meta.seed,
+    playerId: session.player.id,
+    vehicle,
+    localScene: session.localScene,
+    data: session.data,
+    districtId: vehicleCrimeDistrictId(session, vehicleId),
+    credits
+  });
+  const data = appendVehicleCrimeObservations(session.data, result.observations, session.timestamp);
+  return progressLife({ ...session, vehicleCrime: result.state, data }, 3, {
+    category: "personal",
+    title: `Салон ${vehicle.plate} обыскан.`,
+    detail: `Наличные и мелкие вещи · ₵ ${credits} · свидетели ${result.witnessCount} · камеры ${result.cameraCount}`,
+    importance: result.witnessCount || result.cameraCount ? 2 : credits >= 80 ? 2 : 1,
+    balanceDelta: credits,
+    stressDelta: 2,
+    activity: `У машины: ${vehicle.modelName}`,
+    playerPosition: session.localScene.playerPosition,
+    vehicleCommand: { kind: "crime-loot", vehicleId }
+  });
+}
+
+function forgedVehiclePlate(session: GameSession, vehicleId: string): string {
+  const code = createStableEntityId("vehicle-plate-forgery", `${session.world.meta.seed}:${vehicleId}:${session.timestamp}`).replace(/[^a-z0-9]/gi, "").toUpperCase();
+  return `NX-${code.slice(-5)}-${code.slice(-2)}`;
+}
+
+function isAtVehicleWorkshop(session: GameSession): boolean {
+  const exactLocationId = getPlayerExactLocationId(session);
+  return session.world.locations.find((location) => location.id === exactLocationId)?.type === "workshop";
+}
+
+export function replateStolenPhysicalVehicle(session: GameSession, vehicleId: string): GameSession {
+  if (!isAtVehicleWorkshop(session)) return session;
+  const vehicle = getPhysicalVehicle(session.vehicles, vehicleId);
+  const wanted = getVehicleWantedState(session.vehicleCrime, vehicleId);
+  if (!vehicle || !wanted || !session.vehicleCrime.stolenVehicleIds.includes(vehicleId)) return session;
+  if (session.localScene.playerPosition.state !== "outside" && session.vehicles.player.currentVehicleId !== vehicleId) return session;
+  const plate = forgedVehiclePlate(session, vehicleId);
+  const resolved = resolveVehicleFenceAction(session.vehicleCrime, vehicleId, "replate", session.timestamp, plate);
+  if (!resolved || session.player.balance < Math.abs(resolved.amount)) return session;
+  return progressLife({ ...session, vehicleCrime: resolved.state }, 90, {
+    category: "personal",
+    title: `Машина ${vehicle.plate} получила новые номера.`,
+    detail: `${plate} · старый номер ${wanted.originalPlate} остаётся в деле · ₵ ${Math.abs(resolved.amount)}`,
+    importance: 2,
+    balanceDelta: resolved.amount,
+    stressDelta: -3,
+    activity: `Новые номера: ${plate}`,
+    playerPosition: session.localScene.playerPosition,
+    vehicleCommand: { kind: "crime-replate", vehicleId, plate }
+  });
+}
+
+export function disposeStolenPhysicalVehicle(session: GameSession, vehicleId: string, method: "strip" | "fence"): GameSession {
+  if (!isAtVehicleWorkshop(session) || session.localScene.playerPosition.state !== "outside") return session;
+  const vehicle = getPhysicalVehicle(session.vehicles, vehicleId);
+  if (!vehicle || vehicle.distanceToPlayerM > 30 || !session.vehicleCrime.stolenVehicleIds.includes(vehicleId)) return session;
+  const resolved = resolveVehicleFenceAction(session.vehicleCrime, vehicleId, method, session.timestamp);
+  if (!resolved) return session;
+  return progressLife({ ...session, vehicleCrime: resolved.state }, method === "strip" ? 180 : 60, {
+    category: "personal",
+    title: method === "strip" ? `Машина ${vehicle.plate} разобрана.` : `Машина ${vehicle.plate} передана скупщику.`,
+    detail: `${method === "strip" ? "Детали ушли по подпольным каналам" : "Новый владелец забрал машину"} · ₵ ${resolved.amount}`,
+    importance: 3,
+    balanceDelta: resolved.amount,
+    stressDelta: -4,
+    activity: method === "strip" ? "Машина разобрана" : "Машина продана",
+    playerPosition: session.localScene.playerPosition,
+    vehicleCommand: { kind: "crime-dispose", vehicleId, method }
+  });
+}
+
+export function acceptPersonalRequest(session: GameSession, requestId: string): GameSession {
+  const request = session.pressure.requests.find((item) => item.id === requestId);
+  if (!request || request.status !== "open" || request.dueAt <= session.timestamp) return session;
+  const actor = session.localScene.actors.find((item) => item.activePersonId === request.personId && item.visible && item.interactable);
+  if (!actor) return session;
+  const person = getPerson(session.people, request.personId);
+  const targetLocationId = person?.currentLocationId ?? request.targetLocationId;
+  const acceptedPressure = acceptNpcRequestState({
+    ...session.pressure,
+    requests: session.pressure.requests.map((item) => item.id === requestId ? { ...item, targetLocationId } : item)
+  }, requestId, session.timestamp);
+  const people = recordPlayerAction(
+    session.people,
+    session.world.meta.seed,
+    request.personId,
+    session.timestamp,
+    `Игрок согласился выполнить просьбу ${request.code}: ${request.title}.`,
+    { trust: 1, respect: 1, importance: 42, emotionalValue: 6 }
+  );
+  const contact = getPerson(people, request.personId);
+  return {
+    ...session,
+    pressure: acceptedPressure,
+    people,
+    world: { ...session.world, primaryContactId: request.personId },
+    primaryContact: contact ? toKnownNpc(contact, session.world.locations, session.timestamp) : session.primaryContact,
+    currentActivity: `Принята просьба ${request.code}`,
+    events: [
+      createEvent(session, session.timestamp, "contact", `${contact?.name ?? "Контакт"}: договорились.`, `${request.title} · срок ${new Date(request.dueAt).toISOString().slice(11, 16)}.`, 2),
+      ...session.events
+    ].slice(0, 100)
+  };
+}
+
+export function declinePersonalRequest(session: GameSession, requestId: string): GameSession {
+  const request = session.pressure.requests.find((item) => item.id === requestId);
+  if (!request || (request.status !== "open" && request.status !== "accepted")) return session;
+  const actor = session.localScene.actors.find((item) => item.activePersonId === request.personId && item.visible && item.interactable);
+  if (!actor) return session;
+  const pressure = declineNpcRequestState(session.pressure, requestId);
+  const people = recordPlayerAction(
+    session.people,
+    session.world.meta.seed,
+    request.personId,
+    session.timestamp,
+    `Игрок отказался от просьбы ${request.code}: ${request.title}.`,
+    { trust: -2, respect: -1, irritation: 3, importance: 48, emotionalValue: -14 }
+  );
+  const contact = getPerson(people, request.personId);
+  return {
+    ...session,
+    pressure: trackPressureMetrics(pressure, { relationChanges: 1 }),
+    people,
+    primaryContact: contact ? toKnownNpc(contact, session.world.locations, session.timestamp) : session.primaryContact,
+    events: [
+      createEvent(session, session.timestamp, "contact", `${contact?.name ?? "Контакт"}: просьба отклонена.`, request.title, 1),
+      ...session.events
+    ].slice(0, 100)
+  };
+}
+
+export function completePersonalRequest(session: GameSession, requestId: string): GameSession {
+  const request = session.pressure.requests.find((item) => item.id === requestId);
+  if (!request || request.status !== "accepted") return session;
+  const actor = session.localScene.actors.find((item) => item.activePersonId === request.personId && item.visible && item.interactable);
+  if (!actor) return session;
+  const person = getPerson(session.people, request.personId);
+  if (person && person.currentLocationId !== request.targetLocationId) {
+    const location = session.world.locations.find((item) => item.id === person.currentLocationId);
+    return {
+      ...session,
+      pressure: {
+        ...session.pressure,
+        requests: session.pressure.requests.map((item) => item.id === request.id ? { ...item, targetLocationId: person.currentLocationId } : item)
+      },
+      events: [
+        createEvent(session, session.timestamp, "contact", `${person.name} сменил место.`, `${request.code} · новая точка: ${location?.name ?? "неизвестная точка"}.`, 2),
+        ...session.events
+      ].slice(0, 100)
+    };
+  }
+  const exactLocationId = getPlayerExactLocationId(session);
+  if (!exactLocationId) return session;
+  const completionAt = session.timestamp + request.durationMinutes * 60_000;
+  const completion = completeNpcRequestState(
+    session.pressure,
+    requestId,
+    completionAt,
+    exactLocationId,
+    session.player.balance
+  );
+  if (!completion) return session;
+  const base = { ...session, pressure: completion.state };
+  const progressed = progressLife(base, request.durationMinutes, {
+    category: "contact",
+    title: `Просьба ${request.code} выполнена.`,
+    detail: `${request.title} · ${completion.balanceDelta >= 0 ? `получено ₵ ${completion.balanceDelta}` : `потрачено ₵ ${Math.abs(completion.balanceDelta)}`}`,
+    importance: 2,
+    balanceDelta: completion.balanceDelta,
+    fatigueDelta: request.durationMinutes >= 40 ? 4 : 2,
+    stressDelta: -1,
+    requestsCompleted: 1,
+    relationChanges: 1,
+    activity: `Помощь: ${person?.name ?? request.code}`
+  });
+  const isLoan = request.type === "loan";
+  const peopleBeforeMemory = isLoan
+    ? {
+      ...progressed.people,
+      people: progressed.people.people.map((item) => item.id === request.personId ? { ...item, money: item.money + request.upfrontCost } : item)
+    }
+    : progressed.people;
+  const people = recordPlayerAction(
+    peopleBeforeMemory,
+    progressed.world.meta.seed,
+    request.personId,
+    progressed.timestamp,
+    `Игрок выполнил просьбу ${request.code}: ${request.title}.`,
+    isLoan
+      ? { trust: 8, respect: 3, debtToPlayer: request.upfrontCost, importance: 78, emotionalValue: 35 }
+      : { trust: 5, respect: 5, irritation: -2, debtToPlayer: 1, importance: 70, emotionalValue: 28 }
+  );
+  const contact = getPerson(people, request.personId);
+  const economyOutcome = applyRequestToEconomy(progressed.economy, progressed.life.food, request.targetLocationId, request.type);
+  return {
+    ...progressed,
+    people,
+    economy: economyOutcome.state,
+    life: { ...progressed.life, food: economyOutcome.food },
+    world: { ...progressed.world, primaryContactId: request.personId },
+    primaryContact: contact ? toKnownNpc(contact, progressed.world.locations, progressed.timestamp) : progressed.primaryContact
+  };
+}
+
+function adjustPersonLiquidity(
+  session: GameSession,
+  personId: string,
+  delta: number
+): { population: GameSession["population"]; accountEntityId: string } | null {
+  const resident = session.population.residents.find((item) => item.activePersonId === personId);
+  if (!resident || !Number.isFinite(delta) || delta === 0) return null;
+  const household = session.population.households.find((item) => item.id === resident.householdId);
+  const balanceOf = (entityId: string): number => session.kernel.accounts
+    .find((account) => account.entityId === entityId)?.balances
+    .find((entry) => entry.resource === "credits")?.amount ?? 0;
+  if (delta < 0) {
+    const required = Math.abs(delta);
+    if (balanceOf(resident.id) >= required) return { accountEntityId: resident.id, population: session.population };
+    if (household && balanceOf(household.id) >= required) return { accountEntityId: household.id, population: session.population };
+    return null;
+  }
+  return { accountEntityId: resident.id, population: session.population };
+}
+
+export function payPlayerObligation(session: GameSession, obligationId: string): GameSession {
+  const originalObligation = session.pressure.obligations.find((item) => item.id === obligationId);
+  const payment = payObligationState(session.pressure, obligationId, session.timestamp + 2 * 60_000, session.player.balance);
+  if (!payment) return session;
+  const obligation = payment.obligation;
+  const creditorLiquidity = obligation.type === "personal" && obligation.creditorPersonId
+    ? adjustPersonLiquidity(session, obligation.creditorPersonId, obligation.amount)
+    : null;
+  const base = {
+    ...session,
+    pressure: payment.state,
+    population: creditorLiquidity?.population ?? session.population
+  };
+  const progressed = progressLife(base, 2, {
+    category: "finance",
+    title: `${obligation.code}: платёж проведён.`,
+    detail: `${obligation.creditorName} · −₵ ${obligation.amount}`,
+    importance: originalObligation?.status === "overdue" || originalObligation?.status === "defaulted" ? 2 : 1,
+    balanceDelta: -obligation.amount,
+    balanceCounterpartyEntityId: creditorLiquidity?.accountEntityId,
+    relationChanges: obligation.creditorPersonId ? 1 : 0,
+    activity: "Финансовый терминал"
+  });
+  let next = progressed;
+  if (obligation.type === "rent") {
+    const paidUntil = Math.max(session.life.housing.paidUntil, progressed.timestamp) + 7 * 24 * 60 * 60_000;
+    const pressure = scheduleNextRentObligation(progressed.pressure, obligation.id, paidUntil);
+    next = {
+      ...progressed,
+      pressure,
+      life: { ...progressed.life, housing: { ...progressed.life.housing, paidUntil } },
+      player: { ...progressed.player, housingDaysLeft: getHousingDaysLeft({ ...progressed.life.housing, paidUntil }, progressed.timestamp) }
+    };
+  }
+  if (!obligation.creditorPersonId) return next;
+  const people = recordPlayerAction(
+    next.people,
+    next.world.meta.seed,
+    obligation.creditorPersonId,
+    next.timestamp,
+    `Игрок оплатил обязательство ${obligation.code}.`,
+    { trust: 2, respect: 3, irritation: -3, importance: 62, emotionalValue: 18 }
+  );
+  const contact = getPerson(people, obligation.creditorPersonId);
+  return {
+    ...next,
+    people,
+    primaryContact: contact ? toKnownNpc(contact, next.world.locations, next.timestamp) : next.primaryContact
+  };
+}
+
+export function payPlayerObligationAtHome(session: GameSession, obligationId: string): GameSession {
+  return isPlayerInsideHome(session) ? payPlayerObligation(session, obligationId) : session;
+}
+
+export function requestRentExtension(session: GameSession): GameSession {
+  const rent = session.pressure.obligations.find((item) => item.type === "rent" && item.status !== "paid");
+  const manager = rent?.creditorPersonId ? getPerson(session.people, rent.creditorPersonId) : null;
+  if (!rent || !manager) return session;
+  const accepted = manager.trustToPlayer >= 12 && manager.irritationToPlayer < 65;
+  if (!accepted) {
+    return {
+      ...session,
+      events: [
+        createEvent(session, session.timestamp, "contact", `${manager.name} отказал в отсрочке.`, "Управляющий требует оплатить аренду по текущему сроку.", 2),
+        ...session.events
+      ].slice(0, 100)
+    };
+  }
+  const pressure = extendRentObligation(session.pressure, session.timestamp);
+  if (!pressure) return session;
+  const paidUntil = session.life.housing.paidUntil + 24 * 60 * 60_000;
+  const people = recordPlayerAction(
+    session.people,
+    session.world.meta.seed,
+    manager.id,
+    session.timestamp,
+    "Игрок попросил и получил однодневную отсрочку аренды.",
+    { trust: -1, irritation: 4, playerDebt: 1, importance: 68, emotionalValue: -3 }
+  );
+  return {
+    ...session,
+    pressure,
+    people,
+    life: { ...session.life, housing: { ...session.life.housing, paidUntil } },
+    player: { ...session.player, housingDaysLeft: getHousingDaysLeft({ ...session.life.housing, paidUntil }, session.timestamp) },
+    world: { ...session.world, primaryContactId: manager.id },
+    primaryContact: toKnownNpc(getPerson(people, manager.id) ?? manager, session.world.locations, session.timestamp),
+    events: [
+      createEvent(session, session.timestamp, "contact", `${manager.name} дал отсрочку на 24 часа.`, `Новый срок аренды: ${new Date(rent.dueAt + 24 * 60 * 60_000).toISOString().slice(5, 16).replace("T", " · ")}.`, 2),
+      ...session.events
+    ].slice(0, 100)
+  };
+}
+
+export function requestEmergencyLoan(session: GameSession, personId: string): GameSession {
+  const person = getPerson(session.people, personId);
+  if (!person) return session;
+  const existing = session.pressure.obligations.some((item) => item.type === "personal" && item.creditorPersonId === personId && item.status !== "paid");
+  if (existing) return session;
+  if (person.trustToPlayer < 25 || person.money < 180) {
+    return {
+      ...session,
+      events: [
+        createEvent(session, session.timestamp, "contact", `${person.name} не дал денег.`, "Свободных средств или доверия недостаточно.", 1),
+        ...session.events
+      ].slice(0, 100)
+    };
+  }
+  const amount = Math.min(160, Math.max(100, Math.floor(person.money * 0.22)));
+  const creditorLiquidity = adjustPersonLiquidity(session, person.id, -amount);
+  if (!creditorLiquidity) return session;
+  const obligation = {
+    id: createStableEntityId("obligation", `${session.world.meta.seed}:personal:${person.id}:${session.timestamp}`),
+    code: `OBL-P${session.pressure.obligations.length + 1}`,
+    type: "personal" as const,
+    creditorName: person.name,
+    creditorPersonId: person.id,
+    amount,
+    dueAt: session.timestamp + 3 * 24 * 60 * 60_000,
+    status: "active" as const,
+    consequence: "Личный долг изменит отношения и доступ к будущей помощи.",
+    extensionCount: 0,
+    lastNoticeStage: 0,
+    paidAt: null
+  };
+  const base = {
+    ...session,
+    pressure: { ...session.pressure, obligations: [...session.pressure.obligations, obligation] },
+    population: creditorLiquidity.population
+  };
+  const progressed = progressLife(base, 6, {
+    category: "finance",
+    title: `${person.name} передал ₵ ${amount}.`,
+    detail: `Личный долг ${obligation.code} · вернуть в течение трёх дней.`,
+    balanceDelta: amount,
+    balanceCounterpartyEntityId: creditorLiquidity.accountEntityId,
+    trackBalance: false,
+    relationChanges: 1,
+    activity: "Личный финансовый перевод"
+  });
+  const people = recordPlayerAction(
+    progressed.people,
+    progressed.world.meta.seed,
+    person.id,
+    progressed.timestamp,
+    `Игрок занял ₵ ${amount} до срока ${obligation.code}.`,
+    { trust: 1, playerDebt: amount, importance: 76, emotionalValue: 8 }
+  );
+  return {
+    ...progressed,
+    people,
+    world: { ...progressed.world, primaryContactId: person.id },
+    primaryContact: toKnownNpc(getPerson(people, person.id) ?? person, progressed.world.locations, progressed.timestamp)
+  };
+}
+
+function venueAtPlayer(session: GameSession, venueId?: string) {
+  const unitId = session.localScene.playerPosition.unitId;
+  if (session.localScene.playerPosition.state !== "inside" || !unitId) return undefined;
+  return session.urban.venues.find((venue) => venue.unitId === unitId && (!venueId || venue.id === venueId));
+}
+
+export function joinVenueQueue(session: GameSession, venueId: string): GameSession {
+  const venue = venueAtPlayer(session, venueId);
+  if (!venue || !venueIsOpenAt(venue, session.timestamp)) return session;
+  const queued = joinVenueQueueState(session.urban.venueOperations, venue.id, session.timestamp);
+  if (!queued) return session;
+  if (queued.waitMinutes <= 0) return { ...session, urban: { ...session.urban, venueOperations: queued.state } };
+  return progressLife({ ...session, urban: { ...session.urban, venueOperations: queued.state } }, queued.waitMinutes, {
+    category: "personal",
+    title: `Очередь пройдена: ${venue.name}.`,
+    detail: `Ожидание ${queued.waitMinutes} мин. · касса готова принять заказ.`,
+    importance: 1,
+    stressDelta: queued.waitMinutes >= 20 ? 2 : 0,
+    activity: `Очередь: ${venue.name}`,
+    suppressTimeEvent: true
+  });
+}
+
+export function leaveVenueQueue(session: GameSession, venueId: string): GameSession {
+  const venue = venueAtPlayer(session, venueId);
+  if (!venue) return session;
+  return {
+    ...session,
+    urban: {
+      ...session.urban,
+      venueOperations: leaveVenueQueueState(session.urban.venueOperations, venue.id, session.timestamp)
+    }
+  };
+}
+
+export function purchaseVenueOffer(session: GameSession, venueId: string, offerId: string): GameSession {
+  const venue = venueAtPlayer(session, venueId);
+  if (!venue || !venueIsOpenAt(venue, session.timestamp)) return session;
+  const operation = session.urban.venueOperations.operations.find((item) => item.venueId === venue.id);
+  const offer = operation?.offers.find((item) => item.id === offerId);
+  if (!operation || !offer || session.player.balance < offer.currentPrice) return session;
+  const equipmentItem = offer.productId ? getEquipment(offer.productId) : undefined;
+  if (equipmentItem) {
+    if (session.playerLoop.ownedEquipmentIds.includes(equipmentItem.id)) return session;
+    if (equipmentItem.requiredSkill && session.playerLoop.skills[equipmentItem.requiredSkill] < (equipmentItem.minimumSkill ?? 0)) return session;
+  }
+
+  if (offer.kind === "food-goods" && offer.productId) {
+    const product = getFoodProduct(offer.productId);
+    if (getCarriedMassGrams(session.life.food) + product.massGrams > session.life.food.carryingCapacityGrams) return session;
+  }
+
+  const venueBuilding = session.urban.buildings.find((building) => building.id === venue.buildingId);
+  const ownedVehicleIds = new Set([session.vehicles.player.currentVehicleId, ...session.vehicles.player.ownedVehicleIds].filter((id): id is string => Boolean(id)));
+  const serviceVehicle = offer.kind === "vehicle-service" && venueBuilding
+    ? session.vehicles.vehicles.find((vehicle) => {
+        if (!ownedVehicleIds.has(vehicle.id) || vehicle.position.sectorId !== venueBuilding.sectorId) return false;
+        if (vehicle.position.buildingId === venueBuilding.id) return true;
+        const dx = Math.max(venueBuilding.bounds.xM - vehicle.position.xM, 0, vehicle.position.xM - (venueBuilding.bounds.xM + venueBuilding.bounds.widthM));
+        const dy = Math.max(venueBuilding.bounds.yM - vehicle.position.yM, 0, vehicle.position.yM - (venueBuilding.bounds.yM + venueBuilding.bounds.heightM));
+        return Math.hypot(dx, dy) <= 45;
+      })
+    : undefined;
+  const vehicleId = offer.kind === "vehicle-service" ? serviceVehicle?.id : session.vehicles.player.currentVehicleId ?? session.vehicles.player.ownedVehicleIds[0];
+  if (offer.kind === "vehicle-service" && !vehicleId) return session;
+
+  session = withCanonicalInventory(session);
+  let productInventory = session.productInventory;
+  if (offer.productId) {
+    const businessId = session.worldCore.aliasToBusinessId[venue.id] ?? session.worldCore.aliasToBusinessId[`venue-account:${venue.id}`];
+    if (!businessId) return session;
+    if (offer.kind === "food-goods") {
+      productInventory = ensureCanonicalInventory(productInventory, session.player.id, "player", "carried", session.timestamp, session.life.currentLocationId, session.life.food.carryingCapacityGrams, 8_000);
+      const inventorySale = transferProduct(
+        productInventory,
+        businessInventoryId(businessId),
+        playerCarriedInventoryId(session.player.id),
+        offer.productId,
+        1,
+        session.timestamp,
+        "player-purchase",
+        offer.currentPrice
+      );
+      if (inventorySale.transferred !== 1) return session;
+      productInventory = inventorySale.state;
+    } else {
+      const inventorySale = consumeInventoryProduct(
+        productInventory,
+        businessInventoryId(businessId),
+        offer.productId,
+        1,
+        session.timestamp,
+        "retail-sale",
+        offer.currentPrice,
+        session.player.id
+      );
+      if (inventorySale.consumed !== 1) return session;
+      productInventory = inventorySale.state;
+    }
+  }
+
+  const purchase = purchaseVenueOfferState(session.urban.venueOperations, venue.id, offer.id, session.timestamp, session.player.id);
+  if (!purchase) return session;
+  const counterparty = `venue-account:${venue.id}`;
+  const inventorySession = withCanonicalInventory({ ...session, productInventory, urban: { ...session.urban, venueOperations: purchase.state } }, productInventory);
+  const progressed = progressLife(inventorySession, Math.max(1, offer.durationMinutes), {
+    category: offer.kind === "medical" || offer.kind === "cyberware" ? "health" : "finance",
+    title: `${offer.name}: услуга завершена.`,
+    detail: `${venue.name} · −₵ ${purchase.price} · остаток ${Math.max(0, offer.stock - 1)}.`,
+    importance: offer.kind === "medical" ? 2 : 1,
+    balanceDelta: -purchase.price,
+    balanceCounterpartyEntityId: counterparty,
+    healthDelta: offer.effects.healthDelta,
+    fatigueDelta: offer.effects.fatigueDelta,
+    stressDelta: offer.effects.stressDelta,
+    hungerDelta: offer.effects.hungerDelta,
+    activity: `${venue.name}: ${offer.name}`,
+    suppressTimeEvent: offer.durationMinutes >= 60
+  });
+
+  let food = progressed.life.food;
+  if (offer.kind === "meal") {
+    food = { ...food, lastMealAt: progressed.timestamp, lastMealProductId: offer.productId ?? null };
+  }
+
+  const vehicles = offer.kind === "vehicle-service" && vehicleId
+    ? {
+        ...progressed.vehicles,
+        vehicles: progressed.vehicles.vehicles.map((vehicle) => vehicle.id === vehicleId ? {
+          ...vehicle,
+          condition: clamp(vehicle.condition + (offer.effects.vehicleConditionDelta ?? 0)),
+          fuelL: Math.min(vehicle.fuelCapacityL, vehicle.fuelL + (offer.effects.vehicleFuelDelta ?? 0))
+        } : vehicle)
+      }
+    : progressed.vehicles;
+
+  const playerLoop = equipmentItem
+    ? registerEquipmentPurchase(progressed.playerLoop, equipmentItem.id, {
+        seed: progressed.world.meta.seed,
+        timestamp: progressed.timestamp,
+        balance: progressed.player.balance,
+        health: progressed.player.condition.health,
+        fatigue: progressed.player.condition.fatigue,
+        stress: progressed.player.condition.stress
+      }, purchase.price) ?? progressed.playerLoop
+    : progressed.playerLoop;
+
+  return {
+    ...progressed,
+    life: { ...progressed.life, food },
+    vehicles,
+    playerLoop
+  };
+}
+
+
+function playerCrimeLocation(session: GameSession) {
+  const position = session.localScene.playerPosition;
+  const sector = session.metropolitan.sectors.find((item) => item.id === position.sectorId);
+  return {
+    sectorId: position.sectorId,
+    districtId: sector?.districtId ?? session.world.activeDistrictId,
+    xM: position.xM,
+    yM: position.yM
+  };
+}
+
+function visibleCrimeWitnessCount(session: GameSession): number {
+  const position = session.localScene.playerPosition;
+  return session.localScene.actors.filter((actor) => {
+    if (!actor.visible || actor.distanceToPlayerM > 42) return false;
+    if (position.state === "inside") {
+      if (actor.position.buildingId !== position.buildingId) return false;
+      if (position.unitId && actor.position.unitId !== position.unitId) return false;
+      if (position.roomId && actor.position.roomId !== position.roomId) return false;
+    }
+    return true;
+  }).length;
+}
+
+function recordCrimeAtPlayer(session: GameSession, input: {
+  kind: "shoplifting" | "register-robbery" | "vehicle-theft" | "assault";
+  venueId?: string;
+  vehicleId?: string;
+  victimActorId?: string;
+  victimResidentId?: string;
+  success: boolean;
+  violence: number;
+  stolenValue: number;
+  alarmTriggered?: boolean;
+  stolenProperty?: {
+    sourceVenueId?: string;
+    sourceVehicleId?: string;
+    offerId?: string;
+    name: string;
+    value: number;
+    quantity: number;
+    evidenceStrength: number;
+  };
+}) {
+  const location = playerCrimeLocation(session);
+  return recordPlayerCrimeAction(session.playerCrime, {
+    seed: session.world.meta.seed,
+    timestamp: session.timestamp,
+    playerId: session.player.id,
+    playerPosition: session.localScene.playerPosition,
+    localScene: session.localScene,
+    streetScene: session.streetScene,
+    data: session.data,
+    urban: session.urban,
+    government: session.government,
+    districts: session.world.districts,
+    organizations: session.world.organizations,
+    ...location,
+    ...input
+  });
+}
+
+export function shopliftVenueOffer(session: GameSession, venueId: string, offerId: string): GameSession {
+  session = withCanonicalInventory(session);
+  if (session.playerCrime.custody?.status === "detained") return session;
+  const venue = venueAtPlayer(session, venueId);
+  const operation = venue ? session.urban.venueOperations.operations.find((item) => item.venueId === venue.id) : undefined;
+  const offer = operation?.offers.find((item) => item.id === offerId);
+  if (!venue || !operation || operation.status !== "operating" || !offer || !offer.active || offer.stock <= 0) return session;
+  if (offer.kind === "food-goods" && offer.productId) {
+    const product = getFoodProduct(offer.productId);
+    if (getCarriedMassGrams(session.life.food) + product.massGrams > session.life.food.carryingCapacityGrams) return session;
+  }
+  const witnesses = visibleCrimeWitnessCount(session);
+  const rng = new SeededRandom(`${session.world.meta.seed}:shoplift:${venue.id}:${offer.id}:${Math.floor(session.timestamp / 60_000)}`);
+  const successChance = clamp(84 - venue.security * .52 - witnesses * 7);
+  let success = rng.chance(successChance / 100);
+  let productInventory = session.productInventory;
+  if (success && offer.productId) {
+    const businessId = session.worldCore.aliasToBusinessId[venue.id] ?? session.worldCore.aliasToBusinessId[`venue-account:${venue.id}`];
+    if (!businessId) success = false;
+    else if (offer.kind === "food-goods") {
+      productInventory = ensureCanonicalInventory(productInventory, session.player.id, "player", "carried", session.timestamp, session.life.currentLocationId, session.life.food.carryingCapacityGrams, 8_000);
+      const stolen = transferProduct(productInventory, businessInventoryId(businessId), playerCarriedInventoryId(session.player.id), offer.productId, 1, session.timestamp, "player-purchase", 0);
+      success = stolen.transferred === 1;
+      productInventory = stolen.state;
+    } else {
+      const stolen = consumeInventoryProduct(productInventory, businessInventoryId(businessId), offer.productId, 1, session.timestamp, "retail-sale", 0, session.player.id);
+      success = stolen.consumed === 1;
+      productInventory = stolen.state;
+    }
+  }
+  const urban = success ? {
+    ...session.urban,
+    venueOperations: {
+      ...session.urban.venueOperations,
+      operations: session.urban.venueOperations.operations.map((item) => item.venueId !== venue.id ? item : {
+        ...item,
+        offers: item.offers.map((candidate) => candidate.id === offer.id ? { ...candidate, stock: Math.max(0, candidate.stock - 1) } : candidate)
+      })
+    }
+  } : session.urban;
+  const inventorySession = withCanonicalInventory({ ...session, productInventory, urban }, productInventory);
+  const playerCrime = recordCrimeAtPlayer(inventorySession, {
+    kind: "shoplifting",
+    venueId: venue.id,
+    success,
+    violence: 0,
+    stolenValue: success ? offer.currentPrice : 0,
+    alarmTriggered: !success || witnesses > 0,
+    stolenProperty: success ? {
+      sourceVenueId: venue.id,
+      offerId: offer.id,
+      name: offer.name,
+      value: offer.currentPrice,
+      quantity: 1,
+      evidenceStrength: clamp(35 + venue.security * .35 + witnesses * 6)
+    } : undefined
+  });
+  return progressLife({ ...inventorySession, playerCrime }, 3, {
+    category: "personal",
+    title: success ? `Украдено: ${offer.name}.` : `Кража сорвалась: ${venue.name}.`,
+    detail: `${venue.name} · свидетели ${witnesses} · риск опознания ${Math.round(100 - successChance)}%.`,
+    importance: success && !witnesses ? 2 : 3,
+    stressDelta: success ? 5 : 9,
+    activity: `Кража: ${venue.name}`,
+    suppressTimeEvent: true
+  });
+}
+
+export function robVenueRegister(session: GameSession, venueId: string): GameSession {
+  if (session.playerCrime.custody?.status === "detained") return session;
+  const venue = venueAtPlayer(session, venueId);
+  const operation = venue ? session.urban.venueOperations.operations.find((item) => item.venueId === venue.id) : undefined;
+  if (!venue || !operation || operation.status !== "operating" || operation.cash < 60) return session;
+  const witnesses = visibleCrimeWitnessCount(session);
+  const rng = new SeededRandom(`${session.world.meta.seed}:register-robbery:${venue.id}:${Math.floor(session.timestamp / 60_000)}`);
+  const successChance = clamp(76 - venue.security * .55 - operation.staffPresent * 3 - witnesses * 5);
+  const success = rng.chance(successChance / 100);
+  const amount = success ? Math.min(Math.floor(operation.cash), rng.integer(90, Math.max(110, Math.min(650, Math.floor(operation.cash * .2))))) : 0;
+  const urban = success ? {
+    ...session.urban,
+    venueOperations: {
+      ...session.urban.venueOperations,
+      operations: session.urban.venueOperations.operations.map((item) => item.venueId === venue.id ? { ...item, cash: Math.max(0, item.cash - amount) } : item)
+    }
+  } : session.urban;
+  const playerCrime = recordCrimeAtPlayer({ ...session, urban }, {
+    kind: "register-robbery",
+    venueId: venue.id,
+    success,
+    violence: 68,
+    stolenValue: amount,
+    alarmTriggered: true,
+    stolenProperty: success ? {
+      sourceVenueId: venue.id,
+      name: `Наличные ${venue.name}`,
+      value: amount,
+      quantity: 1,
+      evidenceStrength: clamp(58 + venue.security * .32 + witnesses * 5)
+    } : undefined
+  });
+  return progressLife({ ...session, urban, playerCrime }, 5, {
+    category: "personal",
+    title: success ? `Касса ограблена: ₵ ${amount}.` : `Ограбление сорвалось: ${venue.name}.`,
+    detail: `${venue.name} · тревога активирована · свидетели ${witnesses}.`,
+    importance: 3,
+    balanceDelta: amount,
+    balanceCounterpartyEntityId: `venue-account:${venue.id}`,
+    stressDelta: success ? 11 : 14,
+    activity: `Ограбление: ${venue.name}`,
+    suppressTimeEvent: true
+  });
+}
+
+export function assaultLocalActor(session: GameSession, actorId: string): GameSession {
+  if (session.playerCrime.custody?.status === "detained") return session;
+  const actor = session.localScene.actors.find((item) => item.id === actorId);
+  if (!actor || !actor.visible || actor.distanceToPlayerM > 4.5) return session;
+  const position = session.localScene.playerPosition;
+  if (position.state === "inside" && (actor.position.buildingId !== position.buildingId || position.unitId && actor.position.unitId !== position.unitId)) return session;
+
+  const rolePower = /охран|банд|воен|полиц|вышиб/i.test(actor.roleLabel) ? 18 : /рабоч|курьер|механ/i.test(actor.roleLabel) ? 8 : 0;
+  const healthPower = actor.health === "healthy" ? 12 : actor.health === "strained" ? 5 : -4;
+  const opponentPower = Math.max(18, 24 + rolePower + healthPower + Math.round(actor.age / 5));
+  const combat = resolveStreetFightAgainstActor(session.playerLoop, {
+    seed: session.world.meta.seed,
+    timestamp: session.timestamp,
+    balance: session.player.balance,
+    health: session.player.condition.health,
+    fatigue: session.player.condition.fatigue,
+    stress: session.player.condition.stress
+  }, { id: actor.id, name: actor.name, power: opponentPower });
+  if (!combat.ok) return session;
+
+  const won = combat.state.streetFightWins > session.playerLoop.streetFightWins;
+  const witnesses = visibleCrimeWitnessCount(session);
+  const violence = won ? Math.min(92, 45 + opponentPower) : Math.max(24, Math.round(opponentPower * .65));
+  const rng = new SeededRandom(`${session.world.meta.seed}:assault-injury:${actor.id}:${Math.floor(session.timestamp / 60_000)}`);
+  const population = won ? {
+    ...session.population,
+    residents: session.population.residents.map((resident) => resident.id === actor.residentId ? {
+      ...resident,
+      healthScore: clamp(resident.healthScore - rng.integer(8, 22)),
+      health: resident.healthScore <= 38 ? "ill" as const : "strained" as const
+    } : resident)
+  } : session.population;
+  const playerCrime = recordCrimeAtPlayer({ ...session, population }, {
+    kind: "assault",
+    victimActorId: actor.id,
+    victimResidentId: actor.residentId,
+    success: won,
+    violence,
+    stolenValue: 0,
+    alarmTriggered: witnesses > 0
+  });
+  const people = actor.activePersonId ? recordPlayerAction(
+    session.people,
+    session.world.meta.seed,
+    actor.activePersonId,
+    session.timestamp,
+    "Игрок начал уличную драку.",
+    { trust: -35, respect: won ? 4 : -12, irritation: 55, importance: 94, emotionalValue: -70 }
+  ) : session.people;
+  const progressed = progressLife({ ...session, population, playerCrime, people, playerLoop: combat.state }, combat.elapsedMinutes, {
+    category: "local",
+    title: won ? `${actor.name} проиграл драку.` : `${actor.name} победил в драке.`,
+    detail: `${combat.detail} Свидетели ${witnesses} · тяжесть ${violence}%.`,
+    importance: 3,
+    healthDelta: combat.healthDelta,
+    fatigueDelta: combat.fatigueDelta,
+    stressDelta: combat.stressDelta,
+    activity: `Драка: ${actor.name}`,
+    suppressTimeEvent: true
+  });
+  return { ...progressed, playerLoop: combat.state };
+}
+
+export function resolvePlayerCustody(session: GameSession, method: "submit-search" | "resist-search" | "attempt-escape" | "proceed-hearing" | "pay" | "serve"): GameSession {
+  const custody = session.playerCrime.custody;
+  if (!custody || custody.status !== "detained") return session;
+
+  if (method === "submit-search" || method === "resist-search" || method === "attempt-escape" || method === "proceed-hearing") {
+    const result = actOnPlayerCustodyState(session.playerCrime, {
+      seed: session.world.meta.seed,
+      timestamp: session.timestamp,
+      action: method,
+      health: session.player.condition.health,
+      fatigue: session.player.condition.fatigue
+    });
+    if (!result.success) return session;
+    const minutes = method === "proceed-hearing"
+      ? Math.max(1, Math.ceil((custody.hearingAt - session.timestamp) / 60_000))
+      : method === "submit-search" ? 15 : method === "resist-search" ? 10 : 6;
+    const title = method === "submit-search"
+      ? "Обыск завершён."
+      : method === "resist-search"
+        ? "Сопротивление обыску подавлено."
+        : method === "attempt-escape"
+          ? (result.state.custody?.status === "released" ? "Побег удался." : "Побег сорван.")
+          : "Материалы дела рассмотрены.";
+    return progressLife({ ...session, playerCrime: result.state }, minutes, {
+      category: "personal",
+      title,
+      detail: result.message,
+      importance: method === "attempt-escape" || method === "resist-search" ? 3 : 2,
+      fatigueDelta: method === "attempt-escape" ? 8 : 2,
+      stressDelta: method === "attempt-escape" ? 12 : method === "resist-search" ? 8 : 4,
+      activity: title,
+      suppressTimeEvent: true
+    });
+  }
+
+  if (custody.phase !== "hearing") return session;
+  if (method === "pay") {
+    if (session.player.balance < custody.fine) return session;
+    const playerCrime = releasePlayerCustodyState(session.playerCrime, session.timestamp, true);
+    if (playerCrime === session.playerCrime) return session;
+    return progressLife({ ...session, playerCrime }, 20, {
+      category: "finance",
+      title: "Штраф оплачен. Игрок освобождён.",
+      detail: `−₵ ${custody.fine} · изъятые вещи остаются в материалах дела.`,
+      importance: 2,
+      balanceDelta: -custody.fine,
+      balanceCounterpartyEntityId: session.world.organizations.find((item) => item.type === "government")?.id,
+      stressDelta: -4,
+      activity: "Освобождение из-под стражи",
+      suppressTimeEvent: true
+    });
+  }
+  const minutes = Math.max(1, Math.ceil((custody.releaseAt - session.timestamp) / 60_000));
+  const progressed = progressLife(session, minutes, {
+    category: "personal",
+    title: "Срок содержания окончен.",
+    detail: `Проведено под стражей ${Math.ceil(minutes / 60)} ч.`,
+    importance: 2,
+    fatigueDelta: 12,
+    stressDelta: 10,
+    activity: "Под стражей",
+    suppressTimeEvent: true
+  });
+  return { ...progressed, playerCrime: releasePlayerCustodyState(progressed.playerCrime, progressed.timestamp, false) };
+}
+
+
+
+export function performPlayerLoopAction(session: GameSession, action: PlayerLoopAction): GameSession {
+  if (action.kind === "train" || action.kind === "boxing-fight") {
+    const venue = venueAtPlayer(session, action.venueId);
+    if (!venue || !venueIsOpenAt(venue, session.timestamp)) return session;
+    if (action.kind === "boxing-fight" && venue.category !== "boxing-gym") return session;
+    if (action.kind === "train") {
+      const training = TRAINING_ACTIONS.find((item) => item.id === action.trainingId);
+      if (!training || !training.venueCategories.includes(venue.category as "gym" | "boxing-gym" | "shooting-range")) return session;
+    }
+  }
+  const resolved = resolvePlayerLoopAction(session.playerLoop, action, {
+    seed: session.world.meta.seed,
+    timestamp: session.timestamp,
+    balance: session.player.balance,
+    health: session.player.condition.health,
+    fatigue: session.player.condition.fatigue,
+    stress: session.player.condition.stress
+  });
+  if (!resolved.ok) return session;
+  const activeJob = getPlayerJob(resolved.state);
+  const progressed = progressLife({
+    ...session,
+    playerLoop: resolved.state,
+    player: { ...session.player, occupation: activeJob?.title.toUpperCase() ?? "UNEMPLOYED" }
+  }, resolved.elapsedMinutes, {
+    category: resolved.balanceDelta !== 0 ? "finance" : action.kind === "boxing-fight" ? "local" : "personal",
+    title: resolved.title,
+    detail: resolved.detail,
+    importance: resolved.importance,
+    balanceDelta: resolved.balanceDelta,
+    balanceReason: action.kind === "work-shift"
+      ? "wage"
+      : action.kind === "train"
+        ? "education-service"
+        : resolved.balanceDelta !== 0
+          ? "player-action"
+          : undefined,
+    healthDelta: resolved.healthDelta,
+    fatigueDelta: resolved.fatigueDelta,
+    stressDelta: resolved.stressDelta,
+    activity: resolved.title,
+    suppressTimeEvent: true
+  });
+  return {
+    ...progressed,
+    playerLoop: resolved.state,
+    player: { ...progressed.player, occupation: activeJob?.title.toUpperCase() ?? "UNEMPLOYED" }
+  };
+}
+
+export function buyFoodAtCurrentLocation(session: GameSession, productId: string): GameSession {
+  session = withCanonicalInventory(session);
+  const exactLocationId = getPlayerExactLocationId(session);
+  const location = session.world.locations.find((item) => item.id === exactLocationId);
+  if (!location || !isPlayerInsideLocation(session, location.id) || !isLocationOpen(location, session.timestamp)) return session;
+  const product = getFoodProduct(productId);
+  const business = getBusinessAtLocation(session.economy, location.id);
+  const canonicalBusiness = session.worldCore.businesses.find((item) => item.locationId === location.id);
+  const price = localPrice(product.price, business);
+  if (!canonicalBusiness || !businessCanServe(business) || session.player.balance < price) return session;
+  let inventory = ensureCanonicalInventory(session.productInventory, session.player.id, "player", "carried", session.timestamp, location.id, session.life.food.carryingCapacityGrams, 8_000);
+  const purchase = transferProduct(inventory, businessInventoryId(canonicalBusiness.id), playerCarriedInventoryId(session.player.id), productId, 1, session.timestamp, "player-purchase", price);
+  if (purchase.transferred !== 1) return session;
+  inventory = purchase.state;
+  const prepared = withCanonicalInventory({ ...session, productInventory: inventory }, inventory);
+  const progressed = progressLife(prepared, 4, {
+    category: "finance",
+    title: `Куплено: ${product.name}.`,
+    detail: `${location.name} · −₵ ${price} · товар добавлен в переносимый груз · срок хранения ${product.shelfLifeHours} ч.`,
+    balanceDelta: -price,
+    balanceCounterpartyEntityId: business?.organizationId ?? business?.id,
+    activity: `Покупки: ${location.name}`
+  });
+  return { ...progressed, economy: registerBusinessSale(progressed.economy, location.id, price) };
+}
+
+export function orderFoodToHome(session: GameSession, productId: string): GameSession {
+  session = withCanonicalInventory(session);
+  if (session.pressure.housingStatus !== "active") return session;
+  const market = session.world.locations.find((location) => location.type === "market");
+  if (!market) return session;
+  const product = getFoodProduct(productId);
+  const business = getBusinessAtLocation(session.economy, market.id);
+  const canonicalBusiness = session.worldCore.businesses.find((item) => item.locationId === market.id);
+  const deliveryFee = 14 + Math.max(0, Math.round((business?.priceIndex ?? 100) / 25) - 4);
+  const productPrice = localPrice(product.price, business);
+  const totalCost = productPrice + deliveryFee;
+  if (!canonicalBusiness || !businessCanServe(business) || session.player.balance < totalCost) return session;
+  const deliveryTimestamp = session.timestamp + 25 * 60_000;
+  let inventory = ensureCanonicalInventory(session.productInventory, session.player.id, "player", "home-storage", deliveryTimestamp, session.life.housing.locationId);
+  const purchase = transferProduct(inventory, businessInventoryId(canonicalBusiness.id), playerStorageInventoryId(session.player.id), productId, 1, deliveryTimestamp, "player-purchase", productPrice);
+  if (purchase.transferred !== 1) return session;
+  inventory = purchase.state;
+  const prepared = withCanonicalInventory({ ...session, productInventory: inventory }, inventory);
+  const progressed = progressLife(prepared, 25, {
+    category: "finance",
+    title: `Доставка получена: ${product.name}.`,
+    detail: `${market.name} → ${session.world.locations.find((location) => location.id === session.life.housing.locationId)?.name ?? "HOME"} · товар ₵ ${productPrice} · доставка ₵ ${deliveryFee}`,
+    balanceDelta: -totalCost,
+    stressDelta: -1,
+    activity: "Заказ продуктов через городскую сеть"
+  });
+  return { ...progressed, economy: registerBusinessSale(progressed.economy, market.id, productPrice) };
+}
+
+export function eatFoodFromStorage(session: GameSession, productId: string): GameSession {
+  session = withCanonicalInventory(session);
+  const product = getFoodProduct(productId);
+  const atHome = isPlayerInsideHome(session);
+  if (!canPrepare(product.requirement, session.life.food.appliances, atHome)) return session;
+  const sourceIds = atHome
+    ? [playerCarriedInventoryId(session.player.id), playerStorageInventoryId(session.player.id)]
+    : [playerCarriedInventoryId(session.player.id)];
+  let productInventory = session.productInventory;
+  let consumedUnits = 0;
+  for (const sourceId of sourceIds) {
+    if (getInventoryQuantity(productInventory, sourceId, productId, session.timestamp) <= 0) continue;
+    const consumed = consumeInventoryProduct(productInventory, sourceId, productId, 1, session.timestamp, "consumption", 0, session.player.id);
+    productInventory = consumed.state;
+    consumedUnits = consumed.consumed;
+    if (consumedUnits) break;
+  }
+  if (!consumedUnits) return session;
+  const prepared = withCanonicalInventory({
+    ...session,
+    productInventory,
+    life: { ...session.life, food: { ...session.life.food, lastMealAt: session.timestamp, lastMealProductId: productId } }
+  }, productInventory);
+  return progressLife(prepared, Math.max(1, product.preparationMinutes), {
+    category: "health",
+    title: `Съедено: ${product.name}.`,
+    detail: `${product.code} · голод −${product.hungerRelief}${product.requirement !== "none" ? ` · подготовка ${product.preparationMinutes} мин.` : ""}`,
+    healthDelta: product.healthDelta,
+    fatigueDelta: product.fatigueDelta,
+    stressDelta: product.stressDelta,
+    hungerDelta: -product.hungerRelief,
+    activity: atHome ? "Приём пищи дома" : "Приём пищи"
+  });
+}
+
+export function storeCarriedFoodAtHome(session: GameSession): GameSession {
+  session = withCanonicalInventory(session);
+  if (!isPlayerInsideHome(session)) return session;
+  const carriedId = playerCarriedInventoryId(session.player.id);
+  const storageId = playerStorageInventoryId(session.player.id);
+  const carried = findInventory(session.productInventory, session.player.id, "carried");
+  const stored = findInventory(session.productInventory, session.player.id, "home-storage");
+  if (!carried?.stacks.length) return session;
+  const occupied = stored?.stacks.reduce((sum, stack) => sum + (stack.status === "available" ? stack.quantity : 0), 0) ?? 0;
+  let free = Math.max(0, session.life.housing.storageCapacity - occupied);
+  if (free <= 0) return session;
+  let productInventory = ensureCanonicalInventory(session.productInventory, session.player.id, "player", "home-storage", session.timestamp, session.life.housing.locationId);
+  let moved = 0;
+  const products = [...new Set(carried.stacks.filter((stack) => stack.status === "available").map((stack) => stack.productId))];
+  for (const productId of products) {
+    if (free <= 0) break;
+    const available = getInventoryQuantity(productInventory, carriedId, productId, session.timestamp);
+    const transfer = transferProduct(productInventory, carriedId, storageId, productId, Math.min(free, available), session.timestamp, "storage");
+    productInventory = transfer.state;
+    moved += transfer.transferred;
+    free -= transfer.transferred;
+  }
+  if (!moved) return session;
+  const prepared = withCanonicalInventory({ ...session, productInventory }, productInventory);
+  return progressLife(prepared, 3, {
+    category: "personal",
+    title: `Запас убран в пищевой шкаф: ${moved} ед.`,
+    detail: `Домашнее хранение · вместимость ${session.life.housing.storageCapacity} ед.`,
+    importance: 1,
+    activity: "Разбор продуктов дома"
+  });
+}
+
+export function discardSpoiled(session: GameSession): GameSession {
+  session = withCanonicalInventory(session);
+  const result = destroyExpiredInventoryStacks(session.productInventory, [playerCarriedInventoryId(session.player.id), playerStorageInventoryId(session.player.id)], session.timestamp);
+  if (!result.destroyed) return session;
+  const prepared = withCanonicalInventory({
+    ...session,
+    productInventory: result.state,
+    life: { ...session.life, food: { ...session.life.food, discardedUnits: session.life.food.discardedUnits + result.destroyed } }
+  }, result.state);
+  return {
+    ...prepared,
+    events: [
+      createEvent(prepared, prepared.timestamp, "health", `Утилизировано испорченных порций: ${result.destroyed}.`, "Домашний пищевой запас очищен.", 2),
+      ...prepared.events
+    ].slice(0, 100)
+  };
+}
+
+export function sleepAtHome(session: GameSession, hours: number): GameSession {
+  if (!isPlayerInsideHome(session) || session.pressure.housingStatus === "evicted") return session;
+  const recovery = calculateSleepRecovery(session.life.housing, hours);
+  const progressed = progressLife(session, hours * 60, {
+    category: "personal",
+    title: `Сон завершён: ${hours} ч.`,
+    detail: `Качество жилья ${session.life.housing.sleepQuality}% · шум ${session.life.housing.noise}%`,
+    importance: hours >= 7 ? 1 : 2,
+    fatigueDelta: recovery.fatigueDelta,
+    stressDelta: recovery.stressDelta,
+    healthDelta: recovery.healthDelta,
+    hungerDelta: 9,
+    activity: "В жилом блоке",
+    suppressTimeEvent: true
+  });
+  const pressure = closePressureDay(
+    progressed.pressure,
+    progressed.timestamp,
+    hours * 60,
+    progressed.player.balance,
+    progressed.world.meta.seed
+  );
+  const summary = pressure.summaries[0];
+  return {
+    ...progressed,
+    pressure,
+    life: { ...progressed.life, lastSleepAt: progressed.timestamp },
+    events: summary ? [
+      createEvent(
+        progressed,
+        progressed.timestamp,
+        "system",
+        `DAY ${summary.dayIndex} CLOSED.`,
+        `Заработано ₵ ${summary.earned} · потрачено ₵ ${summary.spent} · доставки ${summary.deliveries} · просьбы ${summary.requestsCompleted}/${summary.requestsMissed}.`,
+        summary.requestsMissed > 0 ? 2 : 1
+      ),
+      ...progressed.events
+    ].slice(0, 100) : progressed.events
+  };
+}
+
+export function sleepOutside(session: GameSession, hours: number): GameSession {
+  if (session.localScene.playerPosition.state !== "outside" || session.localMovement || session.transit.player.journey) return session;
+  const safeHours = Math.max(1, Math.min(10, Math.round(hours)));
+  const district = session.world.districts.find((item) => item.id === session.world.activeDistrictId);
+  const danger = Math.round(((district?.gangInfluence ?? 50) + session.district.gangPressure + Math.max(0, 60 - session.district.security)) / 3);
+  const progressed = progressLife(session, safeHours * 60, {
+    category: "personal",
+    title: `Сон на улице: ${safeHours} ч.`,
+    detail: `Риск района ${danger}% · нормального восстановления нет.`,
+    importance: danger >= 60 ? 3 : 2,
+    fatigueDelta: -Math.round(safeHours * 4.5),
+    stressDelta: Math.max(3, Math.round(danger / 12)),
+    healthDelta: danger >= 65 ? -Math.max(1, Math.round(safeHours / 3)) : -1,
+    hungerDelta: 10,
+    activity: "Ночёвка на улице",
+    suppressTimeEvent: true
+  });
+  const pressure = closePressureDay(progressed.pressure, progressed.timestamp, safeHours * 60, progressed.player.balance, progressed.world.meta.seed);
+  return {
+    ...progressed,
+    pressure,
+    life: { ...progressed.life, lastSleepAt: progressed.timestamp }
+  };
+}
+
+export function receiveClinicCare(session: GameSession, kind: "checkup" | "stabilize"): GameSession {
+  const location = currentPhysicalLocation(session);
+  if (!location || location.type !== "clinic" || !isPlayerInsideLocation(session, location.id) || !isLocationOpen(location, session.timestamp)) return session;
+  const facility = session.health.facilities.find((item) => item.locationId === location.id);
+  if (!facility || facility.status === "closed") return session;
+  const cost = kind === "stabilize" ? 120 : 45;
+  const stockUse = kind === "stabilize" ? 4 : 1;
+  if (session.player.balance < cost || facility.medicalStock < stockUse) return session;
+  const progressed = progressLife(session, kind === "stabilize" ? 75 : 25, {
+    category: "health",
+    title: kind === "stabilize" ? "Состояние стабилизировано." : "Первичный осмотр завершён.",
+    detail: `${location.name} · очередь ${facility.queueLength} · −₵ ${cost}`,
+    importance: kind === "stabilize" ? 2 : 1,
+    balanceDelta: -cost,
+    balanceCounterpartyEntityId: facility.ownerOrganizationId,
+    healthDelta: kind === "stabilize" ? 18 : 5,
+    fatigueDelta: kind === "stabilize" ? -8 : -2,
+    stressDelta: kind === "stabilize" ? -7 : -3,
+    activity: `Приём: ${location.name}`
+  });
+  return {
+    ...progressed,
+    health: {
+      ...progressed.health,
+      facilities: progressed.health.facilities.map((item) => item.id === facility.id
+        ? { ...item, medicalStock: Math.max(0, item.medicalStock - stockUse), cash: item.cash + cost }
+        : item)
+    },
+    world: {
+      ...progressed.world,
+      organizations: progressed.world.organizations.map((organization) => organization.id === facility.ownerOrganizationId
+        ? { ...organization, budget: organization.budget + cost }
+        : organization)
+    }
+  };
+}
+

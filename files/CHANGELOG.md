@@ -1,0 +1,1434 @@
+# Changelog
+
+## 0.51.0 — World-Bound Player Systems
+
+- reduced the Work screen to employment only: current job, one-click shift, vacancies and work history;
+- moved all player characteristics and owned/equipped gear into the Profile screen;
+- added generated gyms, boxing gyms, shooting ranges and weapon shops as physical venues in the city;
+- bound strength/endurance training to gyms, boxing training and career bouts to boxing gyms, and shooting practice to ranges;
+- moved equipment purchases into real venue offers backed by venue stock and prices;
+- moved street fights to actual nearby NPC interactions with witnesses, crime and relationship consequences;
+- added hard UI and domain regressions preventing training, boxing, shopping or street fights from running outside their world context;
+- verified TypeScript, all UI suites and all 29 domain suites.
+
+## 0.50.2 — Verified Legacy Removal
+
+- physically removed every stale player-work file left by archive overlay: the venue panel, work engine, courier engine and obsolete test configs;
+- made patch application use `git rm --ignore-unmatch` plus filesystem deletion so tracked and untracked leftovers are both removed;
+- added post-apply hard checks that abort before commit if any legacy file still exists;
+- reproduced the failing TypeScript state first, then verified typecheck, all UI suites and all 29 domain suites on the cleaned tree;
+- kept `playerLoop` as the only player-facing source of truth for work, training, equipment, street fights and boxing;
+- updated application and service-worker version metadata to 0.50.2.
+
+## 0.50.1 — Legacy Work Cleanup
+
+- removed the orphaned `src/app/map/VenueWorkPanel.tsx` left behind when the 0.50 archive was copied over an existing project instead of applied with the deletion manifest;
+- added a regression guard that fails if legacy player work files, `session.jobs`, or imports from the removed work/courier systems return;
+- kept `playerLoop` as the only player-facing source of truth for jobs, training, equipment, street fights and boxing;
+- updated application and service-worker version metadata to 0.50.1.
+
+## 0.49.0 — Runtime Recovery
+
+- replaced repeated linear inventory and business lookups with one projection index shared by food, households, venues, production and World Core;
+- rebuilt initial canonical inventory in one batch instead of copying growing inventory and batch arrays for every adapter target;
+- removed the redundant deep copy before hourly inventory expiry and reused current totals and integrity projections when safe;
+- reduced representative world creation from about 1.6 seconds to 0.9 seconds and a full hour from about 1.8 seconds to 0.45 seconds;
+- stored save slots as gzip-compressed JSON blobs with a plain JSON fallback, shrinking a representative 25.2 MB world to about 2.2 MB;
+- calculated save checksum from the already serialized payload and stored slot summaries outside the compressed world payload;
+- preserved old uncompressed slots and converted them after a successful load;
+- stopped current schema 42 saves from running the entire migration pipeline on every boot;
+- added runtime performance and save codec regressions to the 29-suite domain runner;
+- updated architecture and patch metadata to version 0.49.0.
+
+## 0.48.0 — Physical Inventory
+
+- made `ProductInventory` authoritative for player carried items, home storage, household pantries and production facilities during normal runtime;
+- replaced household pantry feedback with ordered purchase, consumption, transfer and import commands emitted by the population simulation;
+- committed production, logistics and shop-stock deltas as canonical batch transfers, production/import batches or physical consumption before rebuilding compatibility views;
+- made player purchase, delivery, eating, home storage, disposal and shoplifting actions mutate exact canonical batches immediately;
+- stopped `FoodState`, household pantry fields and facility resource arrays from importing goods back after bootstrap;
+- added a one-time schema 41 to 42 migration that preserves legitimate unsynchronized legacy player, household and facility stock, then clears transitional adapter state;
+- expanded the fast local runtime to all sub-hour actions that do not cross an hour boundary or create financial work, while preserving full hourly simulation;
+- optimized large population inventory command batches to avoid repeated whole-inventory scans during annual simulations;
+- added regressions for physical player stock, schema migration, corrupt legacy inventory read models and local-versus-hour-boundary scheduling;
+- kept daily, monthly and annual Kernel reconciliation counts at zero across all 27 domain suites.
+
+## 0.47.0 — Canonical Economy
+
+- made Simulation Kernel accounts the only persisted source of credit balances; player, resident, household, organization, facility, business and venue cash fields are now refreshed as read models;
+- made Product Inventory authoritative for business and venue stock after bootstrap, removing feedback from legacy shop and venue adapters;
+- projected canonical credits during world creation, runtime advancement and save migration;
+- replaced per-domain credit repair with account opening and lifecycle account closure, eliminating newly generated `domain-reconciliation` transactions;
+- made venue purchases consume exact canonical product batches before recording the sale;
+- prevented local ticks from swallowing financial drafts by escalating any money-producing local event to the full Kernel pipeline;
+- removed direct insurance settlement writes to resident savings and organization budgets;
+- migrated saves to schema 41 and added corruption regressions proving legacy business cash and shop stock cannot overwrite canonical state;
+- raised the domain-runner timeout, guaranteed test-output cleanup and required zero reconciliations in daily, monthly, annual and vehicle-crime regressions.
+
+## 0.46.0 — Player Loop & Runtime Split
+
+- split short local actions from the full city simulation pipeline so zero-minute and sub-hour physical actions no longer rebuild the economy, World Core, inventory and Kernel;
+- added a dedicated Life screen with immediate risks, condition, obligations, work, courier contracts and recent consequences;
+- replaced Crime in the primary navigation with Life while keeping custody able to force-open the Crime screen;
+- added explicit local command results and user-facing rejection reasons instead of silent no-op buttons;
+- moved autosave into an idle, deduplicated write queue with a longer debounce to avoid serializing the full world after every click;
+- unified all game date/time presentation on the UTC-backed game clock instead of the host computer timezone;
+- made courier contracts respect opening hours and include pickup, delivery, handling and risk time in their deadlines;
+- made social replies and state changes share one outcome, including actual refusal of money and consistent lie results;
+- fixed stale employment contracts during save migration, street names across sector borders, cached street deltas and transit alighting outside inactive sectors;
+- connected every domain test configuration to `npm test`, repaired stale version assertions and bounded expensive long-run regressions;
+- added local-tick, gift-refusal, contract-feasibility, street continuity, migration and Kernel-account regressions.
+
+## 0.45.0 — Simulation Pipeline Recovery
+
+- replaced quadratic per-account Kernel reconciliation with indexed batch settlement;
+- compacted legacy consumer and workforce pseudo-accounts into canonical system accounts;
+- added a canonical labor-market account for aggregated payroll counterparties;
+- stopped education fallback flows from opening ephemeral institution accounts;
+- aligned business cash flow with ledger rounding and removed duplicate cash COGS deduction;
+- added physical inventory-consumption and debt-interest Kernel drafts;
+- removed unsupported daily company-treasury profit creation;
+- extended the integrity regression across midnight with account-leak and reconciliation bounds;
+- made the world-integrity runner use the local TypeScript compiler and added a 60-second hard timeout.
+
+## 0.44.0 — Unified Business Economy
+
+- added a deterministic citywide registry of businesses that exists independently from map streaming and materialization;
+- introduced operating companies with corporate, independent, franchise, cooperative, public and criminal ownership models;
+- linked every business to a physical premises, canonical inventory, operator, landlord, lease and license;
+- added district/category markets with demand, supply, price pressure, market share and concentration;
+- made autonomous trade consume exact canonical SKU batches instead of percentage stock or synthetic venue offers;
+- added unified sales, payroll, rent, utilities, tax, debt and profit settlement through the Simulation Kernel;
+- added business openings, reopening, insolvency, bankruptcy, lease default, acquisition and ownership reassignment;
+- registered company accounts, business assets, leases and licenses in the canonical kernel;
+- disabled duplicate passive venue and LocalEconomy settlement while retaining backward-compatible projections;
+- migrated saves to schema 40 and added a 120-day headless business-economy regression.
+
+## 0.43.0 — Product & Inventory Foundation
+
+- added a canonical catalog of 84 physical SKUs across food, medicine, parts, apparel, electronics, cyberware, household goods, fuel, contraband and raw materials;
+- added one inventory model for players, households, businesses and production facilities;
+- added traceable production batches with lot codes, producer, quality, condition, expiry, legality, recipe source and recall state;
+- added capacity-aware FIFO transfers that preserve batch identity and reject negative or impossible movement;
+- converted production and import resource deltas into concrete product batches;
+- added expiry, degradation, recalled stock and inventory integrity checks;
+- converted food storage, household pantries, venue offer stock, production inventory and World Core stock into compatibility projections of canonical inventory;
+- prevented adapter feedback from duplicating goods on later simulation ticks;
+- assigned real product IDs to physical clothing, medicine, alcohol and packaged cyberware offers;
+- migrated saves to schema 39 and added a headless product supply-chain regression.
+
+## 0.42.0 — World Core Consolidation
+
+- added a canonical World Core registry for businesses, employment and world time;
+- merged legacy named businesses with their physical venue operations through stable aliases;
+- registered procedural venues and staffed institutions as canonical businesses;
+- made Simulation Kernel create accounts, assets and employment contracts from World Core;
+- remapped legacy and venue ledger transactions onto canonical business accounts;
+- projected canonical cash and status back into compatibility domains;
+- disabled duplicate LocalEconomy passive simulation for merged physical venues;
+- unified NPC employments and player work contracts in one employment registry;
+- added cross-domain integrity checks for ownership, references, account drift and clock drift;
+- migrated saves to schema 38 and added an executable World Core consolidation regression.
+
+## 0.41.0 — Crime, Gangs & Police
+
+- added a persistent player-crime state with incidents, evidence, warrants, stolen property, custody and heat;
+- added physical shoplifting, register robbery, vehicle theft and assault actions;
+- generated witness, camera, vehicle, blood and stolen-property evidence with retention and identification strength;
+- added delayed reports, district or city warrants and moving police responses rendered on the local map;
+- added detention, confiscation, fines and time-served release;
+- connected vehicle hotwiring to the general criminal investigation system;
+- added autonomous gang factions, territory influence, controlled businesses and cash;
+- added a dedicated Crime screen and crime actions inside venue, person and vehicle interfaces;
+- migrated saves to schema 37 and added crime UI and domain regression checks.
+
+## 0.40.0 — Living Work
+
+- added a player-facing work state with skills, vacancies, applications, contracts, shifts and tasks;
+- generated vacancies from real operating venues and their staffing pressure;
+- restricted interviews, contract signing, shift start, tasks and shift completion to the exact workplace unit;
+- added cashier, cafe crew, clinic aide and mechanic task sets;
+- connected work tasks to venue queues, sales, inventory, revenue and the venue ledger;
+- paid wages from the employer venue account and tracked unpaid wage debt;
+- added lateness warnings, missed shifts and dismissal after three violations;
+- added skill growth, probation progression, rank and wage increases;
+- added a dedicated Work screen and workplace controls inside venue service panels;
+- pinned contracted workplaces in the urban cache and migrated saves to schema 36.
+
+## 0.39.4 — Venue Integrity
+
+- added a persistent venue registry independent from spatial streaming;
+- synchronized venue bankruptcy with map, search, access and service UI;
+- replaced the 24-hour simulation cap with complete calendar-interval processing;
+- replaced magical daily restocking with paid supply orders and delivery times;
+- added venue sales, payroll, utilities, rent and supply ledger entries forwarded to the simulation kernel;
+- removed the duplicate legacy shop and clinic counters from the building interface;
+- restricted vehicle service to owned vehicles physically parked near the workshop;
+- changed the player marker to green across global, local, interior and transit views;
+- migrated saves to schema 35 and VenueOperations state version 2.
+
+## 0.39.3 — Functional Venues
+
+- added persistent operational state for every materialized venue;
+- added category-specific offers with prices, stock, duration and gameplay effects;
+- added physical queues, player receipts, venue cash, revenue and expenses;
+- added autonomous customer trade, stock consumption, payroll, utilities and daily restocking;
+- restricted purchases to the exact physical venue unit;
+- connected purchases to player balance, organizations, food inventory, health and vehicles;
+- added venue search by name, category, current status, sector and distance;
+- added live operational data and offer catalogs to venue and building profiles;
+- reduced procedural venue density and added closed, vacant and renovation states;
+- migrated saves to schema 34 and added executable functional-venue regressions.
+
+## 0.39.2 — City Fabric & Venues
+
+- replaced fragile per-building SVG clicks with one screen-space hit-test and object priority;
+- rebuilt procedural building placement around deterministic street-facing lots;
+- reduced oversized anchor footprints and clustered named locations inside their districts;
+- added real venue entities linked to physical buildings and units;
+- generated a bounded, deterministic city-wide catalog of shops, cafes, clinics, pharmacies, repair points, markets and services;
+- added map markers, filters, compact sheets and full profiles for generated venues;
+- connected venue profiles to physical routes, building entry and unit entry;
+- regenerated old metropolitan and urban geometry and migrated saves to schema 33;
+- added executable city-fabric, venue-linkage and physical-entry regression tests.
+
+## 0.39.1 — Map Visual Recovery
+
+- rebuilt global district silhouettes from real sector boundaries instead of visible grid cells;
+- removed the district sidebar that covered the map;
+- added visual hierarchy for coastline, district fill, roads, transit and selected areas;
+- added local-map levels of detail for roads, parcels, parking, entrances, labels and POIs;
+- restricted pedestrians, vehicles, crossings and ordinary incident display to the player’s physical vicinity;
+- reduced marker clutter and rebuilt building roofs, road lanes, route and player presentation;
+- updated map regression checks against the active renderer architecture.
+
+## 0.39.0 — Living People
+
+- added deterministic NPC personalities and distinct speech behavior;
+- added physical proximity and visibility requirements for conversations;
+- added an interactive conversation panel backed by domain commands;
+- added source, confidence, secrecy and expiry to NPC knowledge;
+- connected physical street witnesses to incident knowledge;
+- added rumor propagation through actual relationships with distortion;
+- added autonomous arguments, help, loans, reconciliation and gossip;
+- made threats, lies and gifts persistent social facts;
+- migrated saves to schema 32 and added social regression tests.
+
+## 0.38.0 — Living Street
+
+- Добавлена физическая симуляция пешеходов, транспорта, переходов и уличных происшествий.
+- Происшествия существуют в мире, развиваются со временем и поддерживают реальные действия игрока.
+- Локальная карта показывает движение по тротуарам и полосам, сигналы, торможение и экстренные машины.
+- Сохранения обновлены до схемы 31.
+
+## 0.37.0 — Living Buildings
+
+- added a third physical map level for buildings, floors, units and rooms;
+- added interactive corridors, floor rail, elevators, stairs and unit access;
+- added room plans backed by materialized interiors and real room commands;
+- restricted NPC visibility by building, floor, unit and room boundaries;
+- added physical venue service points for food, clinics and courier operations;
+- exposed home actions from the player's real housing unit;
+- materialized commercial units on the first floor of mixed buildings;
+- added UI and domain regression tests for the complete building loop.
+
+## 0.36.0 — Immersive City Map Rebuild
+
+- removed fake district clip masks and rebuilt district geometry from real sectors;
+- made the map a standalone fullscreen experience with its own HUD;
+- added real pan, pinch, wheel zoom and inertia to the active global map;
+- rebuilt the local map as a top-down street, parcel, roof, entrance and POI view;
+- restricted dynamic people and vehicles to the player’s actual physical context;
+- separated compact map sheets from full venue and building profiles;
+- added real district key-location navigation, floor previews and physical floor movement;
+- reduced MapScreen from a 1200-line monolith to bounded components;
+- replaced false-positive map tests with checks against the active UI.
+
+## 0.35.0 — City Map & Profile Overhaul
+
+- replaced the primary global and local map UI;
+- rendered real metropolitan roads, transit lines, street blocks and street segments;
+- added functional map filters and category markers;
+- restricted people and vehicles to the player’s actual building, street or immediate radius;
+- added rich venue, residential building, stop, person and vehicle profiles;
+- connected building entry, exit, floor movement, vehicle entry and vehicle exit to domain commands;
+- added persistent favorites, share/clipboard actions and startable physical routes;
+- split map, rendering and profile styles into bounded files;
+- added executable city-map overhaul verification.
+
+## 0.34.0 — Physical Life Loop
+
+- added a physical contextual actions tab to Nearby;
+- restricted home sleep to the player's actual housing unit;
+- added risky outside sleep;
+- split food into carried inventory and home storage with carrying mass limits;
+- made purchases enter carried inventory instead of teleporting home;
+- added explicit storing of carried food at home;
+- made courier acceptance, pickup and delivery require the correct physical location;
+- added explicit carried courier cargo with condition and weight;
+- added physical clinic checkups and stabilization;
+- prevented permanent player housing units from being evicted by urban streaming;
+- added save migration v30 and an executable physical-life regression test.
+
+## 0.33.1 — World Integrity Recovery
+
+- restored explicit exit actions for buildings and physical vehicles in Nearby;
+- stopped free street movement from retaining a stale named location;
+- changed hunger and fatigue to fractional, chunk-independent accumulation;
+- made physical interactions require the player's exact spatial location;
+- added recurring weekly rent obligations after payment;
+- removed the duplicate scheduled rent warning from new and migrated saves;
+- moved personal loan transfers to canonical resident/household funds and explicit kernel counterparties;
+- made map opening labels respect game time;
+- added executable world-integrity regression tests and required them in deploy CI.
+
+## 0.33.0 — Local Movement & Route Planner
+
+- added persistent street-level walking routes;
+- added A* pathfinding across connected sector gates;
+- added route targets for points, streets, buildings, stops, vehicles, people and named locations;
+- added incremental movement with saved progress and world-time advancement;
+- added route recovery and replanning after topology or target movement;
+- added a fullscreen walking scene with route geometry and progress;
+- replaced instant Nearby approach actions with the same route system used by the map;
+- connected the first bus or metro stop to the same street walker and explicit waiting handoff;
+- split route presentation and walking styles out of the map monolith;
+- added local movement verification with a two-sector executable graph fixture;
+- added a compiled domain test for buildings, stops, vehicles, people, cross-sector walking and transit handoff.
+
+# 0.32.1 — MAP, PROFILE & TOPOLOGY RECOVERY
+
+- карта переделана в полноэкранное игровое пространство;
+- профиль переделан в короткое личное досье;
+- интерактивными стали здания, остановки, улицы и произвольные точки;
+- названия улиц продолжаются через границы секторов;
+- дорожные дельты обновляют зависимые адреса и объекты;
+- тяжёлый street snap больше не выполняется каждый жизненный тик.
+
+# 0.32.0 — PERSISTENT STREET TOPOLOGY
+
+## Добавлено
+
+- детерминированные уличные каталоги всех 1 512 секторов;
+- совпадающие дорожные порты соседних секторов;
+- улицы, перекрёстки, кварталы, участки, адреса, входы и парковки;
+- разные паттерны улиц для типов застройки;
+- ограниченный кэш полной локальной геометрии;
+- постоянные дельты топологии;
+- доменная локальная карта без декоративной генерации в React.
+
+## Исправлено
+
+- процедурные здания больше не накладываются друг на друга;
+- дороги не проходят через материализованные здания;
+- остановки и парковочные узлы привязаны к улицам;
+- после привязки парковок корректно пересчитываются дистанция и видимость машин;
+- миграция сохраняет ID зданий, квартир, жильцов и собственности.
+
+# 0.31.0 — REAL CITY MAP FOUNDATION
+
+## Добавлено
+
+- постоянные связные игровые районы для всех 1 512 секторов;
+- универсальное распределение произвольного количества административных зон;
+- дорожные коридоры с названиями и трафиком на каждом сегменте;
+- шесть рельсовых линий с промежуточными станциями;
+- камера карты с drag, pinch zoom, колесом, инерцией и сохранением;
+- уровни детализации и полноценные слои районов, дорог, транспорта, трафика, риска и активности;
+- отдельные инспекторы района и сектора;
+- точный выбор координаты на карте.
+
+## Исправлено
+
+- удалено жёсткое деление города только на три прямоугольные зоны;
+- транспортный слой больше не состоит из одиночных точек;
+- локальные автобусные маршруты получили промежуточные секторные остановки;
+- трафик отображается на дорожных сегментах;
+- первый рендер карты больше не приближает текущий сектор автоматически;
+- выбор сектора больше не запускает маршрут к случайной первой локации;
+- миграция сохраняет ID существующих секторов и размещений локаций.
+
+# NEON LIFE v0.30.3 — Interface Recovery
+
+Патч исправляет регрессии `0.30.2` без возврата удалённой старой оболочки.
+
+## Исправлено
+
+- нижняя навигация снова имеет три равных пункта и только одно активное состояние;
+- прокрутка сбрасывается при переключении экрана;
+- добавлены свайпы между Профилем, Картой и Nearby, а также между категориями Nearby;
+- верхняя панель учитывает safe area и больше не заезжает под системную строку iPhone;
+- профиль восстановлен как полноценный экран на реальных данных, без координат и диагностического дампа;
+- Nearby стал плотнее, а карточка выбранного объекта больше не перекрывает навигацию;
+- ложные уведомления об успешном подходе и посадке удалены;
+- глобальная и локальная карты получили pinch zoom, ограниченную камеру и мобильное управление;
+- транспортный слой показывает реальные маршруты и остановки, а не абстрактные точки;
+- старые незавершённые маршруты очищаются при загрузке и больше не открывают автобус автоматически;
+- путь к остановке и ожидание рейса разделены на реальные фазы;
+- посадка недоступна до завершения ожидания;
+- поездка показывает все остановки текущего участка и сохраняет геймплей салона.
+
+## Проверки
+
+- доменный тест Transit Operations проходит полный цикл: пеший подход, ожидание, посадка, все остановки, салон, пересадка, выход и миграция;
+- отдельно подтверждено, что новый мир не начинается в транспорте;
+- пройдены Mobility, Local Scene, Buildings & Access, Physical Vehicles и Metropolitan Scale;
+- TypeScript приложения проверен с временными локальными декларациями React/Vite;
+- 28 архитектурных и 37 recovery-инвариантов проходят;
+- реальный Vite build и браузерный screenshot-run в среде не выполнялись: npm registry недоступен.
+
+
+# 0.30.2 — UNIFIED INTERFACE ARCHITECTURE
+
+## Удалено
+
+- старая desktop-оболочка `NeonShell`;
+- отдельная мобильная оболочка `MobileExperience`;
+- экран «Главная» и весь его код;
+- вкладка «Путь» и отдельный экран мгновенных маршрутов;
+- старые workspace-компоненты, context panel, window dock и дубли навигации;
+- декоративные локальные улицы, fallback-кварталы и неиспользуемые изображения;
+- монолитные CSS-файлы на тысячи строк.
+
+## Добавлено и исправлено
+
+- единый responsive shell для телефона и ПК;
+- три настоящих экрана: профиль, карта и окружение;
+- баланс перенесён в верхнюю панель рядом с погодой, датой и временем;
+- глобальная карта получила drag, wheel zoom и центрирование;
+- локальная карта использует реальные roadLinks, здания и координаты мира;
+- маршрут строится в карте, а не в отдельной вкладке;
+- автобус и метро открывают полноэкранную сцену поездки с остановками, салоном, местами, пассажирами, телефоном и пересадками;
+- профиль очищен от фоновых заглушек состояния, инвентаря, связей и псевдорепутации;
+- App.tsx сокращён с 2509 до менее 220 строк;
+- ни один новый UI-файл не превышает 600 строк.
+
+# 0.30.1 — MOBILE INTERACTION HOTFIX
+
+## Исправлено
+
+- статические и визуально кликабельные элементы заменены реальными кнопками с обработчиками;
+- профиль контакта теперь раскрывается прямо в мобильном экране;
+- профиль локального NPC видимо разворачивает физические факты и синхронизирует выбранный контакт;
+- портрет NPC стабильно вычисляется по постоянному ID и совпадает между списком и нижней панелью;
+- удалены запечённые кнопки и индикаторы из портретных изображений;
+- недоступный вход в здание выводит причину вместо мёртвой кнопки;
+- посадка в машину появляется только на реальной дистанции взаимодействия;
+- мобильный контент использует ширину до 540 px вместо узкой колонки;
+- длинные имена, районы, профессии и задачи больше не скрываются через ellipsis;
+- сокращены слишком длинные показатели в нижней строке профиля;
+- нижняя панель Nearby вмещает факты и действия без перекрытия навигацией.
+
+## Проверено
+
+- 68 статических UI-инвариантов;
+- клики по пяти основным вкладкам;
+- раскрытие профиля контакта и профиля прохожего;
+- наблюдение за NPC;
+- подход и вход в здание;
+- подход и посадка в машину;
+- отсутствие горизонтального overflow на 393 и 539 px;
+- TypeScript приложения и Vite-конфигурации.
+
+# CHANGELOG
+
+## 0.30.0 — MOBILE VISUAL SYSTEM
+
+- Полностью заменена мобильная визуальная система.
+- Добавлены экраны главной, профиля, глобальной и локальной карты, Nearby и перемещения.
+- Глобальная карта отображает полный городской массив секторов, дороги, границы районов и станции.
+- Каждый сектор раскрывается в локальную карту улиц, кварталов, зданий и точек интереса.
+- Профиль больше не фиксирует игрока как курьера.
+- Добавлены 35 автоматических UI-инвариантов и многократная Chromium-проверка на четырёх мобильных ширинах.
+
+## 0.29.0 — VEHICLE THEFT & WITNESSES
+
+### Добавлено
+
+- осмотр замка, зажигания, сигнализации, камер, свидетелей и подпольной стоимости конкретной машины;
+- физическое вскрытие чужой машины и детерминированные попытки запуска без ключа;
+- кража денег и вещей из салона как отдельный преступный инцидент;
+- свидетели из реальных актёров локальной сцены с дистанцией, уверенностью, распознаванием и задержкой сообщения;
+- записи работающих камер в Data Surveillance с номером и ID машины;
+- заявление владельца, розыск исходного номера и государственные дела `vehicle-theft`;
+- страховые требования, выплаты владельцам и явные Kernel-транзакции;
+- подпольная смена номера, разбор и продажа машины;
+- постоянный tombstone проданных и разобранных машин;
+- интерфейс преступных действий во вкладке `МАШИНЫ`;
+- миграция сохранений на схему 27.
+
+### Исправлено
+
+- за попытку вскрытия без успешного угона больше не выплачивается полная страховка;
+- угнанная машина сохраняет позицию, доступ и правовой статус между обновлениями сцены;
+- машины рядом с игроком не смещаются во время подхода;
+- активный сектор гарантированно содержит физических прохожих для честной проверки свидетелей;
+- одна машина получает только одно открытое государственное дело и одну страховую выплату.
+
+### Проверено
+
+- полный цикл угона, розыска, страховой выплаты, смены номера и продажи;
+- 11 свидетельских отчётов и 6 записей камер в детерминированном сценарии;
+- Physical Vehicles, Transit Operations, Buildings & Access и Local Scene;
+- Metropolitan Mobility, Metropolitan Scale и десятилетняя демография;
+- жизненный цикл на 3 650 дней и клиническая экономика на 1 825 дней;
+- миграция схемы 26 → 27.
+
+## 0.28.0 — TRANSIT OPERATIONS
+
+### Добавлено
+
+- физические автобусные остановки и станции метро;
+- районные, межрайонные и рельсовые маршруты с направлениями, интервалами, тарифами и режимом работы;
+- конкретные рейсы с номером машины, водителем, состоянием, задержкой и заполнением;
+- планирование прямого маршрута, одной и двух пересадок;
+- путь игрока до остановки, ожидание, посадка, движение по остановкам, пересадка и выход;
+- отдельная сцена салона с местами и материализованными пассажирами;
+- возможность сесть, встать и уступить место приоритетному пассажиру;
+- разговоры с пассажирами и память знакомых NPC;
+- телефонные занятия: сообщения, работа, учёба и городская лента;
+- полезные действия занимают перегон до следующей остановки;
+- ручное продолжение или полная промотка поездки;
+- вкладка `МЕСТА / ТРАНСПОРТ`;
+- миграция сохранений на схему 26.
+
+### Исправлено
+
+- общественный транспорт больше не телепортирует игрока сразу в конечную точку;
+- позиция игрока следует по секторам маршрута;
+- пересадка действительно требует выхода и посадки на следующий рейс;
+- прибытие оставляет игрока снаружи целевой локации, а не внутри случайного здания;
+- выбор режима учитывает реальную связность остановок;
+- действия в салоне не пересобирают маршрутную сеть повторно.
+
+### Проверено
+
+- прямые маршруты и маршрут с двумя пересадками;
+- посадка, место, уступание, разговор, телефон, выход и промотка;
+- физические машины, здания, локальная сцена и городская мобильность;
+- десятилетняя демография, жизненный цикл и клиническая экономика;
+- миграция схемы 25 → 26.
+
+## 0.27.0 — PHYSICAL VEHICLES
+
+### Добавлено
+
+- конкретные автомобили со стабильными ID во всех активных секторах;
+- модели, классы, государственные номера, владельцы, организации и принадлежность к автопаркам;
+- частные машины, такси, служебный транспорт, медицинские машины, полиция, грузовики и автобусы;
+- физические парковочные узлы у жилых, коммерческих, служебных и грузовых зданий;
+- постоянный личный автомобиль игрока `VANTA R-4`;
+- ключи, право управления, водительское и пассажирское место;
+- подход к машине, посадка и выход;
+- поездки на личной машине между реальными локациями;
+- расчёт расстояния, трафика, средней скорости, времени и расхода топлива;
+- состояние, пробег, вместимость, замки и сигнализация;
+- платная заправка и ремонт в мастерской;
+- сохранение машины игрока после выгрузки сектора;
+- вкладка `МАШИНЫ` в разделе города;
+- миграция сохранений на схему 25;
+- интеграционный тест Physical Vehicles.
+
+### Исправлено
+
+- игрок больше не может одновременно ехать общественным транспортом, находясь внутри машины;
+- вход в здание и подход к нему доступны только из уличного состояния;
+- локальная сцена сохраняет физическое состояние `vehicle` и ID текущей машины при поездке;
+- машина игрока перемещается в тот же сектор и к той же локации, что и игрок.
+
+### Проверено
+
+- полный цикл личной машины: дом → подход → посадка → поездка → парковка → выход → сервис;
+- расход топлива, износ, пробег и постоянство машины;
+- отказ поездки при отсутствии топлива или права управления;
+- миграция схемы 24 → 25;
+- Buildings & Access;
+- Spatial Actors & Local Scene;
+- Metropolitan Mobility;
+- Metropolitan Scale;
+- десятилетняя массовая демография зданий;
+- Population Lifecycle.
+
+## 0.26.0 — BUILDINGS & ACCESS
+
+### Добавлено
+
+- подход к любому материализованному зданию активного сектора;
+- отдельные главные и служебные входы со стабильными ID;
+- решения доступа по назначению здания, режиму работы, безопасности, жилью и профессии игрока;
+- физическое нахождение внутри здания, помещения и комнаты;
+- этажи, подвалы, лестницы и работающие лифты;
+- детерминированная материализация помещений выбранного здания;
+- постоянная квартира игрока с авторизованным доступом;
+- общественные и частные двери помещений;
+- внутренние комнаты и двери процедурных интерьеров;
+- приоритет активного здания и интерьера в ограниченном кэше;
+- вкладка `ЗДАНИЯ` в разделе мест;
+- миграция сохранений на схему 24;
+- интеграционный тест Buildings & Access.
+
+### Исправлено
+
+- расстояние до здания теперь считается до входа, а не до геометрического центра;
+- после подхода доступ к двери пересчитывается по новой позиции игрока;
+- активный подъезд или квартира больше не могут быть немедленно вытеснены лимитом интерьеров.
+
+### Проверено
+
+- Buildings & Access integration и миграция 23 → 24;
+- Local Scene;
+- Metropolitan Mobility;
+- Metropolitan Scale;
+- Buildings & Mass Demography;
+- строгая TypeScript-компиляция Population Lifecycle, Health & Cyberware, Data & Surveillance и React-интерфейса.
+
+## 0.25.0 — SPATIAL ACTORS & LOCAL SCENE
+
+### Добавлено
+
+- физическая позиция игрока внутри текущего сектора и здания;
+- локальная сцена с конкретными актёрами, координатами, занятием, здоровьем и дистанцией;
+- материализация подробных жителей по дому, работе, расписанию и commuter plan;
+- детерминированные секторные образцы массового населения для пустых квадратов;
+- видимость, близость и физическая доступность взаимодействия;
+- здания текущего квадрата с расстоянием, входами, безопасностью и числом актёров;
+- вкладка `СЦЕНА` в экосистеме и незнакомые жители в `ЛЮДИ / РЯДОМ`;
+- миграция сохранений на схему 23.
+
+### Проверено
+
+- Local Scene integration;
+- миграция 22 → 23;
+- Metropolitan Mobility, Metropolitan Scale, Buildings & Mass Demography, Population Lifecycle и Health & Cyberware;
+- строгая компиляция всех core test-конфигураций и интерфейса.
+
+## 0.24.1 — METROPOLITAN MOBILITY HOTFIX
+
+### Исправлено
+
+- возвращены `package.json` и `package-lock.json`, случайно удалённые предыдущим патчем;
+- восстановлены базовые файлы приложения, документация, PWA-обновление, состояние мира и регрессионные тесты;
+- GitHub Actions снова получает lock-файл и может выполнять `npm ci`;
+- миграция сохранений завершена до схемы 22 вместо ссылки на отсутствующий модуль мобильности.
+
+### Добавлено
+
+- постоянная транспортная модель всех 1 512 городских секторов;
+- физические маршруты метро, эстакадного транспорта, автобусов, служебных машин и грузовых рейсов;
+- почасовые пассажирские и грузовые потоки, пробки, скорость движения, загруженность маршрутов и надёжность сервиса;
+- постоянные планы поездок жителей между домом, работой и учёбой;
+- городской автопарк: частные машины, такси, автобусы, поезда, служебный и грузовой транспорт;
+- реальные парковочные ёмкости, занятость мест и незаконная парковка;
+- расчёт времени, стоимости и способа поездки игрока по физическому маршруту;
+- вкладка `ДВИЖЕНИЕ` в экосистемном интерфейсе;
+- отдельный интеграционный тест Metropolitan Mobility.
+
+### Проверено
+
+- строгая TypeScript-проверка ядра и нового интерфейса мобильности;
+- интеграционный прогон 1 512 секторов, маршрутов, автопарков, парковки, пассажирских и грузовых потоков;
+- миграция сохранений 21 → 22;
+- Metropolitan Scale, Buildings & Mass Demography, Population Lifecycle и Health & Cyberware;
+- восстановленный `package-lock.json` соответствует зависимостям `package.json`.
+
+## 0.23.0 — BUILDINGS, INTERIORS & MASS DEMOGRAPHY
+
+### Добавлено
+
+- ежемесячная массовая демография всех 6–7 млн представленных жителей;
+- рождения, смерти, внешняя и внутренняя миграция, образование, занятость и новые домохозяйства по 1 512 секторам;
+- компактные индексы более 70 тысяч зданий и миллионов жилых единиц;
+- детерминированные здания с координатами, участками, адресами, этажами, подвалами, лифтами и входами;
+- мегаблоки и мегаструктуры внутри обычного городского фонда;
+- конкретные квартиры и постоянные адреса подробных домохозяйств;
+- процедурные постоянные интерьеры с комнатами, дверями и мебельными профилями;
+- жёсткие кэши зданий, помещений и интерьеров с выгрузкой и восстановлением из seed;
+- связь подробных NPC с массовыми секторами через sample links;
+- вкладка `ЗДАНИЯ` в интерфейсе экосистемы;
+- миграция сохранений на схему 21.
+
+### Проверено
+
+- 10 лет массовой демографии;
+- более 700 тысяч рождений и 900 тысяч смертей в тестовом городе;
+- более 180 тысяч внутренних переездов;
+- более 51 тысячи выгрузок материализованных зданий;
+- детерминированное восстановление координат и интерьеров;
+- постоянные квартиры для всех подробных домохозяйств с жильём;
+- регрессия Kernel Integrity, Health & Cyberware, Data & Surveillance, Population Lifecycle и Metropolitan Scale.
+
+## 0.22.0 — METROPOLITAN SCALE FOUNDATION
+
+### Добавлено
+
+- физический размер мегаполиса `42 × 36 км`;
+- 1 512 постоянных секторов площадью один квадратный километр;
+- многомиллионное представленное население без создания миллионов подробных NPC;
+- распределение населения, домохозяйств, плотности, зданий и площади этажей по секторам;
+- типы землепользования: жильё, смешанная застройка, торговля, промышленность, корпорации, городские службы, транспорт, коммунальные зоны и пустыри;
+- детерминированные seed каждого сектора для будущих кварталов, участков и интерьеров;
+- физические координаты, размеры и постоянные адреса всех существующих локаций;
+- башни, мегаблоки, кампусы, склады, среднеэтажные и малоэтажные объекты;
+- дорожный граф магистралей, развязок и скоростных дорог;
+- три линии массового транспорта и физические станции;
+- уровни детализации `ACTIVE`, `WARM`, `COLD`;
+- жёсткие бюджеты загруженных секторов, материализованных NPC, интерьеров и памяти;
+- выгрузка удалённых секторов и дематериализация подробного состояния;
+- недельная архивация и очистка временной детализации;
+- вкладка `МАСШТАБ` в интерфейсе экосистемы;
+- миграция сохранений на схему 20.
+
+### Проверено
+
+- площадь города: 1 512 км²;
+- представленное население тестового города: 6,5 млн;
+- оценка зданий: более 70 тысяч;
+- 90 суток перемещения фокуса между секторами;
+- не более 9 активных и 40 тёплых секторов;
+- не более 480 подробных NPC и 24 интерьеров;
+- пиковая оценка памяти: менее 73 МБ при бюджете 256 МБ;
+- миграция схемы 19 → 20;
+- Kernel integrity после интеграционного суточного шага.
+
+## 0.21.0 — DATA & SURVEILLANCE
+
+### Добавлено
+
+- постоянная цифровая личность для каждого подробного жителя;
+- гражданский ID, подтверждённый адрес, кредитный показатель, уровень цифрового доступа и статус профиля;
+- отдельные трудовые, образовательные, медицинские, страховые, налоговые, кредитные, уголовные и кибернетические записи;
+- конкретные владельцы, источники, чувствительность, достоверность и сроки хранения данных;
+- разрешения организаций на отдельные виды записей и цели доступа;
+- журнал разрешённых, отклонённых, следственных и поддельных запросов;
+- физические камеры, пропускные терминалы, транспортные сканеры, медицинские терминалы, считыватели имплантов и сетевые датчики;
+- зависимость наблюдения от электричества, городской сети данных, качества оборудования и владельца объекта;
+- ограниченные по сроку хранения наблюдения реальных жителей;
+- утечки конкретных записей из уязвимых организаций и районов;
+- продажа украденных данных через существующую преступную сеть;
+- автоматическое открытие дел о киберпреступлениях;
+- подпольные цифровые личности с качеством, стоимостью, издателем и риском обнаружения;
+- влияние статуса личности и цифрового доступа на электронный найм;
+- кредитные проверки и ограничения доступа к качественному жилью;
+- узлы наблюдения как активы Kernel;
+- договоры доступа к данным в Kernel;
+- вкладка `ДАННЫЕ` внутри интерфейса экосистемы;
+- миграция сохранений на схему 19.
+
+### Проверено
+
+- 365 последовательных игровых суток цифровой симуляции;
+- 259 активных цифровых профилей после годового прогона;
+- 40 физических узлов наблюдения;
+- 9 652 зарегистрированных запроса к данным;
+- 455 отклонённых запросов;
+- 42 подтверждённые утечки и 863 украденные записи;
+- 24 созданные и 14 обнаруженные поддельные личности;
+- `domain-reconciliation = 0` на каждом суточном шаге;
+- миграция схемы 18 → 19;
+- регрессия Ecosystem Integrity и Health & Cyberware.
+
+## 0.20.1 — ECOSYSTEM INTEGRITY
+
+### Исправлено
+
+- производные показатели персонала и свободных мест больше не учитываются как физические запасы Kernel;
+- бизнес-счета используют реальный магазинный запас из `FoodState`, а не процентный индекс `BusinessState.stock`;
+- фоновые продажи и операционные расходы бизнеса получили явные транзакции;
+- физический продукт при покупке переходит от конкретного продавца, а не из абстрактного оптового счёта;
+- клинические расходники списываются из конкретной клиники при каждом лечении;
+- закупка клиники оплачивает производственный объект, а не одновременно объект и его владельца;
+- государственная страховка больше не переводит недельный взнос сама себе;
+- страховые выплаты из городской казны синхронно уменьшают бюджет гражданской администрации;
+- коммунальные платежи городским сетям поступают на отдельные расчётные счета операторов;
+- обслуживание инфраструктуры списывает деньги и детали в реальные ремонтные счета;
+- пассивный случайный рост личных накоплений жителей удалён;
+- образование новых семей, разделение домохозяйств, наследство и миграция получили явные переводы денег и продуктов;
+- деньги и продукты умерших или покинувших город жителей закрываются через наследство, внешнюю торговлю или гражданское урегулирование;
+- двойное начисление дохода преступной сети при краже и продаже контрабанды устранено;
+- новые ресурсы счёта регистрируются как `account-opening`, а не маскируются под исправление ошибки;
+- копеечные расхождения округления до одного цента больше не создают ложные сверки.
+
+### Проверено
+
+- 365 последовательных игровых суток: `domain-reconciliation = 0`;
+- максимальное число сверок на одном суточном шаге: `0`;
+- 180 суток одним пакетным прыжком: не более пяти граничных сверок;
+- отрицательные физические балансы отсутствуют;
+- Kernel integrity warnings отсутствуют;
+- полный медицинский тест и миграция схемы 17 → 18 продолжают проходить.
+
+## 0.20.0 — HEALTH & CYBERWARE / CLINICAL ECONOMY
+
+### Добавлено
+
+- конкретные инфекционные, хронические, производственные, психические и кибернетические состояния;
+- причины, тяжесть, течение, ограничения труда, триаж и требуемый уровень помощи;
+- пять физических медицинских объектов: районная клиника, травмпункт, госпиталь, корпоративная клиника и подпольная операционная;
+- реальные койки, кабинеты, операционные, персонал, очереди, медицинский запас и ограничения инфраструктуры;
+- физические медикаменты, расходники, имплантные детали и сервисные комплекты из производственно-логистической цепочки;
+- государственное, корпоративное, частное страхование и отсутствие покрытия;
+- франшизы, лимиты, страховые выплаты, личная оплата, медицинские долги, проценты, взыскание и списание без бесконечного роста;
+- синхронизация полисов с трудоустройством, созданием и распадом домохозяйств;
+- восемь моделей кибернетики собственного мира с производителем, качеством, установкой, ресурсами, сервисным интервалом, отказами и отторжением;
+- лицензированные и подпольные установки, корпоративное финансирование, страхование, медицинский и преступный кредит;
+- обслуживание и реальный ремонт отказавших имплантов с расходом деталей и труда;
+- влияние болезней, травм и отказов имплантов на здоровье, явку и рынок труда;
+- медицинские, страховые, долговые и кибернетические договоры и транзакции в Simulation Kernel;
+- вкладка `МЕДИЦИНА` в существующем экосистемном интерфейсе;
+- миграция сохранений на схему 18.
+
+### Исправлено
+
+- абстрактные ежедневные медицинские расходы домохозяйств удалены: оплата происходит только после конкретной помощи;
+- исчезнувшие после смерти, миграции или объединения семьи полисы, случаи и установки больше не оставляют битые ссылки;
+- сломанный имплант больше не регистрирует новый отказ каждый день;
+- медицинский долг не растёт до бессмысленных значений: ставки снижены, введены пределы начислений, резерв семьи и списание безнадёжных долгов;
+- клиническое обслуживание имплантов возможно при дефиците лекарств, если доступны персонал, инфраструктура и сервисные комплекты;
+- Kernel закрывает остатки архивированных сущностей и больше не оставляет отрицательный физический баланс исчезнувшего домохозяйства.
+
+### Автономная проверка
+
+- 180 суток полной городской экосистемы;
+- 1 825 суток изолированной клинической симуляции;
+- страховые выплаты, личные платежи, медицинские долги и погашения;
+- установка, обслуживание, отказ и ремонт имплантов;
+- физический расход медикаментов и деталей;
+- миграция схемы 17 → 18;
+- ссылочная целостность пациентов, семей, клиник, полисов и установок.
+
+## 0.19.0 — POPULATION LIFECYCLE / DEMOGRAPHIC CONTINUITY
+
+### Добавлено
+
+- точные даты рождения и ежедневный расчёт возраста жителей;
+- переход детей во взрослую жизнь и выход на рынок образования и труда;
+- три физических образовательных учреждения в разных районах;
+- базовое, среднее, профессиональное и высшее образование;
+- вместимость, очередь, качество, стоимость обучения и публичное финансирование;
+- рост навыков и выпуск жителей из образовательных программ;
+- партнёрства, самостоятельный выход молодых взрослых из родительского дома и образование новых домохозяйств;
+- распад домохозяйств под длительным финансовым давлением;
+- рождения с наследованием семьи, поколения, здоровья и родственных связей;
+- старение, пенсия, завершение трудовых договоров и освобождение рабочих мест;
+- смертность из возраста, здоровья, жилья, загрязнения и доступности помощи;
+- постоянный архив умерших и покинувших город жителей;
+- внутренняя и внешняя миграция из состояния труда, жилья и доходов;
+- изменение представленного населения районов по демографическим и экономическим причинам;
+- синхронизация активных NPC с миграцией и смертью фонового жителя;
+- вкладка `ЖИЗНЬ` внутри экосистемного интерфейса;
+- образовательные платежи в Simulation Kernel;
+- миграция сохранений на схему 17.
+
+### Исправлено
+
+- переход в совершеннолетие и пенсию теперь определяется пересечением точной возрастной границы, а не состоянием после нормализации;
+- просрочка аренды больше не лишает домохозяйство жилья через несколько игровых дней;
+- хронический голод, загрязнение и плохая инфраструктура больше не списывают здоровье с разрушительной ежедневной скоростью;
+- критическое здоровье остаётся опасным, но не уничтожает детальное население за один год;
+- курьерские заказы больше не выбирают умерших или уехавших клиентов;
+- активные NPC после смерти или эмиграции перестают двигаться по расписанию и участвовать в новых взаимодействиях.
+
+### Автономная проверка
+
+- 180 суток полного интеграционного цикла;
+- 10 лет отдельной демографической симуляции;
+- рождения, смерти, миграция, партнёрства, выпуск и пенсия;
+- сохранение ссылочной целостности жителей, семей, жилья и рабочих мест;
+- устойчивое число детальных жителей;
+- миграция схемы 16 → 17.
+
+## 0.18.0 — CIVIC ORDER / CRIMINAL ECONOMY
+
+### Добавлено
+
+- гражданская администрация и физическое здание городского управления;
+- реальный городской бюджет, налоговые поступления, расходы, резерв и долг;
+- налоги с доходов домохозяйств и прибыли бизнеса;
+- лицензии всех действующих бизнесов с платежами, проверками, нарушениями и ограничением работы;
+- финансирование полиции, судов, инфраструктуры и социальной поддержки;
+- районные показатели патрулей, готовности полиции, коррупции, доверия, преступности и судебной нагрузки;
+- автономные преступные сети из существующих организаций и жителей;
+- вымогательство, перенаправление грузов, кража данных, контрафактная кибернетика, стим-рынки и мошенничество;
+- взятки, скрытый коррупционный бюджет и снижение эффективности контроля;
+- расследования, доказательства, задержания, изъятия и обвинительные решения;
+- налоговые, лицензионные, публичные и незаконные транзакции в Simulation Kernel;
+- лицензионные договоры Kernel;
+- вкладка `ВЛАСТЬ` внутри экосистемного интерфейса;
+- миграция сохранений на схему 16.
+
+### Удалено
+
+- фиксированное стартовое событие смены патруля;
+- полиция больше не двигается по заранее назначенному сценарию.
+
+### Проверено
+
+- 365 суток автономной симуляции;
+- налоги, лицензии, расходы бюджета и социальные выплаты;
+- преступная выручка, вымогательство, кража грузов и взятки;
+- расследования, задержания, обвинения и изъятия;
+- миграция схемы 15 → 16;
+- целостность Kernel без отрицательных физических ресурсов.
+
+
+## 0.17.0 — AUTONOMOUS ORGANIZATIONS
+
+### Добавлено
+
+- автономное состояние `GameSession.organizationEcosystem`;
+- десять организационных акторов поверх существующих корпораций, компаний, служб и банды;
+- модели управления: board, executive, cooperative, bureau, union и cell;
+- руководители и управленческие группы из реальных работников населения;
+- метрики казны, активов, прибыли, штата, дефицита кадров, снабжения и надёжности;
+- недельные стратегии из фактического состояния мира;
+- инвестиции в бизнесы, производство, инфраструктуру и подпольный канал;
+- расширение мощностей и планового штата;
+- сокращение убыточных подразделений;
+- повышение оплаты и снижение давления на увольнение;
+- отношения доверия, конкуренции, зависимости и влияния между организациями;
+- межорганизационные соглашения, связанные с реальными договорами снабжения;
+- организационные решения и капитальные переводы в Simulation Kernel;
+- подвкладка `ОРГАНИЗАЦИИ` в существующем экосистемном интерфейсе;
+- миграция сохранений на схему 15.
+
+### Изменено
+
+- `WorldState.organizations` больше не является только набором бюджетов и названий;
+- решения организаций обновляются недельными пакетами;
+- разные модели управления имеют разную скорость принятия решений;
+- Kernel синхронизирует межорганизационные соглашения;
+- версия приложения и PWA повышена до `0.17.0`.
+
+### Проверено
+
+- строгая компиляция изменённого системного ядра;
+- 180 суток автономной симуляции дневными шагами;
+- миграция схемы 14 → 15;
+- отсутствие отрицательных бюджетов;
+- отсутствие дублированных решений и отношений;
+- целостность межорганизационных соглашений;
+- целостность Simulation Kernel.
+
+## 0.16.0 — PRODUCTION & LOGISTICS
+
+### Добавлено
+
+- физическое сырьё: биомасса, химикаты, сплавы, электронные компоненты, носители данных и упаковка;
+- импортный терминал, производственные линии, медицинская лаборатория, микрофабрика, фабрика данных, складской хаб и подпольный канал;
+- производственные рецепты с входами, выходами, временем, трудом, инфраструктурой, отходами и себестоимостью;
+- ограниченные инвентари производственных узлов и складов;
+- договоры закупки и снабжения с точками перезаказа, целевыми запасами, ценами и нарушениями;
+- физические грузовые рейсы со сроком, маршрутом, задержкой, состоянием и возможной потерей;
+- оптовые платежи и передача физических ресурсов между конкретными сущностями;
+- подпольные поставки только после повторных реальных срывов легального договора;
+- производственные активы, склады, закупочные и логистические договоры в Simulation Kernel;
+- вкладка `СНАБЖЕНИЕ` внутри существующего экосистемного интерфейса;
+- миграция сохранений на схему 14.
+
+### Изменено
+
+- удалено автоматическое пополнение магазинов из локальной экономики;
+- товар возвращается в магазин только после производства, перевозки и оплаты;
+- импорт и подпольные запасы пополняются только до целевого уровня;
+- производство и логистика зависят от инфраструктуры, персонала и оборотного капитала;
+- версия приложения и PWA повышена до `0.16.0`.
+
+### Проверено
+
+- строгая компиляция TypeScript;
+- длительная автономная симуляция города;
+- отсутствие отрицательных инвентарей и дублированных рейсов;
+- преобладание легальных поставок над подпольным каналом;
+- целостность активов, договоров и транзакций Kernel;
+- миграция схемы 13 → 14.
+
+## 0.15.0 — URBAN INFRASTRUCTURE
+
+### Добавлено
+
+- пять автономных городских сетей: электричество, вода, данные, транспорт и отходы;
+- источники мощности, районные узлы, линии передачи и услуги каждого физического объекта;
+- почасовой спрос с дневными и ночными пиками;
+- пропускная способность, потери, нагрузка, состояние, износ и дефицит;
+- резервные фонды и тарифы коммунальных операторов;
+- платежи домохозяйств и бизнеса за реальные услуги;
+- влияние снабжения на здоровье, транспорт, запасы, персонал и статус бизнеса;
+- заявки на обслуживание, расходы денег, деталей и трудовых часов;
+- аварии из перегрузки, износа, нехватки персонала и задержки ремонта;
+- инфраструктурные активы и коммунальные договоры в Simulation Kernel;
+- вкладка `СЕТИ` в существующем экосистемном интерфейсе;
+- миграция сохранений на схему 13.
+
+### Удалено
+
+- фиксированное сценарное восстановление энергосети из стартовой очереди событий.
+
+### Проверено
+
+- 120 суток автономной симуляции;
+- пять сетей, двадцать узлов, пятнадцать линий и пятьдесят точек обслуживания;
+- коммунальные платежи и физический поток ресурсов;
+- ремонт, износ и аварии;
+- 100% владение инфраструктурными активами;
+- отсутствие дублированных транзакций;
+- миграция схемы 12 → 13.
+
+
+## 0.14.0 — SIMULATION KERNEL 2.0
+
+### Добавлено
+
+- постоянное состояние `GameSession.kernel`;
+- единые счета игроков, домохозяйств, бизнесов, организаций, жилья и системных секторов;
+- ресурсы денег, продуктов, материалов, труда, жилья и будущей инфраструктуры;
+- реестр бизнес-активов, жилых блоков, объектов и земли районов;
+- полные записи владения каждым активом;
+- трудовые, арендные и базовые договоры поставки;
+- прямые транзакции зарплат, аренды, продуктов, услуг, долгов и ремонта;
+- отдельный поток физических продуктов от поставщика к семье и в потребление;
+- минутный, часовой, суточный и недельный clock;
+- idempotency-защита от повторного проведения одного расчёта;
+- автоматическая проверка ссылок, владения и физических балансов;
+- reconciliation для старых потоков, ещё не переведённых на договоры;
+- диагностика ядра в существующей вкладке `ПОТОКИ`;
+- миграция сохранений на схему 12.
+
+### Проверено
+
+- строгая компиляция TypeScript;
+- 45 суток автономной симуляции;
+- владение каждым активом ровно 100%;
+- отсутствие дублированных транзакций;
+- движение денег и физических ресурсов;
+- трудовые, арендные и поставочные договоры;
+- миграция схемы 11 → 12.
+
+## 0.13.0 — AUTONOMOUS LABOR MARKET
+
+- реальные вакансии из нехватки штата;
+- навыки, требования, заявки и конкуренция кандидатов;
+- переходы между работодателями;
+- рост зарплат при дефиците работников;
+- миграция сохранений на схему 11.
+
+## 0.12.0 — HOUSEHOLD ECONOMY
+
+### Исправлено основание патча
+
+- Population Foundation включён повторно целиком, потому что предыдущий Git-коммит содержал только откат CITY SITUATIONS;
+- новый патч накладывается на фактическое состояние репозитория v0.9.0;
+- блокирующие сюжетные ситуации не возвращены.
+
+### Добавлено
+
+- реальные денежные переводы между организациями, бизнесами, домохозяйствами и владельцами жилья;
+- конкретный пищевой запас каждого домохозяйства;
+- ежедневные покупки продуктов из физических остатков магазинов;
+- дневной ledger доходов, аренды, еды, транспорта, лечения, досуга и долгов;
+- городской масштаб магазинных остатков и миграция старых малых запасов;
+- рынок жилья с вместимостью, занятостью, ставкой, состоянием и ремонтным фондом;
+- автономные переезды в более дешёвое или качественное жильё;
+- длительная, а не мгновенная потеря адреса при просрочке;
+- дневная прибыль бизнеса, операционные расходы, фонд зарплат и закупки;
+- расширение мощности и открытие рабочих мест после устойчивой прибыли;
+- сокращение штата после длительного убытка;
+- вкладки «Жильё» и «Потоки» в разделе населения;
+- миграция сохранений на схему 10.
+
+### Изменено
+
+- зарплата теперь списывается из реального бюджета работодателя;
+- аренда переводится владельцу жилья и в ремонтный фонд;
+- продукты исчезают из магазина и появляются в запасе семьи;
+- услуги приносят выручку конкретным бизнесам;
+- магазины могут обслуживать соседний район с транспортной наценкой;
+- баланс просрочек и выселений смягчён: один дефицитный день не лишает семью жилья;
+- версия приложения и PWA повышена до `0.12.0`.
+
+### Автономная проверка
+
+- 30 игровых суток без действий игрока;
+- население не исчезает;
+- рабочие места не схлопываются полностью;
+- деньги, товары, аренда и услуги проходят через реальные сущности;
+- возникают разные результаты: устойчивые семьи, напряжённые бюджеты, просрочки и переезды;
+- бизнесы способны расширяться и менять штат.
+
+## 0.11.0 — POPULATION FOUNDATION
+
+### Откат ошибочного v0.10.0
+
+- удалён блокирующий слой CITY SITUATIONS;
+- удалены игровые окна выбора и принудительная остановка времени;
+- восстановлены файлы v0.9.0 до состояния до ошибочного патча;
+- миграция схемы 8 удаляет `situations` из уже открытых сохранений.
+
+### Добавлено
+
+- 252 постоянные фоновые записи жителей;
+- около 100 домохозяйств семи типов;
+- общие бюджеты, долги, пищевые запасы, аренда и устойчивость жилья;
+- около 200 рабочих записей, связанных с жителями и физическими локациями;
+- дневные, ночные и ротационные смены;
+- зарплаты, отсутствие, увольнение и повторный найм;
+- здоровье фоновых жителей и влияние голода, загрязнения и жилья;
+- статистические когорты трёх районов;
+- материализация активных NPC из фоновых записей;
+- жилые объекты в промышленном и корпоративном районах;
+- раздел `НАСЕЛЕНИЕ` внутри CITY;
+- миграция сохранений на схему 9.
+
+### Изменено
+
+- персонал бизнеса учитывает весь фоновый штат, а не только 12 активных NPC;
+- зарплаты уменьшают бюджеты организаций;
+- домохозяйства ежедневно оплачивают питание, транспорт, лечение и аренду;
+- потеря работы одного жителя меняет бюджет всего домохозяйства;
+- город способен прожить неделю без действий игрока и получить изменения занятости, здоровья, долгов и жилья;
+- версия приложения и PWA повышена до `0.11.0`.
+
+### Теперь мир может без игрока
+
+- выплачивать зарплаты;
+- терять и нанимать работников;
+- накапливать долги домохозяйств;
+- ухудшать здоровье жителей;
+- переводить семьи в просрочку и потерю жилья;
+- менять персонал и устойчивость бизнеса.
+
+
+## 0.9.0 — LIVING MARKET / CITY FEEDBACK
+
+### Добавлено
+
+- локальная экономика рынка, ночной кухни, клиники, мастерской, логистического узла и корпоративного комплекса;
+- состояние каждой рабочей точки: запас, персонал, спрос, касса, индекс цены и режим обслуживания;
+- детерминированный экономический цикл каждые шесть игровых часов;
+- фоновое потребление товаров жителями и автоматические попытки поставок;
+- состояния бизнеса `stable`, `strained`, `restricted`, `closed`;
+- изменение цен из-за дефицита, спроса, транспорта и состояния точки;
+- влияние усталости и стресса работников на доступность персонала;
+- экономические события в локальном журнале только при заметной смене состояния;
+- вкладка локальной экономики внутри `CITY`;
+- миграция сохранений на схему 7.
+
+### Связано с существующими системами
+
+- магазин и доставка продуктов используют актуальный индекс цены;
+- закрытая рабочая точка перестаёт обслуживать покупки и доставку;
+- реальные магазинные остатки расходуются фоновым населением и пополняются поставками;
+- до трёх курьерских заказов на бирже могут возникать из конкретного дефицита бизнеса;
+- успешная поставка повышает запас точки и меняет её режим работы;
+- повреждённая или поздняя поставка восстанавливает меньше запаса;
+- просьбы о поставке, подмене смены и переносе груза улучшают состояние рабочей точки;
+- ограничение или закрытие места повышает стресс его работников и давление их личных проблем.
+
+### Интерфейс
+
+- `CITY` получил компактные вкладки «Маршруты» и «Локальная экономика»;
+- маршрут показывает режим бизнеса и индекс цены;
+- продуктовый терминал показывает динамическую цену, запас и доступность обслуживания;
+- курьерская биржа различает личные заказы и поставки `SUPPLY`;
+- диагностический экран показывает число нестабильных рабочих точек;
+- мобильная версия сохраняет экономику в одном прокручиваемом рабочем окне.
+
+### Теперь игрок может
+
+- увидеть, почему конкретный продукт подорожал;
+- застать рынок с ограниченным ассортиментом или закрытой выдачей;
+- выбрать срочную поставку, которая реально нужна клинике, кухне или мастерской;
+- восстановить запас бизнеса хорошей доставкой;
+- проигнорировать дефицит и позже столкнуться с ростом цен, закрытием точки и проблемами её работников.
+
+## 0.8.0 — PRESSURE WEEK
+
+### Добавлено
+
+- обязательства игрока с суммой, сроком, кредитором и последствиями;
+- аренда, транспортная задолженность и медицинский счёт;
+- личные долги после займа у знакомого;
+- стадии просрочки аренды: предупреждение, ограничение сервисов и выселение;
+- возможность оплатить долг после выселения и продолжить игру;
+- однократная отсрочка аренды через управляющего жильём;
+- просьбы постоянных NPC, возникающие из их собственных проблем;
+- принятие, отказ, поездка и выполнение просьбы на физической локации;
+- расходы, награды, сроки и человеческие последствия просьб;
+- отдельный адаптивный модуль `PRESSURE`;
+- отчёт дня после сна;
+- миграция сохранений на схему 6.
+
+### Изменено
+
+- главный план теперь показывает реальные сроки доставок, платежей и просьб;
+- стартовый баланс новых миров уменьшен, чтобы расходы и работа имели значение;
+- `NETWORK` в боковой панели заменён на рабочий раздел `PRESSURE`;
+- мобильная панель PLAN получила компактный индикатор обязательств;
+- HOME показывает состояние доступа к жилью и ведёт к платежам;
+- действия с деньгами учитываются в итогах дня;
+- просроченная просьба оставляет память и меняет отношения;
+- версия PWA повышена до `0.8.0`.
+
+### Теперь игрок может
+
+- выбирать между доставкой, оплатой долга, едой, сном и помощью знакомому;
+- попросить управляющего о 24 часах отсрочки;
+- занять деньги у человека, который достаточно доверяет;
+- потерять жильё без окончания игры;
+- восстановить доступ после оплаты;
+- увидеть конкретный результат прожитого дня.
+
+## 0.7.0 — HUMAN NETWORK
+
+### Добавлено
+
+- человеческая сеть из 12 постоянных жителей, детерминированных seed мира;
+- дом, рабочее место, текущее местоположение и дневное или ночное расписание каждого NPC;
+- конкретная жизненная проблема, деньги, усталость и стресс каждого человека;
+- связи между жителями: семья, друзья, коллеги и соперники;
+- отношения к игроку через доверие, уважение, раздражение и долги;
+- память NPC о принятии, получении и результате курьерской доставки;
+- развитие проблем жителей каждые шесть игровых часов;
+- контактные события, возникающие из изменения положения людей;
+- полноценный раздел `PEOPLE` с вкладками «Рядом», «Все» и «Память»;
+- расширенное досье с расписанием, проблемой и конкретными воспоминаниями;
+- отображение причины заказа и текущего статуса клиента в курьерском модуле;
+- миграция сохранений на схему 5.
+
+### Изменено
+
+- курьерские заказы создаются постоянными жителями, а не безличными организациями;
+- причина доставки зависит от реальной проблемы клиента;
+- оплата учитывает давление проблемы и риск заказа;
+- после принятия заказа клиент становится активным контекстом;
+- успешная, посредственная и плохая доставка по-разному меняют отношения;
+- NPC физически перемещаются по расписанию и могут покинуть точку передачи;
+- если клиент ушёл, заказ получает новую точку вместо магического завершения;
+- мобильная ACTION-панель ведёт в PEOPLE, а CITY остаётся в нижней навигации;
+- PWA-кэш и обязательная проверка версии повышены до `0.7.0`.
+
+### Исправлено
+
+- цикл фоновой жизни NPC привязан к фактическому игровому времени, а не к нулевой временной отметке;
+- старые анонимные клиенты при миграции заменяются постоянными жителями;
+- сохранены активные доставки, рейтинг, деньги, еда, жильё и состояние мира.
+
+### Теперь игрок может
+
+- узнавать одних и тех же людей в разных местах города;
+- видеть, кто сейчас находится рядом;
+- следить за рабочими сменами и бытовыми перемещениями NPC;
+- запоминать, кому принадлежит заказ и зачем он нужен;
+- приехать к точке и обнаружить, что клиент уже ушёл;
+- заслужить доверие конкретного человека или оставить у него претензию;
+- открыть досье и увидеть историю общих событий.
+
+## 0.6.0 — FIRST JOB / COURIER EXCHANGE
+
+### Добавлено
+
+- первая полноценная работа курьера;
+- детерминированная биржа из шести разовых заказов;
+- организация `MESHLINE COURIER CO-OP`;
+- диспетчерский узел `MESHLINE DISPATCH HALL`;
+- физический груз с названием, классом, весом и состоянием;
+- точки получения и передачи в существующих локациях города;
+- срок доставки, оплата и штраф за опоздание;
+- риски `low`, `medium`, `high`;
+- состояния легальности `legal`, `restricted`, `unknown`;
+- вместимость курьерского груза;
+- рейтинг, число доставок и суммарный заработок;
+- повреждение посылки и проверки в пути;
+- отдельный адаптивный экран `WORK`;
+- быстрый доступ к работе из мобильной навигации и ACTION;
+- миграция сохранений на схему 4.
+
+### Удалено
+
+- название стартового сценария из активного интерфейса;
+- обязательная встреча у мастерской;
+- временный пропуск;
+- стартовое собеседование;
+- фиксированная ночная вакансия;
+- сценарная переписка;
+- план из заранее заданных сюжетных пунктов;
+- сценарное событие закрытия вакансии.
+
+### Изменено
+
+- `WORK` теперь является рабочим игровым модулем, а не заглушкой;
+- главный план строится из состояния героя, жилья, еды и активного заказа;
+- старые сохранения автоматически очищаются от стартовой сюжетной линии;
+- основной контакт больше не выдаёт игроку обязательное поручение;
+- перемещение с активным грузом учитывает давление банды и присутствие полиции;
+- версия приложения, PWA-кэша и серверного манифеста повышена до `0.6.0`.
+
+### Теперь игрок может
+
+- выбрать подходящую доставку по весу, сроку, риску и оплате;
+- принять только один заказ одновременно;
+- самостоятельно добраться до точки получения;
+- забрать физический груз;
+- выбрать маршрут к клиенту;
+- повредить груз или попасть под проверку в пути;
+- опоздать и потерять часть оплаты;
+- получить деньги, рейтинг и статистику после передачи;
+- игнорировать работу и продолжать обычную жизнь без сюжетного давления.
+
+## 0.5.0 — LIFE LOOP / PHYSICAL FOOD
+
+### Добавлено
+
+- отдельный каталог продуктов вселенной NEON LIFE без реальных брендов и фотографий;
+- девять продуктов со своими производителями, происхождением, ценой, массой, эффектами и сроком хранения;
+- домашний пищевой запас с физическими порциями и стабильными ID;
+- состояния свежести: `fresh`, `expiring`, `spoiled`;
+- утилизация испорченных продуктов;
+- локальные остатки товаров в ночном рынке, кухне и клинике;
+- покупка продукта только на текущей локации и только во время работы объекта;
+- доставка продуктов с рынка в домашний пищевой шкаф;
+- требования к приготовлению: без подготовки, нагреватель, горячая вода, кухонный модуль и пищевой принтер;
+- фактическое положение героя в конкретном здании;
+- маршруты между всеми доступными локациями;
+- стоимость поездки, длительность, транспортные задержки и состояние объекта к моменту прибытия;
+- расписания открытия для рынка, ночной кухни, мастерской и корпоративного комплекса;
+- полноценный модуль HOME с параметрами жилья и бытовым оборудованием;
+- сон на 6 или 8 часов с расчётом восстановления через качество жилья и шум;
+- мобильная подвкладка «Еда»;
+- отдельные компактные экраны CITY, INVENTORY и HOME;
+- три быстрые кнопки «Еда», «Места» и «Дом» в мобильной панели ACTION;
+- миграция сохранений на схему 3 с автоматическим созданием жизненного состояния.
+
+### Изменено
+
+- покупка еды больше не является абстрактным действием «купить горячую еду»;
+- голод снижается только после расходования конкретного продукта;
+- время приготовления, поездки, покупки, доставки и сна двигает общую симуляцию;
+- положение героя, район, баланс, здоровье, усталость, стресс и голод изменяются одной жизненной системой;
+- быстрые действия теперь могут реально перемещать героя между объектами;
+- мобильный экран сохраняет компактность: полный ассортимент и подробности открываются в отдельном терминальном окне;
+- версия приложения, PWA-кэша и серверного манифеста повышена до `0.5.0`.
+
+### Теперь игрок может
+
+- доехать до ночного рынка и купить конкретный продукт;
+- увидеть, сколько порций осталось у продавца;
+- хранить продукты дома и следить за сроком годности;
+- съесть готовый рацион в дороге;
+- вернуться домой и приготовить лапшу через горячую воду;
+- купить продукт, который пока невозможно приготовить без улучшения жилья;
+- заказать доставку, не находясь в магазине;
+- выбросить испорченную еду;
+- вернуться в жилой блок и проспать до следующего периода дня.
+
+## 0.4.0 — WORLD FOUNDATION
+
+### Добавлено
+
+- настоящий `WorldState` с городом, тремя районами, локациями и организациями;
+- детерминированный генератор мира по seed;
+- генерация героя и главного контакта из seed;
+- три независимых слота сохранения;
+- IndexedDB-хранилище для состояния мира;
+- автосохранение с задержкой после изменений;
+- ручное сохранение из системного окна;
+- создание, загрузка и удаление слотов;
+- контрольная сумма каждого сохранения;
+- архив повреждённых записей в отдельном recovery-хранилище;
+- схема миграций сохранений;
+- перенос старой localStorage-сессии с сохранением только денег, времени, жилья и состояния;
+- очередь будущих событий: восстановление линии, смена патруля, закрытие вакансии и предупреждение об аренде;
+- диагностика IndexedDB, активного слота и recovery-записей.
+
+### Изменено
+
+- старые демонстрационные персонажи, организации и названия полностью удалены из рабочего канона;
+- NEON LIFE использует только собственный канон и не переносит данные других игровых сессий;
+- состояние района привязано к seed конкретного мира;
+- время обновляет `WorldMeta`, очередь событий и районную симуляцию одновременно;
+- системные настройки теперь содержат полноценное управление сохранениями;
+- сброс демо заменён созданием нового мира в активном слоте.
+
+### Теперь игрок может
+
+- иметь три разные жизни в трёх постоянных мирах;
+- закрыть приложение и продолжить с той же минуты;
+- создать новый город без изменения остальных слотов;
+- увидеть события, которые были запланированы состоянием мира заранее;
+- безопасно продолжить игру даже после обнаружения повреждённой записи.
+
+## 0.3.0 — WORLD PULSE / UPDATE GUARD
+
+### Добавлено
+
+- серверный манифест `version.json` с номером актуальной сборки;
+- автоматическая проверка версии при запуске, возвращении в приложение и каждые пять минут;
+- блокирующий экран обязательного обновления;
+- ручная проверка версии в системных настройках;
+- отображение локальной и серверной версии в диагностике;
+- принудительная очистка старых PWA-кэшей без удаления сохранения и настроек;
+- автоматическая активация нового service worker;
+- network-first загрузка HTML и файла версии;
+- миграция старой демонстрационной сессии к новому состоянию района;
+- детерминированный WORLD PULSE для активного района;
+- параметры района: безопасность, полиция, давление банды, транспорт, рынок и энергосеть;
+- системные локальные события, возникающие при изменении состояния района;
+- компактный индикатор состояния района в мобильной вкладке «Район» и полном окне карты.
+
+### Изменено
+
+- версия приложения теперь берётся из `package.json` во время сборки;
+- runtime-события получают стабильные ID вместо случайных UUID;
+- локальный канал больше не состоит из жёстко прописанных строк;
+- продвижение времени и выполнение действий одновременно обновляют район;
+- окно диагностики показывает количество импульсов симуляции и локальных событий;
+- service worker принудительно переводит открытый клиент на новую сборку после деплоя.
+
+### Теперь игрок может
+
+- наблюдать, как район меняется без прямого участия героя;
+- увидеть последствия усиления полиции, банды, задержек транспорта и восстановления энергосети;
+- продолжить старую сессию без ручного сброса;
+- гарантированно перейти на актуальную версию игры без очистки данных браузера.
+
+## 0.2.0 — MOBILE COMMAND VIEW
+
+### Изменено
+
+- мобильный LIFE больше не сжимает десктопную сетку в длинную ленту;
+- создан отдельный компактный экран под iPhone 14 Pro;
+- профиль, баланс, жильё и четыре показателя состояния собраны в верхний блок;
+- текущее действие сокращено до одной строки состояния, риска и двух решений;
+- добавлены подвкладки «Сейчас», «План», «Район» и «Журнал»;
+- длинные описания действий убраны из основного экрана;
+- подробные профиль героя, карта района и журнал перенесены во внутренние окна;
+- локальные действия представлены компактными строками;
+- мобильная верхняя и нижняя панели уменьшены;
+- экран зафиксирован по высоте устройства, прокручивается только содержимое активной подвкладки;
+- десктопная компоновка сохранена без упрощения.
+
+### Теперь игрок может
+
+- увидеть всё критическое состояние без прокрутки;
+- переключить нужный слой информации одним нажатием;
+- открыть детали только тогда, когда они нужны;
+- выполнять действия, ждать, открывать контакт, карту и полный журнал из одного мобильного экрана.
+
+## 0.1.0 — SEVEN DAYS BELOW / Interface Foundation
+
+### Добавлено
+
+- desktop shell: topbar, navigation, workspace, context panel;
+- mobile shell: bottom navigation, ACTION sheet, fullscreen windows;
+- главный экран LIFE;
+- профиль героя и состояние здоровья;
+- текущая активность и план ночи;
+- локальные возможности с длительностью, ценой и риском;
+- продвижение игрового времени;
+- изменения баланса, усталости, стресса и голода;
+- журнал событий с фильтрами;
+- карточка и досье первого демонстрационного контакта;
+- сообщения, вакансия, настройки и диагностика во внутренних окнах;
+- сохранение UI-настроек и демонстрационной сессии;
+- PWA-манифест, runtime/offline cache и иконки;
+- GitHub Pages workflow;
+- seeded random, стабильные Entity ID и контракт WorldAction.
