@@ -560,7 +560,7 @@ function activeWorldCoreEmploymentContract(input: KernelSyncInput, employment: W
   if (!business || !resident) return null;
   const status = employment.status === "ended" ? "ended" : employment.status === "breached" ? "breached" : employment.status === "suspended" ? "suspended" : "active";
   return {
-    id: employmentContractId(employment.sourceEmploymentId ?? employment.sourcePlayerContractId ?? employment.id),
+    id: employmentContractId(employment.sourceEmploymentId ?? employment.id),
     kind: "employment",
     sourceEntityId: business.operatorEntityId || business.id,
     targetEntityId: employment.residentId,

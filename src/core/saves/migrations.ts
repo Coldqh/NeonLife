@@ -3,8 +3,7 @@ import { createStableEntityId } from "../ids/entityId";
 import type { GameSession, LocationState } from "../../world/state/types";
 import { createInitialFoodState } from "../../gameplay/food/foodSystem";
 import { createInitialHousing } from "../../gameplay/housing/housingSystem";
-import { createInitialCourierState, reconcileCourierEmployment, type CourierOrder, type CourierState } from "../../gameplay/jobs/courier/courierSystem";
-import { normalizePlayerWorkState } from "../../gameplay/jobs/work/workSystem";
+import { getPlayerJob, normalizePlayerLoopState } from "../../gameplay/playerLoop/playerLoopSystem";
 import { createHumanNetwork, getPerson, toKnownNpc } from "../../people/network/humanNetwork";
 import type { HumanNetworkState, PersonState } from "../../people/network/types";
 import { createPressureState } from "../../gameplay/pressure/pressureSystem";
@@ -390,84 +389,6 @@ function ensureLocalOperators(
   return { organizations, locations };
 }
 
-function migrateCourierOrder(order: unknown, people: PersonState[], index: number): CourierOrder | null {
-  if (!isObject(order) || typeof order.id !== "string" || typeof order.code !== "string") return null;
-  const matchedPerson = typeof order.clientId === "string"
-    ? people.find((item) => item.id === order.clientId)
-    : undefined;
-  const person = matchedPerson ?? people[index % Math.max(1, people.length)];
-  if (!person) return null;
-  return {
-    id: order.id,
-    code: order.code,
-    clientId: person.id,
-    client: matchedPerson && typeof order.client === "string" ? order.client : person.name,
-    requestNote: typeof order.requestNote === "string" ? order.requestNote : person.problem.detail,
-    businessId: typeof order.businessId === "string" ? order.businessId : null,
-    economicPurpose: order.economicPurpose === "restock" ? "restock" : "personal",
-    pickupLocationId: String(order.pickupLocationId ?? "location-missing"),
-    dropoffLocationId: String(order.dropoffLocationId ?? person.currentLocationId),
-    cargoName: String(order.cargoName ?? "sealed parcel"),
-    cargoClass: ["documents", "food", "medical", "parts", "sealed"].includes(String(order.cargoClass))
-      ? order.cargoClass as CourierOrder["cargoClass"]
-      : "sealed",
-    weightKg: typeof order.weightKg === "number" ? order.weightKg : 1,
-    payout: typeof order.payout === "number" ? order.payout : 40,
-    latePenalty: typeof order.latePenalty === "number" ? order.latePenalty : 18,
-    deadlineAt: typeof order.deadlineAt === "number" ? order.deadlineAt : 0,
-    status: ["available", "accepted", "in-transit", "completed", "failed", "expired"].includes(String(order.status))
-      ? order.status as CourierOrder["status"]
-      : "available",
-    risk: ["low", "medium", "high"].includes(String(order.risk)) ? order.risk as CourierOrder["risk"] : "low",
-    legality: ["legal", "restricted", "unknown"].includes(String(order.legality)) ? order.legality as CourierOrder["legality"] : "legal",
-    condition: typeof order.condition === "number" ? order.condition : 100,
-    acceptedAt: typeof order.acceptedAt === "number" ? order.acceptedAt : null,
-    collectedAt: typeof order.collectedAt === "number" ? order.collectedAt : null,
-    completedAt: typeof order.completedAt === "number" ? order.completedAt : null
-  };
-}
-
-function migrateCourierState(
-  value: unknown,
-  seed: string,
-  timestamp: number,
-  locations: LocationState[],
-  people: PersonState[],
-  businesses: LocalEconomyState["businesses"]
-): CourierState {
-  if (!isObject(value) || !Array.isArray(value.orders)) {
-    return createInitialCourierState(seed, timestamp, locations, people, businesses);
-  }
-  const orders = value.orders
-    .map((order, index) => migrateCourierOrder(order, people, index))
-    .filter((order): order is CourierOrder => Boolean(order));
-  if (!orders.length) return createInitialCourierState(seed, timestamp, locations, people, businesses);
-  const activeOrderId = typeof value.activeOrderId === "string" ? value.activeOrderId : null;
-  const activeOrder = activeOrderId ? orders.find((order) => order.id === activeOrderId) : undefined;
-  const rawCargo = isObject(value.carriedCargo) ? value.carriedCargo : null;
-  return {
-    orders,
-    activeOrderId,
-    carriedCargo: rawCargo && typeof rawCargo.orderId === "string"
-      ? {
-        orderId: rawCargo.orderId,
-        name: typeof rawCargo.name === "string" ? rawCargo.name : activeOrder?.cargoName ?? "UNKNOWN CARGO",
-        weightKg: typeof rawCargo.weightKg === "number" ? rawCargo.weightKg : activeOrder?.weightKg ?? 0,
-        condition: typeof rawCargo.condition === "number" ? rawCargo.condition : activeOrder?.condition ?? 100,
-        collectedAt: typeof rawCargo.collectedAt === "number" ? rawCargo.collectedAt : activeOrder?.collectedAt ?? timestamp
-      }
-      : activeOrder?.status === "in-transit"
-        ? { orderId: activeOrder.id, name: activeOrder.cargoName, weightKg: activeOrder.weightKg, condition: activeOrder.condition, collectedAt: activeOrder.collectedAt ?? timestamp }
-        : null,
-    boardGeneration: typeof value.boardGeneration === "number" ? value.boardGeneration : 1,
-    boardRefreshAt: typeof value.boardRefreshAt === "number" ? value.boardRefreshAt : timestamp + 8 * 60 * 60_000,
-    rating: typeof value.rating === "number" ? value.rating : 50,
-    completedDeliveries: typeof value.completedDeliveries === "number" ? value.completedDeliveries : 0,
-    failedDeliveries: typeof value.failedDeliveries === "number" ? value.failedDeliveries : 0,
-    totalEarnings: typeof value.totalEarnings === "number" ? value.totalEarnings : 0,
-    cargoCapacityKg: typeof value.cargoCapacityKg === "number" ? value.cargoCapacityKg : 9
-  };
-}
 
 export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope | null {
   if (!isObject(raw) || !hasBaseSessionShape(raw.payload)) return null;
@@ -544,7 +465,6 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     };
   }
   const economy = normalizeEconomyState(payload.economy, seed, timestamp, locations, people.people, population, foodState, pulseState);
-  const courier = migrateCourierState(existingJobs.courier, seed, timestamp, locations, people.people, economy.businesses);
   const pressure = hasPressureState(payload.pressure)
     ? payload.pressure
     : createPressureState(seed, timestamp, housingState, people.people, locations);
@@ -727,12 +647,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     localScene,
     vehicles
   });
-  const work = normalizePlayerWorkState(existingJobs.work, {
-    seed,
-    timestamp,
-    venues: urban.venueOperations.registry.map((entry) => entry.venue),
-    venueOperations: urban.venueOperations
-  });
+  const playerLoop = normalizePlayerLoopState(payload.playerLoop, seed, timestamp, existingJobs);
   const social = normalizeSocialState(payload.social, seed, timestamp, people, locations);
   const vehicleCrime = normalizeVehicleCrimeState(payload.vehicleCrime, timestamp);
   const playerCrime = normalizePlayerCrimeState(payload.playerCrime, {
@@ -757,7 +672,6 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     economy,
     population,
     urban,
-    work,
     kernel: baseKernel
   });
   let productInventoryBase = normalizeProductInventoryState(payload.productInventory, {
@@ -834,7 +748,6 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     economy: businessBase.economy,
     population,
     urban: businessBase.urban,
-    work,
     kernel,
     previous: worldCore
   }, worldCore);
@@ -863,17 +776,13 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
     worldCore: inventoryProjection.worldCore
   });
 
-  const activeWorkContract = coreProjection.work.contracts.find((contract) =>
-    contract.id === coreProjection.work.activeContractId
-    && (contract.status === "active" || contract.status === "warning")
-  );
+  const activeJob = getPlayerJob(playerLoop);
   const migratedPlayer = {
     ...canonicalCredits.player,
-    occupation: activeWorkContract?.title.toUpperCase() ?? "UNEMPLOYED"
+    occupation: activeJob?.title.toUpperCase() ?? "UNEMPLOYED"
   };
-  const employedAsCourier = activeWorkContract?.role === "courier";
 
-  const { situations: _discardedSituations, ...payloadWithoutSituations } = payload;
+  const { situations: _discardedSituations, jobs: _discardedJobs, playerLoop: _oldPlayerLoop, ...payloadWithoutSituations } = payload;
   const migratedPayload = {
     ...payloadWithoutSituations,
     schemaVersion: SAVE_SCHEMA_VERSION,
@@ -929,11 +838,7 @@ export function migrateEnvelope(raw: unknown, slotId: SaveSlotId): SaveEnvelope 
       food: inventoryProjection.food,
       lastSleepAt: null
     },
-    jobs: {
-      ...existingJobs,
-      courier: reconcileCourierEmployment(courier, employedAsCourier),
-      work: coreProjection.work
-    }
+    playerLoop
   } as unknown as GameSession;
 
   return {

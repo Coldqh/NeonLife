@@ -92,28 +92,9 @@ import {
 } from "../../simulation/access/buildingAccessSystem";
 import { canPrepare, getCarriedMassGrams } from "../food/foodSystem";
 import { calculateSleepRecovery, getHousingDaysLeft } from "../housing/housingSystem";
+import { getPlayerJob, resolvePlayerLoopAction } from "../playerLoop/playerLoopSystem";
+import type { PlayerLoopAction } from "../playerLoop/types";
 import { getTravelOptions, isLocationOpen } from "../travel/travelSystem";
-import {
-  acceptCourierOrder as acceptCourierOrderState,
-  applyCourierTravelRisk,
-  collectCourierCargo,
-  completeCourierOrder,
-  expireCourierOrders,
-  getActiveCourierOrder,
-  reconcileCourierEmployment,
-  refreshCourierBoard
-} from "../jobs/courier/courierSystem";
-import {
-  advancePlayerWorkState,
-  collectPlayerWorkDebt,
-  completePlayerWorkTask,
-  finishPlayerWorkShift,
-  interviewPlayerForVacancy,
-  resignPlayerWorkContract,
-  signPlayerWorkContract,
-  startPlayerWorkShift,
-  waitMinutesUntilShift
-} from "../jobs/work/workSystem";
 import { advanceDistrictPulse } from "../../world/city/districtPulse";
 import {
   acceptNpcRequest as acceptNpcRequestState,
@@ -127,11 +108,10 @@ import {
   trackPressureMetrics
 } from "../pressure/pressureSystem";
 import type { GameSession } from "../../world/state/types";
-import { currentPhysicalLocation, getPlayerExactLocationId, getPlayerHomeUnit, isCourierDispatchLocation, isPlayerInsideHome, isPlayerInsideLocation } from "./playerPresence";
+import { currentPhysicalLocation, getPlayerExactLocationId, getPlayerHomeUnit, isPlayerInsideHome, isPlayerInsideLocation } from "./playerPresence";
 export { getPlayerExactLocationId } from "./playerPresence";
 import {
   advanceLocalEconomy,
-  applyCourierSupplyDelivery,
   applyEconomyPressureToPeople,
   applyRequestToEconomy,
   businessCanServe,
@@ -422,24 +402,8 @@ function progressLocalLife(session: GameSession, minutes: number, options: Progr
     relationChanges: options.relationChanges,
     worldEvents: options.worldEvents ?? (queued.events.length + pulse.events.length + generated.length)
   });
-  const workState = advancePlayerWorkState(session.jobs.work, {
-    seed: session.world.meta.seed,
-    playerId: session.player.id,
-    timestamp: nextTimestamp,
-    venues: urbanState.venueOperations.registry.map((entry) => entry.venue),
-    venueOperations: urbanState.venueOperations
-  });
-  const activeWorkContract = workState.contracts.find((contract) => contract.id === workState.activeContractId && (contract.status === "active" || contract.status === "warning"));
-  const playerWithWork = { ...nextPlayer, occupation: activeWorkContract?.title.toUpperCase() ?? "UNEMPLOYED" };
-  const employedAsCourier = activeWorkContract?.role === "courier";
-  const courierState = reconcileCourierEmployment(refreshCourierBoard(
-    expireCourierOrders(session.jobs.courier, nextTimestamp),
-    session.world.meta.seed,
-    nextTimestamp,
-    session.world.locations,
-    peopleState.people,
-    session.economy.businesses
-  ), employedAsCourier);
+  const activeJob = getPlayerJob(session.playerLoop);
+  const playerWithWork = { ...nextPlayer, occupation: activeJob?.title.toUpperCase() ?? "UNEMPLOYED" };
   const buildingAccessState = advanceBuildingAccessState(session.buildingAccess, {
     timestamp: nextTimestamp,
     seed: session.world.meta.seed,
@@ -487,7 +451,7 @@ function progressLocalLife(session: GameSession, minutes: number, options: Progr
       ...session.life,
       currentLocationId: targetLocation?.id ?? localSceneState.playerPosition.locationId ?? session.life.currentLocationId
     },
-    jobs: { ...session.jobs, courier: courierState, work: workState },
+    playerLoop: session.playerLoop,
     player: playerWithWork,
     events: [...generated, ...queued.events.reverse(), ...pulse.events.reverse(), ...session.events].slice(0, 100)
   };
@@ -974,24 +938,8 @@ function progressWorldLife(session: GameSession, minutes: number, options: Progr
       hunger: clamp(session.player.condition.hunger + baselineHunger + (options.hungerDelta ?? 0))
     }
   };
-  const workState = advancePlayerWorkState(session.jobs.work, {
-    seed: session.world.meta.seed,
-    playerId: session.player.id,
-    timestamp: nextTimestamp,
-    venues: urbanState.venueOperations.registry.map((entry) => entry.venue),
-    venueOperations: urbanState.venueOperations
-  });
-  const activeWorkContract = workState.contracts.find((contract) => contract.id === workState.activeContractId && (contract.status === "active" || contract.status === "warning"));
-  const playerWithWork = { ...nextPlayer, occupation: activeWorkContract?.title.toUpperCase() ?? "UNEMPLOYED" };
-  const employedAsCourier = activeWorkContract?.role === "courier";
-  const courierState = reconcileCourierEmployment(refreshCourierBoard(
-    expireCourierOrders(session.jobs.courier, nextTimestamp),
-    session.world.meta.seed,
-    nextTimestamp,
-    session.world.locations,
-    peopleState.people,
-    healthAdvance.economy.businesses
-  ), employedAsCourier);
+  const activeJob = getPlayerJob(session.playerLoop);
+  const playerWithWork = { ...nextPlayer, occupation: activeJob?.title.toUpperCase() ?? "UNEMPLOYED" };
   const buildingAccessState = advanceBuildingAccessState(session.buildingAccess, {
     timestamp: nextTimestamp,
     seed: session.world.meta.seed,
@@ -1041,7 +989,6 @@ function progressWorldLife(session: GameSession, minutes: number, options: Progr
     economy: healthAdvance.economy,
     population: crimeAdvance.population,
     urban: urbanState,
-    work: workState,
     kernel: session.kernel,
     previous: session.worldCore
   });
@@ -1128,7 +1075,6 @@ function progressWorldLife(session: GameSession, minutes: number, options: Progr
     economy: businessAdvance.economy,
     population: crimeAdvance.population,
     urban: businessAdvance.urban,
-    work: workState,
     kernel,
     previous: worldCore
   }, worldCore);
@@ -1208,11 +1154,7 @@ function progressWorldLife(session: GameSession, minutes: number, options: Progr
       food: inventoryProjection.food,
       currentLocationId: targetLocation?.id ?? localSceneState.playerPosition.locationId ?? session.life.currentLocationId
     },
-    jobs: {
-      ...session.jobs,
-      courier: courierState,
-      work: coreProjection.work
-    },
+    playerLoop: session.playerLoop,
     player: canonicalCredits.player,
     events: [...generated, ...queued.events.reverse(), ...pulse.events.reverse(), ...session.events].slice(0, 100)
   };
@@ -1360,22 +1302,7 @@ export function travelToLocation(session: GameSession, locationId: string): Game
     activity: `На месте: ${option.location.name}`,
     targetLocationId: option.location.id
   });
-  const risk = applyCourierTravelRisk(
-    progressed.jobs.courier,
-    progressed.world.meta.seed,
-    progressed.timestamp,
-    progressed.district.gangPressure + progressed.district.policePresence
-  );
-  if (risk.incident === "none") return progressed;
-  const active = getActiveCourierOrder(risk.state);
-  const incident = risk.incident === "inspection"
-    ? createEvent(progressed, progressed.timestamp, "work", "Курьерский груз попал под проверку.", `${active?.code ?? "DELIVERY"} · пломба сверена, данные рейса записаны.`, 3)
-    : createEvent(progressed, progressed.timestamp, "work", "Груз получил повреждение в пути.", `${active?.code ?? "DELIVERY"} · состояние −${risk.conditionLoss}%.`, 2);
-  return {
-    ...progressed,
-    jobs: { ...progressed.jobs, courier: risk.state },
-    events: [incident, ...progressed.events].slice(0, 100)
-  };
+  return progressed;
 }
 
 
@@ -2249,181 +2176,6 @@ export function disposeStolenPhysicalVehicle(session: GameSession, vehicleId: st
   });
 }
 
-export function acceptCourierOrder(session: GameSession, orderId: string): GameSession {
-  const courierContract = session.jobs.work.contracts.find((contract) => contract.id === session.jobs.work.activeContractId && contract.role === "courier" && (contract.status === "active" || contract.status === "warning"));
-  if (!courierContract) return session;
-  const dispatch = currentPhysicalLocation(session);
-  if (!dispatch || !isCourierDispatchLocation(dispatch) || !isPlayerInsideLocation(session, dispatch.id)) return session;
-  const nextState = acceptCourierOrderState(session.jobs.courier, orderId, session.timestamp);
-  if (nextState === session.jobs.courier) return session;
-  const order = nextState.orders.find((item) => item.id === orderId);
-  if (!order) return session;
-  const pickup = session.world.locations.find((location) => location.id === order.pickupLocationId);
-  const dropoff = session.world.locations.find((location) => location.id === order.dropoffLocationId);
-  const people = recordPlayerAction(
-    session.people,
-    session.world.meta.seed,
-    order.clientId,
-    session.timestamp,
-    `Игрок принял доставку ${order.code}.`,
-    { trust: 1, respect: 1, importance: 35, emotionalValue: 4 }
-  );
-  const client = getPerson(people, order.clientId);
-  return {
-    ...session,
-    jobs: { ...session.jobs, courier: nextState },
-    people,
-    world: { ...session.world, primaryContactId: order.clientId },
-    primaryContact: client ? toKnownNpc(client, session.world.locations, session.timestamp) : session.primaryContact,
-    player: { ...session.player, occupation: courierContract.title },
-    currentActivity: `Заказ принят: ${order.code}`,
-    events: [
-      createEvent(session, session.timestamp, "work", `Принят заказ ${order.code}.`, `${order.client} · ${pickup?.name} → ${dropoff?.name} · оплата ₵ ${order.payout}`, 2),
-      createEvent(session, session.timestamp, "contact", `${order.client} ждёт доставку.`, order.requestNote, order.risk === "high" ? 3 : 2),
-      ...session.events
-    ].slice(0, 100)
-  };
-}
-
-export function pickupCourierOrder(session: GameSession): GameSession {
-  const active = getActiveCourierOrder(session.jobs.courier);
-  if (!active || !isPlayerInsideLocation(session, active.pickupLocationId)) return session;
-  const exactLocationId = getPlayerExactLocationId(session);
-  if (!exactLocationId) return session;
-  const nextState = collectCourierCargo(session.jobs.courier, exactLocationId, session.timestamp + 6 * 60_000);
-  if (!active || nextState === session.jobs.courier) return session;
-  const progressed = progressLife(session, 6, {
-    category: "work",
-    title: `Груз получен: ${active.code}.`,
-    detail: `${active.cargoName} · ${active.weightKg} кг · пломба ${active.condition}%`,
-    fatigueDelta: 1,
-    activity: `Доставка ${active.code}: груз на руках`
-  });
-  const people = recordPlayerAction(
-    progressed.people,
-    progressed.world.meta.seed,
-    active.clientId,
-    progressed.timestamp,
-    `Груз по заказу ${active.code} забран со склада.`,
-    { respect: 1, importance: 28, emotionalValue: 2 }
-  );
-  const client = getPerson(people, active.clientId);
-  return {
-    ...progressed,
-    people,
-    primaryContact: client ? toKnownNpc(client, progressed.world.locations, progressed.timestamp) : progressed.primaryContact,
-    jobs: { ...progressed.jobs, courier: nextState }
-  };
-}
-
-export function deliverCourierOrder(session: GameSession): GameSession {
-  const active = getActiveCourierOrder(session.jobs.courier);
-  if (!active) return session;
-  const clientAtDelivery = getPerson(session.people, active.clientId);
-  if (clientAtDelivery && clientAtDelivery.currentLocationId !== active.dropoffLocationId) {
-    const redirected = {
-      ...session.jobs.courier,
-      orders: session.jobs.courier.orders.map((order) => order.id === active.id
-        ? { ...order, dropoffLocationId: clientAtDelivery.currentLocationId }
-        : order)
-    };
-    const location = session.world.locations.find((item) => item.id === clientAtDelivery.currentLocationId);
-    return {
-      ...session,
-      jobs: { ...session.jobs, courier: redirected },
-      world: { ...session.world, primaryContactId: clientAtDelivery.id },
-      primaryContact: toKnownNpc(clientAtDelivery, session.world.locations, session.timestamp),
-      currentActivity: `Клиент сменил точку: ${location?.name ?? "неизвестная точка"}`,
-      events: [
-        createEvent(
-          session,
-          session.timestamp,
-          "contact",
-          `${clientAtDelivery.name} ушёл с точки передачи.`,
-          `Новая точка: ${location?.name ?? "неизвестный узел"}. Заказ ${active.code} остаётся активным.`,
-          2
-        ),
-        ...session.events
-      ].slice(0, 100)
-    };
-  }
-  if (!isPlayerInsideLocation(session, active.dropoffLocationId)) return session;
-  const completionTimestamp = session.timestamp + 5 * 60_000;
-  const exactLocationId = getPlayerExactLocationId(session);
-  if (!exactLocationId) return session;
-  const completion = completeCourierOrder(session.jobs.courier, exactLocationId, completionTimestamp);
-  if (!completion) return session;
-  const progressed = progressLife(session, 5, {
-    category: "work",
-    title: `Заказ ${active.code} закрыт.`,
-    detail: `${completion.lateMinutes ? `Опоздание ${completion.lateMinutes} мин. · ` : "В срок · "}состояние ${completion.condition}% · начислено ₵ ${completion.payout}`,
-    importance: completion.lateMinutes > 15 || completion.condition < 70 ? 3 : 1,
-    balanceDelta: completion.payout,
-    stressDelta: -2,
-    activity: "Свободен для нового заказа",
-    deliveryCompleted: true,
-    relationChanges: 1
-  });
-  const cleanDelivery = completion.lateMinutes === 0 && completion.condition >= 90;
-  const badDelivery = completion.lateMinutes > 15 || completion.condition < 70;
-  const summary = cleanDelivery
-    ? `Игрок доставил заказ ${active.code} вовремя и без повреждений.`
-    : badDelivery
-      ? `Игрок доставил заказ ${active.code} с серьёзной проблемой.`
-      : `Игрок завершил заказ ${active.code} с небольшими отклонениями.`;
-  const people = recordPlayerAction(
-    progressed.people,
-    progressed.world.meta.seed,
-    active.clientId,
-    progressed.timestamp,
-    summary,
-    cleanDelivery
-      ? { trust: 6, respect: 5, irritation: -2, debtToPlayer: 1, importance: 75, emotionalValue: 32 }
-      : badDelivery
-        ? { trust: -7, respect: -4, irritation: 12, importance: 82, emotionalValue: -44 }
-        : { trust: 2, respect: 1, irritation: 2, importance: 50, emotionalValue: 8 }
-  );
-  const client = getPerson(people, active.clientId);
-  const reaction = cleanDelivery
-    ? `${active.client} подтвердил получение и сохранил твой контакт.`
-    : badDelivery
-      ? `${active.client} принял груз, но оставил претензию в MESHLINE.`
-      : `${active.client} подтвердил получение без дополнительных требований.`;
-  const supply = applyCourierSupplyDelivery(
-    progressed.economy,
-    progressed.life.food,
-    active,
-    completion.payout,
-    completion.condition,
-    completion.lateMinutes
-  );
-  const economicEvent = active.economicPurpose === "restock"
-    ? createEvent(
-      progressed,
-      progressed.timestamp,
-      "local",
-      cleanDelivery ? "Поставка восстановила рабочий запас." : "Поставка принята с потерями.",
-      `${locationNameForSession(progressed, active.dropoffLocationId)} · запас зависит от состояния груза и срока.`,
-      cleanDelivery ? 2 : badDelivery ? 3 : 1
-    )
-    : null;
-  return {
-    ...progressed,
-    people,
-    economy: supply.state,
-    life: { ...progressed.life, food: supply.food },
-    world: { ...progressed.world, primaryContactId: active.clientId },
-    primaryContact: client ? toKnownNpc(client, progressed.world.locations, progressed.timestamp) : progressed.primaryContact,
-    jobs: { ...progressed.jobs, courier: completion.state },
-    events: [
-      ...(economicEvent ? [economicEvent] : []),
-      createEvent(progressed, progressed.timestamp, "contact", reaction, client?.problem.detail, badDelivery ? 3 : cleanDelivery ? 2 : 1),
-      ...progressed.events
-    ].slice(0, 100)
-  };
-}
-
-
 export function acceptPersonalRequest(session: GameSession, requestId: string): GameSession {
   const request = session.pressure.requests.find((item) => item.id === requestId);
   if (!request || request.status !== "open" || request.dueAt <= session.timestamp) return session;
@@ -3164,226 +2916,48 @@ export function resolvePlayerCustody(session: GameSession, method: "submit-searc
 }
 
 
-function vacancyVenueAtPlayer(session: GameSession, vacancyId: string) {
-  const vacancy = session.jobs.work.vacancies.find((item) => item.id === vacancyId);
-  if (!vacancy) return null;
-  const venue = venueAtPlayer(session, vacancy.venueId);
-  return venue ? { vacancy, venue } : null;
-}
 
-export function interviewForPlayerWork(session: GameSession, vacancyId: string): GameSession {
-  const target = vacancyVenueAtPlayer(session, vacancyId);
-  const operation = target ? session.urban.venueOperations.operations.find((item) => item.venueId === target.venue.id) : undefined;
-  if (!target || operation?.status !== "operating") return session;
-  const work = interviewPlayerForVacancy(session.jobs.work, vacancyId, {
+export function performPlayerLoopAction(session: GameSession, action: PlayerLoopAction): GameSession {
+  const resolved = resolvePlayerLoopAction(session.playerLoop, action, {
     seed: session.world.meta.seed,
-    playerId: session.player.id,
     timestamp: session.timestamp,
-    venues: session.urban.venueOperations.registry.map((entry) => entry.venue),
-    venueOperations: session.urban.venueOperations,
-    playerHealth: session.player.condition.health,
-    playerFatigue: session.player.condition.fatigue,
-    playerStress: session.player.condition.stress
+    balance: session.player.balance,
+    health: session.player.condition.health,
+    fatigue: session.player.condition.fatigue,
+    stress: session.player.condition.stress
   });
-  if (work === session.jobs.work) return session;
-  const application = work.applications.find((item) => item.vacancyId === vacancyId);
-  return progressLife({ ...session, jobs: { ...session.jobs, work } }, 20, {
-    category: "work",
-    title: application?.status === "accepted" ? `Собеседование пройдено: ${target.venue.name}.` : `Отказ на собеседовании: ${target.venue.name}.`,
-    detail: application?.decisionText,
-    importance: application?.status === "accepted" ? 2 : 1,
-    stressDelta: application?.status === "accepted" ? -1 : 2,
-    activity: `Собеседование: ${target.venue.name}`,
-    suppressTimeEvent: true
-  });
-}
-
-export function signPlayerEmploymentContract(session: GameSession, vacancyId: string): GameSession {
-  const target = vacancyVenueAtPlayer(session, vacancyId);
-  const operation = target ? session.urban.venueOperations.operations.find((item) => item.venueId === target.venue.id) : undefined;
-  if (!target || operation?.status !== "operating") return session;
-  const work = signPlayerWorkContract(session.jobs.work, vacancyId, session.timestamp);
-  if (work === session.jobs.work) return session;
-  const contract = work.contracts.find((item) => item.id === work.activeContractId);
+  if (!resolved.ok) return session;
+  const activeJob = getPlayerJob(resolved.state);
   const progressed = progressLife({
     ...session,
-    jobs: { ...session.jobs, work },
-    urban: {
-      ...session.urban,
-      buildings: session.urban.buildings.map((building) => building.id === target.venue.buildingId ? { ...building, permanent: true } : building),
-      venues: session.urban.venues.map((venue) => venue.id === target.venue.id ? { ...venue, permanent: true } : venue),
-      venueOperations: {
-        ...session.urban.venueOperations,
-        registry: session.urban.venueOperations.registry.map((entry) => entry.venue.id === target.venue.id ? { ...entry, venue: { ...entry.venue, permanent: true } } : entry)
-      }
-    },
-    player: { ...session.player, occupation: contract?.title.toUpperCase() ?? session.player.occupation }
-  }, 8, {
-    category: "work",
-    title: `Контракт подписан: ${target.venue.name}.`,
-    detail: contract?.role === "courier"
-      ? `${contract.title} · оплата за выполненный заказ · свободный график.`
-      : `${contract?.title ?? target.vacancy.title} · ₵ ${contract?.wagePerHour ?? target.vacancy.wagePerHour}/ч · следующая смена ${contract ? new Date(contract.nextShiftAt).toISOString().slice(5, 16).replace("T", " · ") : "назначается"}.`,
-    importance: 2,
-    activity: `Оформление: ${target.venue.name}`,
-    suppressTimeEvent: true
-  });
-  return { ...progressed, player: { ...progressed.player, occupation: contract?.title.toUpperCase() ?? progressed.player.occupation } };
-}
-
-export function waitForPlayerWorkShift(session: GameSession, contractId: string): GameSession {
-  const contract = session.jobs.work.contracts.find((item) => item.id === contractId);
-  if (!contract || !venueAtPlayer(session, contract.venueId)) return session;
-  const minutes = waitMinutesUntilShift(session.jobs.work, contractId, session.timestamp);
-  if (minutes === null || minutes <= 0 || minutes > 18 * 60) return session;
-  return progressLife(session, minutes, {
-    category: "work",
-    title: `Начало смены: ${contract.title}.`,
-    detail: `Ожидание на рабочем месте · ${minutes} мин.`,
-    importance: 1,
-    fatigueDelta: Math.max(0, minutes / 240),
-    activity: `Ожидание смены: ${contract.title}`,
-    suppressTimeEvent: true
-  });
-}
-
-export function startPlayerEmploymentShift(session: GameSession, contractId: string): GameSession {
-  const contract = session.jobs.work.contracts.find((item) => item.id === contractId);
-  const venue = contract ? venueAtPlayer(session, contract.venueId) : undefined;
-  const operation = venue ? session.urban.venueOperations.operations.find((item) => item.venueId === venue.id) : undefined;
-  if (!contract || !venue || operation?.status !== "operating" || !venueIsOpenAt(venue, session.timestamp)) return session;
-  const work = startPlayerWorkShift(session.jobs.work, contractId, session.timestamp);
-  if (work === session.jobs.work) return session;
-  const shift = work.shifts.find((item) => item.id === work.activeShiftId);
-  const updatedContract = work.contracts.find((item) => item.id === contract.id);
-  if (!shift && updatedContract?.status === "dismissed") {
-    return {
-      ...session,
-      jobs: { ...session.jobs, work, courier: reconcileCourierEmployment(session.jobs.courier, false) },
-      player: { ...session.player, occupation: "UNEMPLOYED" },
-      currentActivity: "Безработный",
-      events: [
-        createEvent(session, session.timestamp, "work", `Увольнение: ${contract.title}.`, updatedContract.dismissalReason ?? "Контракт расторгнут работодателем.", 3),
-        ...session.events
-      ].slice(0, 100)
-    };
-  }
-  return {
-    ...session,
-    jobs: { ...session.jobs, work },
-    currentActivity: `Смена: ${contract.title}`,
-    events: [
-      createEvent(session, session.timestamp, "work", `Смена начата: ${contract.title}.`, shift?.lateMinutes ? `Опоздание ${shift.lateMinutes} мин.` : "Отметка выполнена вовремя.", shift?.lateMinutes && shift.lateMinutes >= 30 ? 2 : 1),
-      ...session.events
-    ].slice(0, 100)
-  };
-}
-
-export function performPlayerWorkTask(session: GameSession, taskId: string): GameSession {
-  const shift = session.jobs.work.shifts.find((item) => item.id === session.jobs.work.activeShiftId);
-  if (!shift || !venueAtPlayer(session, shift.venueId)) return session;
-  const result = completePlayerWorkTask(session.jobs.work, taskId, {
-    seed: session.world.meta.seed,
-    playerId: session.player.id,
-    timestamp: session.timestamp,
-    venues: session.urban.venueOperations.registry.map((entry) => entry.venue),
-    venueOperations: session.urban.venueOperations
-  });
-  if (!result) return session;
-  return progressLife({
-    ...session,
-    jobs: { ...session.jobs, work: result.state },
-    urban: { ...session.urban, venueOperations: result.venueOperations }
-  }, result.durationMinutes, {
-    category: "work",
-    title: result.message,
-    importance: 1,
-    fatigueDelta: Math.max(.2, result.durationMinutes / 45),
-    stressDelta: -0.5,
-    activity: "Рабочая задача",
-    suppressTimeEvent: true
-  });
-}
-
-export function finishPlayerEmploymentShift(session: GameSession): GameSession {
-  const shift = session.jobs.work.shifts.find((item) => item.id === session.jobs.work.activeShiftId);
-  if (!shift || !venueAtPlayer(session, shift.venueId)) return session;
-  const result = finishPlayerWorkShift(session.jobs.work, {
-    seed: session.world.meta.seed,
-    playerId: session.player.id,
-    timestamp: session.timestamp,
-    venues: session.urban.venueOperations.registry.map((entry) => entry.venue),
-    venueOperations: session.urban.venueOperations
-  });
-  if (!result) return session;
-  const contract = result.state.contracts.find((item) => item.id === shift.contractId);
-  const progressed = progressLife({
-    ...session,
-    jobs: { ...session.jobs, work: result.state },
-    urban: { ...session.urban, venueOperations: result.venueOperations }
-  }, Math.max(1, result.remainingMinutes), {
-    category: "work",
-    title: result.message,
-    detail: `Качество смены ${shift.quality}% · выполнено ${shift.completedTaskCount}/${shift.taskIds.length} задач.`,
-    importance: result.unpaid > 0 ? 2 : 1,
-    balanceDelta: result.pay,
-    balanceCounterpartyEntityId: `venue-account:${shift.venueId}`,
-    balanceReason: "wage",
-    fatigueDelta: 5,
-    stressDelta: result.unpaid > 0 ? 5 : -2,
-    activity: "Смена завершена",
+    playerLoop: resolved.state,
+    player: { ...session.player, occupation: activeJob?.title.toUpperCase() ?? "UNEMPLOYED" }
+  }, resolved.elapsedMinutes, {
+    category: resolved.balanceDelta !== 0 ? "finance" : action.kind === "street-fight" || action.kind === "boxing-fight" ? "local" : "personal",
+    title: resolved.title,
+    detail: resolved.detail,
+    importance: resolved.importance,
+    balanceDelta: resolved.balanceDelta,
+    balanceReason: action.kind === "work-shift"
+      ? "wage"
+      : action.kind === "train"
+        ? "education-service"
+        : action.kind === "buy-equipment"
+          ? "retail-service"
+          : resolved.balanceDelta !== 0
+            ? "player-action"
+            : undefined,
+    healthDelta: resolved.healthDelta,
+    fatigueDelta: resolved.fatigueDelta,
+    stressDelta: resolved.stressDelta,
+    activity: resolved.title,
     suppressTimeEvent: true
   });
   return {
     ...progressed,
-    player: { ...progressed.player, occupation: contract?.title.toUpperCase() ?? progressed.player.occupation }
+    playerLoop: resolved.state,
+    player: { ...progressed.player, occupation: activeJob?.title.toUpperCase() ?? "UNEMPLOYED" }
   };
-}
-
-export function resignPlayerEmploymentContract(session: GameSession, contractId: string): GameSession {
-  const contract = session.jobs.work.contracts.find((item) => item.id === contractId && (item.status === "active" || item.status === "warning"));
-  if (!contract || !venueAtPlayer(session, contract.venueId) || session.jobs.work.activeShiftId) return session;
-  const work = resignPlayerWorkContract(session.jobs.work, contractId, session.timestamp);
-  if (work === session.jobs.work) return session;
-  const courier = contract.role === "courier" ? reconcileCourierEmployment(session.jobs.courier, false) : session.jobs.courier;
-  return {
-    ...session,
-    jobs: { ...session.jobs, work, courier },
-    player: { ...session.player, occupation: "UNEMPLOYED" },
-    currentActivity: "Безработный",
-    events: [
-      createEvent(session, session.timestamp, "work", `Контракт расторгнут: ${contract.title}.`, contract.unpaidWages > 0 ? `Работодатель всё ещё должен ₵ ${contract.unpaidWages}.` : "Доступ к рабочим действиям закрыт.", 2),
-      ...session.events
-    ].slice(0, 100)
-  };
-}
-
-export function collectPlayerEmploymentDebt(session: GameSession, contractId: string): GameSession {
-  const contract = session.jobs.work.contracts.find((item) => item.id === contractId && item.unpaidWages > 0);
-  if (!contract || !venueAtPlayer(session, contract.venueId)) return session;
-  const result = collectPlayerWorkDebt(session.jobs.work, contractId, {
-    seed: session.world.meta.seed,
-    playerId: session.player.id,
-    timestamp: session.timestamp,
-    venues: session.urban.venueOperations.registry.map((entry) => entry.venue),
-    venueOperations: session.urban.venueOperations
-  });
-  if (!result) return session;
-  return progressLife({
-    ...session,
-    jobs: { ...session.jobs, work: result.state },
-    urban: { ...session.urban, venueOperations: result.venueOperations }
-  }, 5, {
-    category: "finance",
-    title: `Выплачен долг по зарплате: ₵ ${result.paid}.`,
-    detail: result.remaining > 0 ? `Остаток долга ₵ ${result.remaining}.` : "Работодатель полностью рассчитался.",
-    importance: result.remaining > 0 ? 2 : 1,
-    balanceDelta: result.paid,
-    balanceCounterpartyEntityId: `venue-account:${contract.venueId}`,
-    balanceReason: "wage",
-    activity: "Получение долга по зарплате",
-    suppressTimeEvent: true
-  });
 }
 
 export function buyFoodAtCurrentLocation(session: GameSession, productId: string): GameSession {

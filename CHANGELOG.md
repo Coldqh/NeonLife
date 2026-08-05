@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.50.0 — Simple Player Loop
+
+- replaced vacancies, interviews, contracts, scheduled shifts, per-shift tasks and courier stages with one deterministic `playerLoop`;
+- added one-click jobs that spend time, pay once and improve one explicit skill;
+- added one-click training for strength, endurance, boxing, shooting and streetwise;
+- added a small equipment catalog with outfit, armor, weapon and implant slots;
+- added instant street-fight resolution and a simple boxing rank, rating and fight record;
+- deleted the old work engine, courier engine, workplace panel and `GameSession.jobs` state;
+- migrated only useful legacy totals and skills into schema 43 while discarding removed runtime structures;
+- stopped player jobs from being duplicated as fake World Core employment tied to an arbitrary business;
+- hardened player-loop save normalization against invalid skills, equipment, counters and removed catalog entries;
+- corrected transaction reasons for wages, training, equipment and fight payouts;
+- kept city employment, businesses and autonomous simulation independent from the simplified player loop;
+- added player-loop, migration, no-duplicate-employment and UI regressions.
+
 ## 0.49.0 — Runtime Recovery
 
 - replaced repeated linear inventory and business lookups with one projection index shared by food, households, venues, production and World Core;

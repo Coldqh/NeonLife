@@ -1,6 +1,5 @@
 import { createWorldSession } from "../src/world/generation/createWorld";
-import { progressLife } from "../src/gameplay/life/lifeSimulation";
-import { interviewPlayerForVacancy, signPlayerWorkContract } from "../src/gameplay/jobs/work/workSystem";
+import { performPlayerLoopAction, progressLife } from "../src/gameplay/life/lifeSimulation";
 import { advanceWorldCoreState } from "../src/simulation/worldCore/worldCoreSystem";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -57,38 +56,22 @@ for (const transaction of newTransactions.filter((item) => item.idempotencyKey.i
   assert(!managed, `managed venue ${managed?.id ?? transaction.creditEntityId} was simulated twice`);
 }
 
-const vacancy = advanced.jobs.work.vacancies[0];
-assert(vacancy, "player vacancy is missing");
-const skilledWork = {
-  ...advanced.jobs.work,
-  skills: { service: 100, cooking: 100, medical: 100, technical: 100 }
-};
-const interviewed = interviewPlayerForVacancy(skilledWork, vacancy.id, {
+const employedPlayer = performPlayerLoopAction(advanced, { kind: "select-job", jobId: "store-clerk" });
+assert(employedPlayer.playerLoop.activeJobId === "store-clerk", "simple player job was not selected");
+const employedAdvanced = progressLife(employedPlayer, 6 * 60, { suppressTimeEvent: true });
+const consolidated = advanceWorldCoreState({
   seed,
-  playerId: advanced.player.id,
-  timestamp: advanced.timestamp,
-  venues: advanced.urban.venueOperations.registry.map((entry) => entry.venue),
-  venueOperations: advanced.urban.venueOperations,
-  playerHealth: 100,
-  playerFatigue: 0,
-  playerStress: 0
+  timestamp: employedAdvanced.timestamp,
+  playerId: employedAdvanced.player.id,
+  locations: employedAdvanced.world.locations,
+  organizations: employedAdvanced.world.organizations,
+  economy: employedAdvanced.economy,
+  population: employedAdvanced.population,
+  urban: employedAdvanced.urban,
+  kernel: employedAdvanced.kernel,
+  previous: employedAdvanced.worldCore
 });
-const signed = signPlayerWorkContract(interviewed, vacancy.id, advanced.timestamp);
-assert(signed.activeContractId, "player contract was not signed");
-const consolidatedWithPlayer = advanceWorldCoreState({
-  seed,
-  timestamp: advanced.timestamp,
-  playerId: advanced.player.id,
-  locations: advanced.world.locations,
-  organizations: advanced.world.organizations,
-  economy: advanced.economy,
-  population: advanced.population,
-  urban: advanced.urban,
-  work: signed,
-  kernel: advanced.kernel,
-  previous: advanced.worldCore
-});
-assert(consolidatedWithPlayer.employments.some((employment) => employment.sourcePlayerContractId === signed.activeContractId && employment.residentId === advanced.player.id), "player contract did not enter the unified labor registry");
+assert(!consolidated.employments.some((employment) => employment.playerControlled), "simple player job must not be duplicated in the world-core labor registry");
 
 console.log(JSON.stringify({
   businesses: advanced.worldCore.businesses.length,
@@ -97,5 +80,5 @@ console.log(JSON.stringify({
   kernelBusinessAccounts: advanced.worldCore.businesses.filter((business) => advanced.kernel.accounts.some((account) => account.entityId === business.id)).length,
   worldCoreRevision: advanced.worldCore.clock.revision,
   integrityWarnings: advanced.worldCore.integrity.warnings,
-  playerEmploymentUnified: true
+  playerEmploymentDuplicated: false
 }, null, 2));

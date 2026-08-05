@@ -1,44 +1,35 @@
 import type { GameSession } from "../../world/state/types";
 import { getFoodProduct } from "../../data/products/foodCatalog";
 import { getBusinessAtLocation, localPrice } from "../../gameplay/economy/localEconomy";
-import { getActiveCourierOrder } from "../../gameplay/jobs/courier/courierSystem";
 import { isLocationOpen } from "../../gameplay/travel/travelSystem";
+import { resolvePlayerLoopAction } from "../../gameplay/playerLoop/playerLoopSystem";
+import type { PlayerLoopAction } from "../../gameplay/playerLoop/types";
 import { currentPhysicalLocation, isPlayerInsideHome, isPlayerInsideLocation } from "../../gameplay/life/playerPresence";
 import {
-  acceptCourierOrder,
   acceptPersonalRequest,
+  assaultLocalActor,
   buyFoodAtCurrentLocation,
-  deliverCourierOrder,
+  completePersonalRequest,
   declinePersonalRequest,
   discardSpoiled,
-  completePersonalRequest,
-  collectPlayerEmploymentDebt,
-  finishPlayerEmploymentShift,
   eatFoodFromStorage,
   enterPlayerHomeUnit,
-  leaveBuildingUnit,
-  payPlayerObligationAtHome,
-  pickupCourierOrder,
-  interviewForPlayerWork,
-  joinVenueQueue,
-  leaveVenueQueue,
-  performPlayerWorkTask,
-  purchaseVenueOffer,
-  resignPlayerEmploymentContract,
-  signPlayerEmploymentContract,
-  startPlayerEmploymentShift,
-  receiveClinicCare,
-  shopliftVenueOffer,
-  robVenueRegister,
-  assaultLocalActor,
-  inspectPhysicalVehicleForTheft,
   forceOpenPhysicalVehicle,
   hotwirePhysicalVehicle,
+  inspectPhysicalVehicleForTheft,
+  joinVenueQueue,
+  leaveBuildingUnit,
+  leaveVenueQueue,
+  payPlayerObligationAtHome,
+  performPlayerLoopAction,
+  purchaseVenueOffer,
+  receiveClinicCare,
   resolvePlayerCustody,
+  robVenueRegister,
+  shopliftVenueOffer,
   sleepAtHome,
   sleepOutside,
-  storeCarriedFoodAtHome,
-  waitForPlayerWorkShift
+  storeCarriedFoodAtHome
 } from "../../gameplay/life/lifeSimulation";
 import type { NoticeTone } from "../shared/types";
 
@@ -51,9 +42,6 @@ export type LocalLifeAction =
   | { kind: "discard-spoiled" }
   | { kind: "sleep-home"; hours: number }
   | { kind: "sleep-outside"; hours: number }
-  | { kind: "accept-courier"; orderId: string }
-  | { kind: "pickup-courier" }
-  | { kind: "deliver-courier" }
   | { kind: "accept-personal-request"; requestId: string }
   | { kind: "decline-personal-request"; requestId: string }
   | { kind: "complete-personal-request"; requestId: string }
@@ -62,21 +50,14 @@ export type LocalLifeAction =
   | { kind: "join-venue-queue"; venueId: string }
   | { kind: "leave-venue-queue"; venueId: string }
   | { kind: "buy-venue-offer"; venueId: string; offerId: string }
-  | { kind: "interview-work"; vacancyId: string }
-  | { kind: "sign-work-contract"; vacancyId: string }
-  | { kind: "wait-work-shift"; contractId: string }
-  | { kind: "start-work-shift"; contractId: string }
-  | { kind: "perform-work-task"; taskId: string }
-  | { kind: "finish-work-shift" }
-  | { kind: "collect-work-debt"; contractId: string }
-  | { kind: "resign-work-contract"; contractId: string }
   | { kind: "shoplift-venue-offer"; venueId: string; offerId: string }
   | { kind: "rob-venue-register"; venueId: string }
   | { kind: "assault-actor"; actorId: string }
   | { kind: "inspect-vehicle-crime"; vehicleId: string }
   | { kind: "break-in-vehicle"; vehicleId: string }
   | { kind: "hotwire-vehicle"; vehicleId: string }
-  | { kind: "resolve-custody"; method: "submit-search" | "resist-search" | "attempt-escape" | "proceed-hearing" | "pay" | "serve" };
+  | { kind: "resolve-custody"; method: "submit-search" | "resist-search" | "attempt-escape" | "proceed-hearing" | "pay" | "serve" }
+  | PlayerLoopAction;
 
 export interface LocalLifeCommandResult {
   session: GameSession;
@@ -87,7 +68,12 @@ export interface LocalLifeCommandResult {
   moneyDelta: number;
 }
 
+function isPlayerLoopAction(action: LocalLifeAction): action is PlayerLoopAction {
+  return ["select-job", "leave-job", "work-shift", "train", "buy-equipment", "equip-item", "unequip-item", "street-fight", "boxing-fight"].includes(action.kind);
+}
+
 function execute(session: GameSession, action: LocalLifeAction): GameSession {
+  if (isPlayerLoopAction(action)) return performPlayerLoopAction(session, action);
   switch (action.kind) {
     case "enter-home-unit": return enterPlayerHomeUnit(session);
     case "leave-home-unit": return leaveBuildingUnit(session);
@@ -97,9 +83,6 @@ function execute(session: GameSession, action: LocalLifeAction): GameSession {
     case "discard-spoiled": return discardSpoiled(session);
     case "sleep-home": return sleepAtHome(session, action.hours);
     case "sleep-outside": return sleepOutside(session, action.hours);
-    case "accept-courier": return acceptCourierOrder(session, action.orderId);
-    case "pickup-courier": return pickupCourierOrder(session);
-    case "deliver-courier": return deliverCourierOrder(session);
     case "accept-personal-request": return acceptPersonalRequest(session, action.requestId);
     case "decline-personal-request": return declinePersonalRequest(session, action.requestId);
     case "complete-personal-request": return completePersonalRequest(session, action.requestId);
@@ -108,14 +91,6 @@ function execute(session: GameSession, action: LocalLifeAction): GameSession {
     case "join-venue-queue": return joinVenueQueue(session, action.venueId);
     case "leave-venue-queue": return leaveVenueQueue(session, action.venueId);
     case "buy-venue-offer": return purchaseVenueOffer(session, action.venueId, action.offerId);
-    case "interview-work": return interviewForPlayerWork(session, action.vacancyId);
-    case "sign-work-contract": return signPlayerEmploymentContract(session, action.vacancyId);
-    case "wait-work-shift": return waitForPlayerWorkShift(session, action.contractId);
-    case "start-work-shift": return startPlayerEmploymentShift(session, action.contractId);
-    case "perform-work-task": return performPlayerWorkTask(session, action.taskId);
-    case "finish-work-shift": return finishPlayerEmploymentShift(session);
-    case "collect-work-debt": return collectPlayerEmploymentDebt(session, action.contractId);
-    case "resign-work-contract": return resignPlayerEmploymentContract(session, action.contractId);
     case "shoplift-venue-offer": return shopliftVenueOffer(session, action.venueId, action.offerId);
     case "rob-venue-register": return robVenueRegister(session, action.venueId);
     case "assault-actor": return assaultLocalActor(session, action.actorId);
@@ -126,11 +101,22 @@ function execute(session: GameSession, action: LocalLifeAction): GameSession {
   }
 }
 
+function playerLoopRejection(session: GameSession, action: PlayerLoopAction): string {
+  return resolvePlayerLoopAction(session.playerLoop, action, {
+    seed: session.world.meta.seed,
+    timestamp: session.timestamp,
+    balance: session.player.balance,
+    health: session.player.condition.health,
+    fatigue: session.player.condition.fatigue,
+    stress: session.player.condition.stress
+  }).message;
+}
+
 function rejectionReason(session: GameSession, action: LocalLifeAction): string {
+  if (isPlayerLoopAction(action)) return playerLoopRejection(session, action);
   const location = currentPhysicalLocation(session);
   switch (action.kind) {
-    case "enter-home-unit":
-      return session.pressure.housingStatus === "evicted" ? "Доступ к жилью отозван" : "Нужно находиться внутри своего жилого блока";
+    case "enter-home-unit": return session.pressure.housingStatus === "evicted" ? "Доступ к жилью отозван" : "Нужно находиться внутри своего жилого блока";
     case "leave-home-unit": return "Ты не находишься внутри отдельного помещения";
     case "buy-food": {
       if (!location || !isPlayerInsideLocation(session, location.id)) return "Сначала войди в торговую точку";
@@ -145,24 +131,6 @@ function rejectionReason(session: GameSession, action: LocalLifeAction): string 
     case "discard-spoiled": return "Испорченных продуктов нет";
     case "sleep-home": return "Спать дома можно только внутри своего помещения";
     case "sleep-outside": return session.localScene.playerPosition.state === "outside" ? "Сейчас нельзя лечь спать" : "Сначала выйди на улицу";
-    case "accept-courier": {
-      const courierContract = session.jobs.work.contracts.find((contract) => contract.id === session.jobs.work.activeContractId && contract.role === "courier" && (contract.status === "active" || contract.status === "warning"));
-      if (!courierContract) return "Сначала устройся курьером во вкладке «Работа»";
-      const order = session.jobs.courier.orders.find((item) => item.id === action.orderId);
-      if (session.jobs.courier.activeOrderId) return "Сначала закончи текущую доставку";
-      if (!order || order.status !== "available") return "Заказ уже недоступен";
-      if (order.deadlineAt <= session.timestamp) return "Срок заказа уже истёк";
-      if (order.weightKg > session.jobs.courier.cargoCapacityKg) return "Груз тяжелее доступной грузоподъёмности";
-      return "Заказ нельзя принять из этой точки";
-    }
-    case "pickup-courier": {
-      const order = getActiveCourierOrder(session.jobs.courier);
-      return !order ? "Активного заказа нет" : order.status !== "accepted" ? "Груз уже забран" : "Сначала войди в точку выдачи";
-    }
-    case "deliver-courier": {
-      const order = getActiveCourierOrder(session.jobs.courier);
-      return !order ? "Активного заказа нет" : order.status !== "in-transit" ? "Сначала забери груз" : "Сначала войди в точку доставки";
-    }
     case "accept-personal-request": {
       const request = session.pressure.requests.find((item) => item.id === action.requestId);
       if (!request || request.status !== "open") return "Просьба уже недоступна";
@@ -190,14 +158,6 @@ function rejectionReason(session: GameSession, action: LocalLifeAction): string 
     case "join-venue-queue": return "Очередь закрыта, заведение недоступно или ты находишься не там";
     case "leave-venue-queue": return "Ты не стоишь в этой очереди";
     case "buy-venue-offer": return "Предложение недоступно, не хватает денег или ты находишься не у кассы";
-    case "interview-work": return "Собеседование доступно только в заведении с открытой вакансией";
-    case "sign-work-contract": return "Работодатель ещё не сделал предложение";
-    case "wait-work-shift": return "До смены слишком далеко или она уже началась";
-    case "start-work-shift": return "Нужно быть на рабочем месте в окно начала смены";
-    case "perform-work-task": return "Эта задача недоступна или нарушена очередь выполнения";
-    case "finish-work-shift": return "Сначала заверши все задачи смены";
-    case "collect-work-debt": return "Долг не погашен: работодатель без денег или ты не на рабочем месте";
-    case "resign-work-contract": return session.jobs.work.activeShiftId ? "Нельзя уволиться посреди смены" : "Расторгнуть контракт можно только на рабочем месте";
     case "shoplift-venue-offer": return "Товар недоступен для кражи или ты находишься слишком далеко";
     case "rob-venue-register": return "Касса недоступна или ты находишься не в заведении";
     case "assault-actor": return "Цель не находится рядом или уже недоступна";
@@ -226,9 +186,6 @@ function successMessage(action: LocalLifeAction, elapsedMinutes: number, moneyDe
     "discard-spoiled": "Испорченные продукты выброшены",
     "sleep-home": "Сон завершён",
     "sleep-outside": "Сон на улице завершён",
-    "accept-courier": "Заказ принят",
-    "pickup-courier": "Груз получен",
-    "deliver-courier": "Доставка завершена",
     "accept-personal-request": "Просьба принята",
     "decline-personal-request": "Просьба отклонена",
     "complete-personal-request": "Просьба выполнена",
@@ -237,14 +194,15 @@ function successMessage(action: LocalLifeAction, elapsedMinutes: number, moneyDe
     "join-venue-queue": "Ты занял место в очереди",
     "leave-venue-queue": "Ты вышел из очереди",
     "buy-venue-offer": "Покупка завершена",
-    "interview-work": "Собеседование завершено",
-    "sign-work-contract": "Контракт подписан",
-    "wait-work-shift": "Время до смены пропущено",
-    "start-work-shift": "Смена началась",
-    "perform-work-task": "Рабочая задача выполнена",
-    "finish-work-shift": "Смена закрыта",
-    "collect-work-debt": "Долг по зарплате получен",
-    "resign-work-contract": "Контракт расторгнут",
+    "select-job": "Работа выбрана",
+    "leave-job": "Работа оставлена",
+    "work-shift": "Смена завершена",
+    "train": "Тренировка завершена",
+    "buy-equipment": "Снаряжение куплено",
+    "equip-item": "Снаряжение надето",
+    "unequip-item": "Снаряжение снято",
+    "street-fight": "Уличная драка завершена",
+    "boxing-fight": "Боксёрский бой завершён",
     "shoplift-venue-offer": "Попытка кражи завершена",
     "rob-venue-register": "Попытка ограбления завершена",
     "assault-actor": "Нападение завершено",
@@ -264,12 +222,6 @@ export function applyLocalLifeAction(session: GameSession, action: LocalLifeActi
   }
   const elapsedMinutes = Math.max(0, Math.round((next.timestamp - session.timestamp) / 60_000));
   const moneyDelta = next.player.balance - session.player.balance;
-  return {
-    session: next,
-    ok: true,
-    message: successMessage(action, elapsedMinutes, moneyDelta),
-    tone: action.kind === "decline-personal-request" || action.kind === "shoplift-venue-offer" || action.kind === "rob-venue-register" || action.kind === "assault-actor" || action.kind === "break-in-vehicle" || action.kind === "hotwire-vehicle" ? "warn" : "good",
-    elapsedMinutes,
-    moneyDelta
-  };
+  const risky = ["street-fight", "boxing-fight", "shoplift-venue-offer", "rob-venue-register", "assault-actor", "break-in-vehicle", "hotwire-vehicle", "decline-personal-request"].includes(action.kind);
+  return { session: next, ok: true, message: successMessage(action, elapsedMinutes, moneyDelta), tone: risky ? "warn" : "good", elapsedMinutes, moneyDelta };
 }

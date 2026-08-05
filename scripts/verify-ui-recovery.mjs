@@ -48,7 +48,7 @@ check("physical actions tab exists", nearby.includes('id: "actions"') && nearby.
 check("physical actions are dispatched outside the view", app.includes("applyLocalLifeAction") && lifeActions.includes("LocalLifeAction"));
 check("home actions require physical presence", localActions.includes("isPlayerInsideHome") && localActions.includes("Войти в своё жильё"));
 check("food has carried and home storage presentation", localActions.includes("Переносимый груз") && localActions.includes("Пищевой шкаф"));
-check("courier loop exposes pickup and delivery", localActions.includes("Забрать груз") && localActions.includes("Передать груз"));
+check("legacy courier controls are absent", !localActions.includes("Забрать груз") && !localActions.includes("Передать груз"));
 check("clinic actions are physical", localActions.includes("Стабилизация") && localActions.includes("clinic-care"));
 check("nearby inspector is not a fixed overlay", !nearbyCss.includes("position: fixed"));
 check("map has city street and building modes", map.includes("insideBuilding ? \"interior\" : \"local\"") && map.includes("<GlobalCityMap") && map.includes("<LocalSectorMap") && map.includes("<BuildingInteriorMap") && mapTopBar.includes("onMode(\"interior\")"));
@@ -59,7 +59,7 @@ check("local map shows real stops", localMap.includes("session.transit.stops") &
 check("selection sheet has real route and entry actions", mapSheet.includes("onBuildRoute") && mapSheet.includes("onStartRoute") && mapSheet.includes("onEnterBuilding") && mapSheet.includes("onEnterVehicle"));
 check("profiles expose floors and physical actions", mapProfile.includes("FloorGrid") && mapProfile.includes("onMoveFloor") && mapProfile.includes("onEnterBuilding") && mapProfile.includes("onLeaveBuilding"));
 check("interior map exposes floors units rooms and exits", interiorMap.includes("FloorRail") && interiorMap.includes("floor-unit-grid") && interiorMap.includes("unit-plan") && interiorMap.includes("onEnterUnit") && interiorMap.includes("onEnterRoom") && interiorMap.includes("onLeaveBuilding"));
-check("building services dispatch real life actions", servicePanel.includes("buy-venue-offer") && servicePanel.includes("VenueWorkPanel") && servicePanel.includes("accept-courier") && servicePanel.includes("pickup-courier") && servicePanel.includes("deliver-courier"));
+check("building services dispatch physical venue actions only", servicePanel.includes("buy-venue-offer") && servicePanel.includes("join-venue-queue") && !servicePanel.includes("accept-courier") && !servicePanel.includes("VenueWorkPanel"));
 check("transit has walking scene", transit.includes('journey.phase === "walking"') && transit.includes("Дойти до остановки"));
 check("transit has explicit waiting scene", transit.includes("waitingMinutesRemaining") && transit.includes("Дождаться рейса"));
 check("transit lists every stop", transit.includes("segment.stopIds.map"));
@@ -77,7 +77,7 @@ for (const file of ["src/ui/theme/app-shell.css", "src/ui/theme/screens.css", "s
   check(`${file} braces balanced`, (text.match(/\{/g) ?? []).length === (text.match(/\}/g) ?? []).length);
 }
 
-for (const file of ["src/app/App.tsx", "src/app/screens/ProfileScreen.tsx", "src/app/screens/NearbyScreen.tsx", "src/app/screens/TransitJourneyScreen.tsx", "src/app/screens/MapScreen.tsx", "src/app/screens/WorkScreen.tsx", "src/app/map/VenueWorkPanel.tsx", "src/app/map/LocalSectorMap.tsx", "src/app/map/GlobalCityMap.tsx", "src/app/map/MapProfileOverlay.tsx", "src/app/map/MapSelectionSheet.tsx", "src/app/map/BuildingInteriorMap.tsx", "src/app/map/BuildingServicePanel.tsx"]) {
+for (const file of ["src/app/App.tsx", "src/app/screens/ProfileScreen.tsx", "src/app/screens/NearbyScreen.tsx", "src/app/screens/TransitJourneyScreen.tsx", "src/app/screens/MapScreen.tsx", "src/app/screens/WorkScreen.tsx", "src/app/map/LocalSectorMap.tsx", "src/app/map/GlobalCityMap.tsx", "src/app/map/MapProfileOverlay.tsx", "src/app/map/MapSelectionSheet.tsx", "src/app/map/BuildingInteriorMap.tsx", "src/app/map/BuildingServicePanel.tsx"]) {
   const lines = read(file).split(/\r?\n/).length;
   check(`${file} remains bounded`, lines <= 600);
 }

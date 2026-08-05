@@ -1,7 +1,6 @@
 import type { GameSession } from "../../world/state/types";
 import { FOOD_CATALOG, getFoodProduct } from "../../data/products/foodCatalog";
 import { canPrepare, getCarriedMassGrams, getFoodFreshness, type FoodStack } from "../../gameplay/food/foodSystem";
-import { getActiveCourierOrder } from "../../gameplay/jobs/courier/courierSystem";
 import { activeObligations } from "../../gameplay/pressure/pressureSystem";
 import { getBusinessAtLocation, localPrice } from "../../gameplay/economy/localEconomy";
 import { isLocationOpen } from "../../gameplay/travel/travelSystem";
@@ -9,12 +8,11 @@ import {
   currentPhysicalLocation,
   getPlayerHomeBuilding,
   getPlayerHomeUnit,
-  isCourierDispatchLocation,
   isPlayerInsideHome,
   isPlayerInsideLocation
 } from "../../gameplay/life/playerPresence";
 import type { LocalLifeAction } from "../actions/localLifeActions";
-import { formatGameShortDateTime, formatGameTime } from "../../core/time/gameTime";
+import { formatGameShortDateTime } from "../../core/time/gameTime";
 
 function stacksByProduct(stacks: FoodStack[], timestamp: number): Array<{ productId: string; quantity: number; freshness: string }> {
   const grouped = new Map<string, { quantity: number; freshness: string }>();
@@ -50,11 +48,6 @@ function clinicStatusLabel(value: string): string {
   return "закрыта";
 }
 
-function orderStage(status: string): string {
-  if (status === "accepted") return "Нужно забрать груз";
-  if (status === "in-transit") return "Груз на руках";
-  return status;
-}
 
 export function LocalActionsPanel({
   session,
@@ -79,10 +72,6 @@ export function LocalActionsPanel({
   const spoiledCount = [...session.life.food.carried, ...session.life.food.storage].filter((stack) => getFoodFreshness(stack, session.timestamp) === "spoiled").reduce((sum, stack) => sum + stack.quantity, 0);
   const shopStock = location && insideLocation ? session.life.food.shopStocks[location.id] : undefined;
   const business = location ? getBusinessAtLocation(session.economy, location.id) : undefined;
-  const courierContract = session.jobs.work.contracts.find((contract) => contract.id === session.jobs.work.activeContractId && contract.role === "courier" && (contract.status === "active" || contract.status === "warning"));
-  const activeOrder = courierContract ? getActiveCourierOrder(session.jobs.courier) : null;
-  const dispatch = session.world.locations.find((item) => isCourierDispatchLocation(item));
-  const atDispatch = Boolean(dispatch && isPlayerInsideLocation(session, dispatch.id));
   const obligations = activeObligations(session.pressure);
   const clinic = location?.type === "clinic" && insideLocation
     ? session.health.facilities.find((item) => item.locationId === location.id)
@@ -143,30 +132,6 @@ export function LocalActionsPanel({
         </section>
       ) : null}
 
-      {courierContract ? (
-        <section className="local-action-card">
-          <header><div><span>Работа</span><h2>Курьер MESHLINE</h2></div><strong>{Math.round(session.jobs.courier.rating)}%</strong></header>
-          {!activeOrder ? atDispatch ? (
-            <div className="local-action-list">{session.jobs.courier.orders.filter((order) => order.status === "available").slice(0, 4).map((order) => (
-              <article key={order.id}><div><strong>{order.code} · ₵ {order.payout}</strong><span>{order.cargoName} · {order.weightKg} кг · риск {order.risk}</span></div><button type="button" onClick={() => onAction({ kind: "accept-courier", orderId: order.id })}>Принять заказ</button></article>
-            ))}{!session.jobs.courier.orders.some((order) => order.status === "available") ? <p className="local-action-empty">Свободных заказов сейчас нет.</p> : null}</div>
-          ) : <div className="local-action-buttons"><button type="button" disabled={!dispatch} onClick={() => dispatch && onRouteTo(dispatch.id)}>Ехать в диспетчерскую</button></div> : (
-            <div className="courier-active">
-              <strong>{activeOrder.code} · {orderStage(activeOrder.status)}</strong>
-              <span>{activeOrder.cargoName} · срок {formatGameTime(activeOrder.deadlineAt)}</span>
-              {session.jobs.courier.carriedCargo ? <p>Груз: {session.jobs.courier.carriedCargo.weightKg} кг · состояние {session.jobs.courier.carriedCargo.condition}%</p> : null}
-              <div className="local-action-buttons">
-                {activeOrder.status === "accepted" ? isPlayerInsideLocation(session, activeOrder.pickupLocationId)
-                  ? <button type="button" onClick={() => onAction({ kind: "pickup-courier" })}>Забрать груз</button>
-                  : <button type="button" onClick={() => onRouteTo(activeOrder.pickupLocationId)}>Маршрут к грузу</button> : null}
-                {activeOrder.status === "in-transit" ? isPlayerInsideLocation(session, activeOrder.dropoffLocationId)
-                  ? <button type="button" onClick={() => onAction({ kind: "deliver-courier" })}>Передать груз</button>
-                  : <button type="button" onClick={() => onRouteTo(activeOrder.dropoffLocationId)}>Маршрут к клиенту</button> : null}
-              </div>
-            </div>
-          )}
-        </section>
-      ) : null}
 
       {clinic && location ? (
         <section className="local-action-card">

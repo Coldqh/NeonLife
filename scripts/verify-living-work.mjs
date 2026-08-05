@@ -1,34 +1,34 @@
 import fs from "node:fs";
+import path from "node:path";
 
-const checks = [
-  ["src/gameplay/jobs/work/types.ts", "PlayerWorkContractState"],
-  ["src/gameplay/jobs/work/types.ts", "courier"],
-  ["src/gameplay/jobs/work/types.ts", "PlayerWorkShiftState"],
-  ["src/gameplay/jobs/work/workSystem.ts", "createPlayerWorkState"],
-  ["src/gameplay/jobs/work/workSystem.ts", "interviewPlayerForVacancy"],
-  ["src/gameplay/jobs/work/workSystem.ts", "completePlayerWorkTask"],
-  ["src/gameplay/jobs/work/workSystem.ts", "finishPlayerWorkShift"],
-  ["src/gameplay/jobs/work/workSystem.ts", "resignPlayerWorkContract"],
-  ["src/gameplay/jobs/work/workSystem.ts", "collectPlayerWorkDebt"],
-  ["src/gameplay/life/lifeSimulation.ts", "interviewForPlayerWork"],
-  ["src/gameplay/life/lifeSimulation.ts", "startPlayerEmploymentShift"],
-  ["src/gameplay/life/lifeSimulation.ts", "balanceReason: \"wage\""],
-  ["src/app/screens/WorkScreen.tsx", "Реальная потребность бизнеса"],
-  ["src/app/App.tsx", 'screen === "work" ? <WorkScreen'],
-  ["src/app/map/VenueWorkPanel.tsx", "Поговорить с управляющим"],
-  ["src/app/map/VenueWorkPanel.tsx", "Закрыть смену и получить зарплату"],
-  ["src/app/map/VenueWorkPanel.tsx", "Потребовать выплату"],
-  ["src/app/map/VenueWorkPanel.tsx", "Расторгнуть контракт"],
-  ["src/app/actions/localLifeActions.ts", "perform-work-task"],
-  ["src/app/actions/localLifeActions.ts", "resign-work-contract"],
-  ["src/world/state/types.ts", "work: PlayerWorkState"],
-  ["src/ui/theme/work.css", ".venue-work-panel"]
-];
+const root = process.cwd();
+const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
+const exists = (file) => fs.existsSync(path.join(root, file));
+const checks = [];
+const check = (name, pass) => checks.push({ name, pass: Boolean(pass) });
 
-let passed = 0;
-for (const [file, token] of checks) {
-  const content = fs.readFileSync(file, "utf8");
-  if (!content.includes(token)) throw new Error(`${file} does not contain ${token}`);
-  passed += 1;
-}
-console.log(`Living Work UI checks: ${passed}/${checks.length}`);
+const system = read("src/gameplay/playerLoop/playerLoopSystem.ts");
+const types = read("src/gameplay/playerLoop/types.ts");
+const life = read("src/gameplay/life/lifeSimulation.ts");
+const screen = read("src/app/screens/WorkScreen.tsx");
+const actions = read("src/app/actions/localLifeActions.ts");
+const state = read("src/world/state/types.ts");
+const css = read("src/ui/theme/work.css");
+
+check("one canonical player loop exists", types.includes("PlayerLoopState") && state.includes("playerLoop: PlayerLoopState"));
+check("work is one-click", system.includes('action.kind === "work-shift"') && system.includes("durationMinutes") && screen.includes("Отработать смену"));
+check("training improves one explicit skill", system.includes('action.kind === "train"') && system.includes("addSkill(state, training.skill"));
+check("equipment has four simple slots", types.includes('"outfit" | "armor" | "weapon" | "implant"') && screen.includes("СНАРЯЖЕНИЕ"));
+check("street fights auto-resolve", system.includes('action.kind === "street-fight"') && screen.includes("УЛИЧНЫЕ ДРАКИ"));
+check("boxing career auto-resolves", system.includes('action.kind === "boxing-fight"') && screen.includes("Провести следующий бой"));
+check("all player-loop actions use one command", life.includes("performPlayerLoopAction") && actions.includes("isPlayerLoopAction"));
+check("old work engine is physically deleted", !exists("src/gameplay/jobs/work/workSystem.ts") && !exists("src/gameplay/jobs/work/types.ts"));
+check("old courier engine is physically deleted", !exists("src/gameplay/jobs/courier/courierSystem.ts"));
+check("old venue work panel is physically deleted", !exists("src/app/map/VenueWorkPanel.tsx"));
+check("runtime contains no legacy jobs state", !state.includes("jobs:") && !life.includes("session.jobs"));
+check("screen styles are balanced", css.includes(".work-screen") && (css.match(/\{/g) ?? []).length === (css.match(/\}/g) ?? []).length);
+
+const failed = checks.filter((item) => !item.pass);
+for (const item of checks) console.log(`${item.pass ? "PASS" : "FAIL"} ${item.name}`);
+console.log(`\n${checks.length - failed.length}/${checks.length} simple player-loop checks passed.`);
+if (failed.length) process.exit(1);

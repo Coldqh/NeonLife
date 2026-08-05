@@ -6,8 +6,7 @@ import { INITIAL_GAME_TIMESTAMP } from "../../core/time/gameTime";
 import { createInitialPlayer } from "../../gameplay/player/demoPlayer";
 import { createInitialFoodState } from "../../gameplay/food/foodSystem";
 import { createInitialHousing } from "../../gameplay/housing/housingSystem";
-import { createInitialCourierState } from "../../gameplay/jobs/courier/courierSystem";
-import { createPlayerWorkState } from "../../gameplay/jobs/work/workSystem";
+import { createPlayerLoopState } from "../../gameplay/playerLoop/playerLoopSystem";
 import { createLocalEconomy } from "../../gameplay/economy/localEconomy";
 import { createPressureState } from "../../gameplay/pressure/pressureSystem";
 import { createPrimaryContact } from "../../people/demoNpc";
@@ -453,13 +452,7 @@ export function createWorldSession(seed: string): GameSession {
     vehicles,
     food: foodState
   });
-  const work = createPlayerWorkState({
-    seed,
-    playerId: player.id,
-    timestamp: INITIAL_GAME_TIMESTAMP,
-    venues: urban.venueOperations.registry.map((entry) => entry.venue),
-    venueOperations: urban.venueOperations
-  });
+  const playerLoop = createPlayerLoopState(seed, INITIAL_GAME_TIMESTAMP);
   const initialWorldCore = createWorldCoreState({
     seed,
     timestamp: INITIAL_GAME_TIMESTAMP,
@@ -469,7 +462,6 @@ export function createWorldSession(seed: string): GameSession {
     economy,
     population,
     urban,
-    work,
     kernel: syncedKernel
   });
   const productInventoryBase = createProductInventoryState({
@@ -532,7 +524,6 @@ export function createWorldSession(seed: string): GameSession {
     economy: initialBusinessEconomy.economy,
     population,
     urban: initialBusinessEconomy.urban,
-    work,
     kernel: coreKernel,
     previous: businessWorldCore
   }, businessWorldCore);
@@ -596,9 +587,6 @@ export function createWorldSession(seed: string): GameSession {
       food: inventoryProjection.food,
       lastSleepAt: null
     },
-    jobs: {
-      courier: createInitialCourierState(seed, INITIAL_GAME_TIMESTAMP, locations, people.people, economy.businesses),
-      work: coreProjection.work
-    }
+    playerLoop
   };
 }

@@ -1,6 +1,6 @@
 import type { GameSession } from "../../world/state/types";
 import { formatGameDateLong, formatGameShortDateTime } from "../../core/time/gameTime";
-import { getActiveCourierOrder } from "../../gameplay/jobs/courier/courierSystem";
+import { boxingRankLabel, getPlayerJob } from "../../gameplay/playerLoop/playerLoopSystem";
 import { activeObligations, activeRequests } from "../../gameplay/pressure/pressureSystem";
 import { Icon } from "../../ui/components/Icons";
 import type { GameScreen } from "../shared/types";
@@ -60,17 +60,14 @@ function timeLeftLabel(timestamp: number, target: number): string {
 function priorityFor(session: GameSession): ProfilePriority {
   const condition = session.player.condition;
   const obligation = activeObligations(session.pressure)[0];
-  const contract = session.jobs.work.contracts.find((item) => item.id === session.jobs.work.activeContractId && (item.status === "active" || item.status === "warning"));
-  const activeOrder = contract?.role === "courier" ? getActiveCourierOrder(session.jobs.courier) : undefined;
+  const job = getPlayerJob(session.playerLoop);
 
   if (condition.health <= 35) return { tone: "danger", eyebrow: "Здоровье", title: "Нужна медицинская помощь", detail: `Состояние ${percent(condition.health)}%. Найди открытую клинику.`, actionLabel: "Места рядом", route: "nearby" };
   if (condition.hunger >= 78) return { tone: "danger", eyebrow: "Голод", title: "Нужно поесть", detail: `Голод ${percent(condition.hunger)}%. Проверь еду в сумке или торговые точки.`, actionLabel: "Открыть действия", route: "nearby" };
   if (condition.fatigue >= 82) return { tone: "warn", eyebrow: "Усталость", title: "Нужно добраться до сна", detail: `Усталость ${percent(condition.fatigue)}%. Ошибки и риски уже растут.`, actionLabel: "Маршрут домой", route: "map", targetLocationId: session.life.housing.locationId };
-  if (activeOrder) return { tone: minutesUntil(session.timestamp, activeOrder.deadlineAt) < 60 ? "danger" : "warn", eyebrow: "Курьерский заказ", title: activeOrder.status === "accepted" ? "Забери груз" : "Доставь груз клиенту", detail: `${activeOrder.code} · осталось ${timeLeftLabel(session.timestamp, activeOrder.deadlineAt)}.`, actionLabel: "Продолжить маршрут", route: "map" };
   if (obligation && minutesUntil(session.timestamp, obligation.dueAt) <= 24 * 60) return { tone: obligation.status === "overdue" || obligation.status === "defaulted" ? "danger" : "warn", eyebrow: "Платёж", title: `${obligation.creditorName}: ₵ ${credits(obligation.amount)}`, detail: `${obligation.code} · ${timeLeftLabel(session.timestamp, obligation.dueAt)} · ${obligation.consequence}`, actionLabel: "Домашний терминал", route: "map", targetLocationId: session.life.housing.locationId };
-  if (contract && contract.role !== "courier" && minutesUntil(session.timestamp, contract.nextShiftAt) <= 8 * 60) return { tone: minutesUntil(session.timestamp, contract.nextShiftAt) < 90 ? "warn" : "neutral", eyebrow: "Работа", title: `Смена: ${contract.title}`, detail: `${formatGameShortDateTime(contract.nextShiftAt)} · осталось ${timeLeftLabel(session.timestamp, contract.nextShiftAt)}.`, actionLabel: "Открыть контракт", route: "work" };
-  if (!contract) return { tone: "neutral", eyebrow: "Доход", title: "Постоянной работы нет", detail: "Выбери профессию, пройди собеседование и подпиши контракт.", actionLabel: "Смотреть вакансии", route: "work" };
-  return { tone: "good", eyebrow: "Текущая цель", title: "Срочных угроз нет", detail: contract.role === "courier" ? "Выбери заказ вручную в диспетчерской." : "Можно заняться маршрутом, запасами или связями.", actionLabel: contract.role === "courier" ? "Открыть работу" : "Открыть карту", route: contract.role === "courier" ? "work" : "map" };
+  if (!job) return { tone: "neutral", eyebrow: "Доход", title: "Постоянной работы нет", detail: "Выбери профессию и выполняй смену одной кнопкой.", actionLabel: "Открыть развитие", route: "work" };
+  return { tone: "good", eyebrow: "Развитие", title: job.title, detail: "Можно отработать смену, тренироваться, купить снаряжение или провести бой.", actionLabel: "Открыть развитие", route: "work" };
 }
 
 export function ProfileScreen({ session, onOpen, onRouteTo }: { session: GameSession; onOpen: (screen: GameScreen) => void; onRouteTo: (locationId: string) => void }) {
@@ -86,16 +83,13 @@ export function ProfileScreen({ session, onOpen, onRouteTo }: { session: GameSes
   const homeAddress = session.urban.householdAddresses.find((address) => address.householdId === playerHousehold?.id);
   const homeUnit = session.urban.units.find((item) => item.id === homeAddress?.unitId);
   const vehicle = session.vehicles.vehicles.find((item) => session.vehicles.player.ownedVehicleIds.includes(item.id));
-  const contract = session.jobs.work.contracts.find((item) => item.id === session.jobs.work.activeContractId && (item.status === "active" || item.status === "warning"));
-  const activeShift = session.jobs.work.shifts.find((item) => item.id === session.jobs.work.activeShiftId);
-  const activeOrder = contract?.role === "courier" ? getActiveCourierOrder(session.jobs.courier) : undefined;
+  const job = getPlayerJob(session.playerLoop);
   const warrants = session.playerCrime.warrants.filter((item) => item.status !== "closed" && item.status !== "arrested");
   const priority = priorityFor(session);
   const obligations = activeObligations(session.pressure);
   const requests = activeRequests(session.pressure);
   const latestEvents = session.events.filter((event) => event.importance >= 2).slice().sort((left, right) => right.timestamp - left.timestamp).slice(0, 5);
   const completedRequests = session.pressure.summaries.reduce((sum, item) => sum + item.requestsCompleted, 0) + session.pressure.currentDay.requestsCompleted;
-  const completedShifts = session.jobs.work.contracts.reduce((sum, item) => sum + item.completedShifts, 0);
   const firstRequest = requests[0];
   const firstRequestPerson = firstRequest ? session.people.people.find((person) => person.id === firstRequest.personId) : undefined;
   const firstRequestTargetId = firstRequestPerson?.currentLocationId ?? firstRequest?.targetLocationId;
@@ -105,8 +99,8 @@ export function ProfileScreen({ session, onOpen, onRouteTo }: { session: GameSes
   const metrics = [["Здоровье", player.condition.health, false], ["Голод", player.condition.hunger, true], ["Усталость", player.condition.fatigue, true], ["Стресс", player.condition.stress, true]] as const;
   const historyStats = [
     { value: livedDays(session), label: "дней прожито" },
-    { value: credits(session.jobs.work.totalEarned + session.jobs.courier.totalEarnings), label: "кредитов заработано" },
-    contract?.role === "courier" ? { value: session.jobs.courier.completedDeliveries, label: "доставок завершено" } : { value: completedShifts, label: "смен завершено" },
+    { value: credits(session.playerLoop.totalEarned), label: "кредитов заработано" },
+    { value: session.playerLoop.shiftsWorked, label: "смен завершено" },
     { value: completedRequests, label: "просьб выполнено" }
   ];
 
@@ -132,8 +126,8 @@ export function ProfileScreen({ session, onOpen, onRouteTo }: { session: GameSes
 
         <div className="profile-grid">
           <section className="profile-section"><header><div><span>ТЕКУЩАЯ ЖИЗНЬ</span><h2>Статус</h2></div><button type="button" className="profile-section__link" onClick={() => onOpen("work")}>Работа</button></header><div className="profile-facts">
-            <article><span>Профессия</span><strong>{contract?.title ?? "Безработный"}</strong><p>{contract?.role === "courier" ? `${session.jobs.courier.completedDeliveries} доставок · рейтинг ${Math.round(session.jobs.courier.rating)}%` : contract ? `₵ ${credits(contract.wagePerHour)}/ч · смен ${contract.completedShifts}` : "Активного контракта нет"}</p></article>
-            <article><span>{contract?.role === "courier" ? "Заказ" : "Смена"}</span><strong>{activeOrder?.code ?? (activeShift ? "Идёт сейчас" : contract?.role === "courier" ? "Не выбран" : contract ? formatGameShortDateTime(contract.nextShiftAt) : "Не назначена")}</strong><p>{activeOrder ? `₵ ${credits(activeOrder.payout)} · ${timeLeftLabel(session.timestamp, activeOrder.deadlineAt)}` : contract?.role === "courier" ? "Заказы принимаются вручную" : contract ? `Предупреждения ${contract.warningCount}/3` : "Открой вакансии"}</p></article>
+            <article><span>Профессия</span><strong>{job?.title ?? "Безработный"}</strong><p>{job ? `~₵ ${credits(job.basePay)} за смену · смен ${session.playerLoop.shiftsWorked}` : "Работа выбирается одной кнопкой"}</p></article>
+            <article><span>Бокс</span><strong>{boxingRankLabel(session.playerLoop.boxingRank)}</strong><p>Рейтинг {session.playerLoop.boxingRating} · {session.playerLoop.boxingWins}-{session.playerLoop.boxingLosses}</p></article>
             <article><span>Правовой риск</span><strong>{warrants.length ? `${warrants.length} активн.` : "Розыска нет"}</strong><p>Розыск {percent(session.playerCrime.heat)}% · преступлений {session.playerCrime.totals.crimesCommitted}</p></article>
             <article><span>Основной контакт</span><strong>{session.primaryContact?.name ?? "Не установлен"}</strong><p>{session.primaryContact?.role ?? "Связь не сформирована"}</p></article>
           </div></section>

@@ -24,7 +24,7 @@ const life = read("src/gameplay/life/lifeSimulation.ts");
 
 check("profile is a dossier, not a position debugger", profile.includes("ЛИЧНОЕ ДОСЬЕ") && profile.includes("СОБСТВЕННОСТЬ") && profile.includes("ИСТОРИЯ МИРА"));
 check("profile removes spatial exit actions", !profile.includes("onLeaveBuilding") && !profile.includes("onLeaveVehicle") && !profile.includes("Количество ключей"));
-check("profile uses only real session data", !profile.includes("Псевдо") && !profile.includes("fake") && profile.includes("session.jobs.courier.completedDeliveries"));
+check("profile uses only real session data", !profile.includes("Псевдо") && !profile.includes("fake") && profile.includes("session.playerLoop.boxingWins"));
 check("profile merges life and former more screen without owning physical actions", profile.includes("activeObligations") && profile.includes("ИСТОРИЯ МИРА") && !profile.includes("<WorkScreen") && !profile.includes("onLeaveBuilding") && app.includes('<WorkScreen session={session}') && app.includes("onLeaveBuilding={()") && app.includes("onLeaveVehicle={()"));
 check("map is an immersive full stage", mapScreen.includes("map-screen--immersive") && mapScreen.includes("map-viewport") && shell.includes('screen === "map" ? null : <GameHeader') && mapCss.includes(".map-screen--immersive"));
 check("map uses functional city street and building hierarchy", mapScreen.includes("<MapTopBar") && mapScreen.includes("<GlobalCityMap") && mapScreen.includes("<LocalSectorMap") && mapScreen.includes("<BuildingInteriorMap") && mapTopBar.includes("onMode") && mapTopBar.includes("Город") && mapTopBar.includes("Улица") && mapTopBar.includes("Здание"));

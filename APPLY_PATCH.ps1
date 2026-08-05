@@ -9,56 +9,39 @@ param(
 $ErrorActionPreference = "Stop"
 $PatchDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Manifest = Join-Path $PatchDir "PATCH_FILES.txt"
+$DeleteManifest = Join-Path $PatchDir "DELETE_FILES.txt"
 
-if (-not (Test-Path $ProjectRoot)) {
-  throw "Project root not found: $ProjectRoot"
-}
-if (-not (Test-Path (Join-Path $ProjectRoot "package.json"))) {
-  throw "package.json not found in project root: $ProjectRoot"
-}
-if (-not (Test-Path $Manifest)) {
-  throw "PATCH_FILES.txt not found next to APPLY_PATCH.ps1"
-}
+if (-not (Test-Path $ProjectRoot)) { throw "Project root not found: $ProjectRoot" }
+if (-not (Test-Path (Join-Path $ProjectRoot "package.json"))) { throw "package.json not found in project root: $ProjectRoot" }
+if (-not (Test-Path $Manifest)) { throw "PATCH_FILES.txt not found next to APPLY_PATCH.ps1" }
 
 $packageJson = Get-Content (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json
-if ($packageJson.version -ne "0.48.0") {
-  Write-Warning "Expected base version 0.48.0, found $($packageJson.version)."
-}
+if ($packageJson.version -ne "0.49.0") { Write-Warning "Expected base version 0.49.0, found $($packageJson.version)." }
 
 $files = Get-Content $Manifest | Where-Object {
-  $_ -and -not $_.StartsWith("NEON LIFE") -and $_ -ne "APPLY_PATCH.ps1" -and $_ -ne "PATCH_FILES.txt"
+  $_ -and -not $_.StartsWith("NEON LIFE") -and $_ -ne "APPLY_PATCH.ps1" -and $_ -ne "PATCH_FILES.txt" -and $_ -ne "DELETE_FILES.txt"
 }
-
-$index = 0
 foreach ($relativePath in $files) {
-  $index += 1
   $source = Join-Path $PatchDir ($relativePath -replace "/", [IO.Path]::DirectorySeparatorChar)
   $target = Join-Path $ProjectRoot ($relativePath -replace "/", [IO.Path]::DirectorySeparatorChar)
-  if (-not (Test-Path $source)) {
-    throw "Patch file missing: $relativePath"
-  }
-  $targetDir = Split-Path -Parent $target
-  New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
-  Write-Host "[$index/$($files.Count)] $relativePath"
+  if (-not (Test-Path $source)) { throw "Patch file missing: $relativePath" }
+  New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
   Copy-Item -Path $source -Destination $target -Force
 }
 
-$updatedPackage = Get-Content (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json
-if ($updatedPackage.version -ne "0.49.0") {
-  throw "Patch copied, but package.json version is $($updatedPackage.version), expected 0.49.0"
+if (Test-Path $DeleteManifest) {
+  foreach ($relativePath in (Get-Content $DeleteManifest | Where-Object { $_ })) {
+    $target = Join-Path $ProjectRoot ($relativePath -replace "/", [IO.Path]::DirectorySeparatorChar)
+    if (Test-Path $target) { Remove-Item $target -Force }
+  }
 }
 
-Write-Host "NEON LIFE v0.49.0 RUNTIME RECOVERY applied successfully." -ForegroundColor Green
+$updatedPackage = Get-Content (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json
+if ($updatedPackage.version -ne "0.50.0") { throw "Patch copied, but package.json version is $($updatedPackage.version), expected 0.50.0" }
+Write-Host "NEON LIFE v0.50.0 SIMPLE PLAYER LOOP applied successfully." -ForegroundColor Green
 
 if ($RunChecks) {
   Push-Location $ProjectRoot
-  try {
-    npm install
-    npm run typecheck
-    npm run test
-    npm run build
-  }
-  finally {
-    Pop-Location
-  }
+  try { npm install; npm test; npm run build }
+  finally { Pop-Location }
 }

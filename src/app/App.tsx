@@ -213,7 +213,7 @@ export default function App() {
             onStreetIncidentAction={(incidentId, action) => setSession((current) => actOnStreetIncident(current, incidentId, action))}
           />
         ) : null}
-        {screen === "work" ? <WorkScreen session={session} onOpenVenue={openVenueOnMap} /> : null}
+        {screen === "work" ? <WorkScreen session={session} onAction={runLocalLifeAction} /> : null}
         {screen === "crime" ? <CrimeScreen session={session} onAction={runLocalLifeAction} /> : null}
         {screen === "nearby" ? (
           <NearbyScreen

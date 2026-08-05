@@ -1,11 +1,9 @@
 import { getFoodProduct } from "../../data/products/foodCatalog";
 import { getCarriedMassGrams } from "../../gameplay/food/foodSystem";
-import { getActiveCourierOrder } from "../../gameplay/jobs/courier/courierSystem";
-import { currentPhysicalLocation, isCourierDispatchLocation, isPlayerInsideHome, isPlayerInsideLocation } from "../../gameplay/life/playerPresence";
+import { currentPhysicalLocation, isPlayerInsideHome, isPlayerInsideLocation } from "../../gameplay/life/playerPresence";
 import type { GameSession } from "../../world/state/types";
 import { venueCategoryLabel, venueIsOpen } from "./mapUi";
 import type { LocalLifeAction } from "../actions/localLifeActions";
-import { VenueWorkPanel } from "./VenueWorkPanel";
 
 function venueStatusLabel(status: GameSession["urban"]["venueOperations"]["operations"][number]["status"] | undefined): string {
   if (status === "insolvent") return "БАНКРОТ";
@@ -27,9 +25,6 @@ export function BuildingServicePanel({
 }) {
   const location = currentPhysicalLocation(session);
   const insideLocation = Boolean(location && isPlayerInsideLocation(session, location.id));
-  const atDispatch = Boolean(location && insideLocation && isCourierDispatchLocation(location));
-  const courierContract = session.jobs.work.contracts.find((contract) => contract.id === session.jobs.work.activeContractId && contract.role === "courier" && (contract.status === "active" || contract.status === "warning"));
-  const activeOrder = courierContract ? getActiveCourierOrder(session.jobs.courier) : null;
   const carriedMass = getCarriedMassGrams(session.life.food);
   const insideHome = isPlayerInsideHome(session);
   const venue = session.urban.venues.find((item) => item.unitId === session.localScene.playerPosition.unitId);
@@ -95,31 +90,6 @@ export function BuildingServicePanel({
         </section>
       ) : null}
 
-      {venue ? <VenueWorkPanel session={session} venueId={venue.id} onAction={onAction} /> : null}
-
-      {atDispatch ? (
-        <section>
-          <h3>ДИСПЕТЧЕРСКАЯ MESHLINE</h3>
-          {!courierContract ? <p className="building-service-empty">Доступ к заказам закрыт. Курьер — обычная профессия: сначала пройди собеседование и подпиши контракт.</p> : !activeOrder ? (
-            <div className="building-service-list">
-              {session.jobs.courier.orders.filter((order) => order.status === "available").slice(0, 4).map((order) => (
-                <article key={order.id}>
-                  <div><strong>{order.code} · ₵ {order.payout}</strong><span>{order.cargoName} · {order.weightKg} кг · риск {order.risk}</span></div>
-                  <button type="button" onClick={() => onAction({ kind: "accept-courier", orderId: order.id })}>Принять заказ</button>
-                </article>
-              ))}
-            </div>
-          ) : <p>Активный заказ: {activeOrder.code} · {activeOrder.status}.</p>}
-        </section>
-      ) : null}
-
-      {activeOrder && location && insideLocation && activeOrder.pickupLocationId === location.id && activeOrder.status === "accepted" ? (
-        <section><h3>ЗОНА ВЫДАЧИ</h3><div className="building-service-actions"><button type="button" onClick={() => onAction({ kind: "pickup-courier" })}>Забрать груз {activeOrder.code}</button></div></section>
-      ) : null}
-
-      {activeOrder && location && insideLocation && activeOrder.dropoffLocationId === location.id && activeOrder.status === "in-transit" ? (
-        <section><h3>ТОЧКА ПЕРЕДАЧИ</h3><div className="building-service-actions"><button type="button" onClick={() => onAction({ kind: "deliver-courier" })}>Передать груз {activeOrder.code}</button></div></section>
-      ) : null}
 
       {insideHome ? (
         <section>
@@ -132,7 +102,7 @@ export function BuildingServicePanel({
         </section>
       ) : null}
 
-      {!venue && !atDispatch && !insideHome && !(activeOrder && location && [activeOrder.pickupLocationId, activeOrder.dropoffLocationId].includes(location.id)) ? <p className="building-service-empty">В этой зоне пока нет доступного сервиса.</p> : null}
+      {!venue && !insideHome ? <p className="building-service-empty">В этой зоне пока нет доступного сервиса.</p> : null}
     </aside>
   );
 }

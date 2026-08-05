@@ -7,8 +7,7 @@ import type { HumanNetworkState } from "../../people/network/types";
 import type { DistrictPulseState } from "../city/districtPulse";
 import type { FoodState } from "../../gameplay/food/foodSystem";
 import type { HousingState } from "../../gameplay/housing/housingSystem";
-import type { CourierState } from "../../gameplay/jobs/courier/courierSystem";
-import type { PlayerWorkState } from "../../gameplay/jobs/work/types";
+import type { PlayerLoopState } from "../../gameplay/playerLoop/types";
 import type { PressureState } from "../../gameplay/pressure/types";
 import type { LocalEconomyState } from "../../gameplay/economy/types";
 import type { PopulationState } from "../../simulation/population/types";
@@ -153,8 +152,5 @@ export interface GameSession {
   currentActivity: string;
   district: DistrictPulseState;
   life: LifeState;
-  jobs: {
-    courier: CourierState;
-    work: PlayerWorkState;
-  };
+  playerLoop: PlayerLoopState;
 }

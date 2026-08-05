@@ -1,6 +1,5 @@
 import type { EntityId } from "../../core/ids/entityId";
 import type { LocalEconomyState, SupplyClass } from "../../gameplay/economy/types";
-import type { PlayerWorkState } from "../../gameplay/jobs/work/types";
 import type { KernelTransactionDraft, SimulationKernelState } from "../kernel/types";
 import type { PopulationState, ShiftType } from "../population/types";
 import type { UrbanFabricState, VenueCategory, VenueOperatingStatus } from "../urban/types";
@@ -41,7 +40,6 @@ export interface WorldCoreEmploymentState {
   residentId: EntityId;
   businessId: EntityId;
   sourceEmploymentId?: EntityId;
-  sourcePlayerContractId?: EntityId;
   role: string;
   status: WorldCoreEmploymentStatus;
   wagePerDay: number;
@@ -91,7 +89,6 @@ export interface WorldCoreInput {
   economy: LocalEconomyState;
   population: PopulationState;
   urban: UrbanFabricState;
-  work: PlayerWorkState;
   kernel?: SimulationKernelState;
   previous?: WorldCoreState;
 }
@@ -101,7 +98,6 @@ export interface WorldCoreProjectionResult {
   economy: LocalEconomyState;
   population: PopulationState;
   urban: UrbanFabricState;
-  work: PlayerWorkState;
 }
 
 export interface WorldCoreKernelBridgeResult {

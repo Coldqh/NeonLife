@@ -4,7 +4,6 @@ import type { FoodState } from "../food/foodSystem";
 import type { DistrictPulseState } from "../../world/city/districtPulse";
 import type { LocationState } from "../../world/state/types";
 import type { HumanNetworkState, PersonState } from "../../people/network/types";
-import type { CourierOrder } from "../jobs/courier/courierSystem";
 import type { PopulationState } from "../../simulation/population/types";
 import { kernelSystemEntityId } from "../../simulation/kernel/simulationKernel";
 import type { KernelTransactionDraft } from "../../simulation/kernel/types";
@@ -348,46 +347,6 @@ export function registerBusinessSale(state: LocalEconomyState, locationId: strin
     businesses: state.businesses.map((business) => business.locationId === locationId
       ? { ...business, cash: business.cash + revenue, revenueToday: business.revenueToday + revenue, demand: clamp(business.demand + 2), stock: clamp(business.stock - 1) }
       : business)
-  };
-}
-
-export interface CourierSupplyResult {
-  state: LocalEconomyState;
-  food: FoodState;
-}
-
-export function applyCourierSupplyDelivery(
-  state: LocalEconomyState,
-  food: FoodState,
-  order: CourierOrder,
-  payout: number,
-  condition: number,
-  lateMinutes: number
-): CourierSupplyResult {
-  if (!order.businessId) return { state, food };
-  const quality = clamp(Math.round(condition - Math.min(45, lateMinutes)), 0, 100);
-  const stockGain = Math.max(2, Math.round(quality / 5));
-  const target = state.businesses.find((business) => business.id === order.businessId);
-  return {
-    food: target ? restockFoodStock(food, target.locationId, stockGain) : food,
-    state: {
-      ...state,
-      businesses: state.businesses.map((business) => {
-        if (business.id !== order.businessId) return business;
-        const stock = clamp(business.stock + stockGain);
-        const cash = business.cash - payout;
-        const status = statusFor(stock, business.staffing, cash);
-        return {
-          ...business,
-          cash,
-          stock,
-          supplierCostsToday: business.supplierCostsToday + payout,
-          shortage: stock < 42,
-          status,
-          priceIndex: priceIndexFor(stock, business.demand, status, 0)
-        };
-      })
-    }
   };
 }
 

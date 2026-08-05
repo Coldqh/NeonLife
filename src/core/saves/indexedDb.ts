@@ -68,6 +68,7 @@ function isCurrentGameSession(value: unknown): value is GameSession {
     && typeof value.timestamp === "number"
     && isRecord(value.world)
     && isRecord(value.player)
+    && isRecord(value.playerLoop)
     && Array.isArray(value.events)
     && isRecord(value.district);
 }

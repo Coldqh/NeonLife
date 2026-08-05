@@ -24,7 +24,7 @@ check("units are selectable and enterable", interior.includes("floor-unit-grid")
 check("rooms are mapped and enterable", interior.includes("unit-plan") && interior.includes("onEnterRoom(selectedRoomId)") && interior.includes("onLeaveRoom"));
 check("building exit remains physical", interior.includes("onLeaveBuilding") && app.includes("leaveLocalBuilding"));
 check("venue service point is a real panel", interior.includes("BuildingServicePanel") && interior.includes("building-service-node"));
-check("venue courier and home actions are wired", ["buy-venue-offer", "join-venue-queue", "accept-courier", "pickup-courier", "deliver-courier", "sleep-home"].every((token) => service.includes(token)));
+check("venue and home actions are wired without duplicate job controls", ["buy-venue-offer", "join-venue-queue", "sleep-home"].every((token) => service.includes(token)) && !service.includes("accept-courier"));
 check("player position records interior hierarchy", localTypes.includes("InteriorPresenceZone") && life.includes('interiorZone: roomId ? "room"'));
 check("NPC visibility respects walls and rooms", localScene.includes("sameInteriorView") && localScene.includes("actor.roomId === player.roomId") && localScene.includes("!actor.unitId"));
 check("ambient NPCs occupy floors units and rooms", localScene.includes("actorFloor") && localScene.includes("actorUnit") && localScene.includes("actorRoomId"));

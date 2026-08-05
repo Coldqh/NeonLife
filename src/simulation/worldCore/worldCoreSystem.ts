@@ -1,6 +1,5 @@
 import { createStableEntityId } from "../../core/ids/entityId";
 import type { BusinessState, BusinessStatus, SupplyClass } from "../../gameplay/economy/types";
-import type { PlayerWorkContractState } from "../../gameplay/jobs/work/types";
 import type { KernelAccountState, KernelTransactionDraft, SimulationKernelState } from "../kernel/types";
 import type { EmploymentRecord, ShiftType } from "../population/types";
 import type { VenueCategory, VenueOperatingStatus, VenueState } from "../urban/types";
@@ -94,16 +93,6 @@ function employmentStatus(record: EmploymentRecord): WorldCoreEmploymentStatus {
   return "active";
 }
 
-function playerEmploymentStatus(contract: PlayerWorkContractState): WorldCoreEmploymentStatus {
-  if (contract.status === "dismissed" || contract.status === "resigned") return "ended";
-  if (contract.unpaidWages > 0) return "breached";
-  if (contract.status === "warning") return "suspended";
-  return "active";
-}
-
-function shiftForPlayerContract(contract: PlayerWorkContractState): ShiftType {
-  return contract.shiftStartHour >= 18 || contract.shiftStartHour < 6 ? "night" : "day";
-}
 
 function previousBusiness(input: WorldCoreInput, aliases: string[], id: string): WorldCoreBusinessState | undefined {
   if (!input.previous) return undefined;
@@ -196,7 +185,7 @@ function buildBusinesses(input: WorldCoreInput): WorldCoreBusinessState[] {
     const cash = canonicalCash(previous, input.kernel, id, undefined, operation?.cash ?? 0);
     const stock = venueStock(venue, input);
     const status = cash < -1_500 ? "insolvent" as const : operation?.status ?? venue.operatingStatus;
-    const playerWorkers = input.work.contracts.filter((contract) => contract.venueId === venue.id && (contract.status === "active" || contract.status === "warning")).length;
+    const playerWorkers = 0;
     result.push({
       id,
       source: "venue",
@@ -287,23 +276,6 @@ function buildEmployments(input: WorldCoreInput, businesses: WorldCoreBusinessSt
       shift: employment.shift,
       startedAt: (employment.startedDay ?? input.population.dayIndex) * DAY_MS,
       playerControlled: false,
-      lastUpdatedAt: input.timestamp
-    });
-  }
-  for (const contract of input.work.contracts) {
-    const business = businesses.find((item) => item.venueId === contract.venueId);
-    if (!business) continue;
-    result.push({
-      id: createStableEntityId("core-employment", `player:${contract.id}`),
-      residentId: input.playerId,
-      businessId: business.id,
-      sourcePlayerContractId: contract.id,
-      role: contract.title,
-      status: playerEmploymentStatus(contract),
-      wagePerDay: Math.round(contract.wagePerHour * contract.shiftDurationHours),
-      shift: shiftForPlayerContract(contract),
-      startedAt: contract.startedAt,
-      playerControlled: true,
       lastUpdatedAt: input.timestamp
     });
   }
@@ -476,7 +448,7 @@ export function projectWorldCoreState(input: WorldCoreInput, state: WorldCoreSta
     },
     lastUpdatedAt: input.timestamp
   };
-  return { state, economy, population: input.population, urban, work: input.work };
+  return { state, economy, population: input.population, urban };
 }
 
 export function worldCoreManagedLocationIds(state: WorldCoreState): Set<string> {

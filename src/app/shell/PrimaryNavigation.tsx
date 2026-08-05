@@ -5,7 +5,7 @@ const items: Array<{ id: GameScreen; label: string; icon: IconName }> = [
   { id: "profile", label: "Профиль", icon: "people" },
   { id: "map", label: "Карта", icon: "city" },
   { id: "nearby", label: "Рядом", icon: "network" },
-  { id: "work", label: "Работа", icon: "work" }
+  { id: "work", label: "Развитие", icon: "work" }
 ];
 
 export function PrimaryNavigation({ screen, onChange }: { screen: GameScreen; onChange: (screen: GameScreen) => void }) {
