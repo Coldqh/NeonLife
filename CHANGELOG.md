@@ -1,19 +1,11 @@
 # Changelog
 
-## 0.50.0 — Simple Player Loop
+## 0.50.1 — Legacy Work Cleanup
 
-- replaced vacancies, interviews, contracts, scheduled shifts, per-shift tasks and courier stages with one deterministic `playerLoop`;
-- added one-click jobs that spend time, pay once and improve one explicit skill;
-- added one-click training for strength, endurance, boxing, shooting and streetwise;
-- added a small equipment catalog with outfit, armor, weapon and implant slots;
-- added instant street-fight resolution and a simple boxing rank, rating and fight record;
-- deleted the old work engine, courier engine, workplace panel and `GameSession.jobs` state;
-- migrated only useful legacy totals and skills into schema 43 while discarding removed runtime structures;
-- stopped player jobs from being duplicated as fake World Core employment tied to an arbitrary business;
-- hardened player-loop save normalization against invalid skills, equipment, counters and removed catalog entries;
-- corrected transaction reasons for wages, training, equipment and fight payouts;
-- kept city employment, businesses and autonomous simulation independent from the simplified player loop;
-- added player-loop, migration, no-duplicate-employment and UI regressions.
+- removed the orphaned `src/app/map/VenueWorkPanel.tsx` left behind when the 0.50 archive was copied over an existing project instead of applied with the deletion manifest;
+- added a regression guard that fails if legacy player work files, `session.jobs`, or imports from the removed work/courier systems return;
+- kept `playerLoop` as the only player-facing source of truth for jobs, training, equipment, street fights and boxing;
+- updated application and service-worker version metadata to 0.50.1.
 
 ## 0.49.0 — Runtime Recovery
 
