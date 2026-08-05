@@ -1,3 +1,9 @@
+files
+APPLY_PATCH.ps1
+PATCH_FILES.txt
+DELETE_FILES.txt
+TEST_RESULTS.txt
+NeonLife-0.50.2-verified-cleanup.patch
 src/app/map/VenueWorkPanel.tsx
 src/gameplay/jobs/work/workSystem.ts
 src/gameplay/jobs/work/types.ts
@@ -5,4 +11,3 @@ src/gameplay/jobs/courier/courierSystem.ts
 scripts/run-player-work-domain-test.mjs
 tests/playerWorkTest.ts
 tsconfig.playerworktest.json
-NeonLife-0.50.2-verified-cleanup.patch

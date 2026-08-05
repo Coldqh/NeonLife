@@ -1,0 +1,53 @@
+import fs from "node:fs";
+import path from "node:path";
+
+const root = process.cwd();
+const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
+const checks = [];
+const check = (name, value) => checks.push({ name, ok: Boolean(value) });
+
+const map = read("src/app/screens/MapScreen.tsx");
+const app = read("src/app/App.tsx");
+const shell = read("src/app/shell/GameShell.tsx");
+const globalMap = read("src/app/map/GlobalCityMap.tsx");
+const globalGeometry = read("src/app/map/globalMapGeometry.ts");
+const localMap = read("src/app/map/LocalSectorMap.tsx");
+const topBar = read("src/app/map/MapTopBar.tsx");
+const sheet = read("src/app/map/MapSelectionSheet.tsx");
+const profile = read("src/app/map/MapProfileOverlay.tsx");
+const ui = read("src/app/map/mapUi.ts");
+const interiorMap = read("src/app/map/BuildingInteriorMap.tsx");
+const servicePanel = read("src/app/map/BuildingServicePanel.tsx");
+const css = ["src/ui/theme/city-map.css", "src/ui/theme/city-map-render.css", "src/ui/theme/city-profiles.css", "src/ui/theme/building-interiors.css"].map(read).join("\n");
+
+check("fake district clip masks are gone", !map.includes("DISTRICT_CLIPS") && !globalMap.includes("DISTRICT_CLIPS"));
+check("global map derives boundaries from real sectors", globalMap.includes("boundaryLoops(session.metropolitan.sectors") && globalMap.includes("roundedLoopPath") && globalGeometry.includes("export function boundaryLoops") && globalGeometry.includes("sector.xIndex"));
+check("global map is genuinely navigable", globalMap.includes("onPointerDown") && globalMap.includes("onPointerMove") && globalMap.includes("onWheel") && globalMap.includes("runInertia"));
+check("global map draws real roads and transit", globalMap.includes("session.metropolitan.roadLinks") && globalMap.includes("session.transit.routes") && globalMap.includes("route.stopIds"));
+check("global layers are functional state", topBar.includes("GLOBAL_LAYERS") && map.includes("setGlobalLayer") && map.includes("globalLayers"));
+check("local map renders real street topology and buildings", localMap.includes("getSectorStreetTopology") && localMap.includes("topology.segments") && localMap.includes("session.urban.buildings"));
+check("local map supports real pan zoom and arbitrary point selection", localMap.includes("onPointerMove") && localMap.includes("onWheel") && localMap.includes("function hitTest") && localMap.includes('return { kind: "point"'));
+check("local map renders top-down entrances venues people cars and route", ["renderedVenues", "camera.zoom >= 3.2", "local-map__entrance", "local-map__venue", "local-map__actor", "local-map__vehicle", "local-map__route"].every((token) => localMap.includes(token)));
+check("local map hides debug graph noise by zoom level", localMap.includes("camera.zoom >= 1.55 ? topology.parcels") && localMap.includes("camera.zoom >= 3 ? crossings") && localMap.includes("camera.zoom >= 2.5") && localMap.includes("selected.kind === \"building\" || selected.kind === \"venue\""));
+check("map removes the blocking district sidebar", !map.includes("global-district-legend") && !map.includes("<aside className=\"global-district-legend\""));
+check("street entities are restricted before rendering", map.includes("nearbyPedestrians") && map.includes("nearbyTraffic") && map.includes("nearbyCrossings"));
+check("nearby people are restricted by building or street context", map.includes('player.state === "inside"') && map.includes("actor.position.buildingId === player.buildingId") && map.includes("actorStreetId === playerStreetId"));
+check("nearby cars are restricted by immediate context", map.includes("vehicle.position.buildingId === player.buildingId") && map.includes("streetId === playerStreetId"));
+check("venue sheet uses real generated venue state", sheet.includes('selection.kind === "venue"') && sheet.includes("venueIsOpen") && sheet.includes("venueOperations.operations"));
+check("district sheet opens real key locations", sheet.includes("session.metropolitan.locations") && sheet.includes("onSelectLocation(location.id)"));
+check("venue profile uses generated venue and visible occupants", profile.includes("venue?: VenueState") && profile.includes("venueIsOpen") && profile.includes("actor.position.buildingId === targetBuilding.id"));
+check("building profile has floor rail apartment grid and real movement", profile.includes("building-profile__floor-rail") && profile.includes("building-profile__unit-grid") && profile.includes("onMoveFloor(selectedFloor, \"stairs\")") && profile.includes("onMoveFloor(selectedFloor, \"elevator\")"));
+check("every map action is connected to a real callback", map.includes("onWalk(target)") && map.includes("onTravel(selectedLocation.id)") && map.includes("onEnterBuilding={onEnterBuilding}") && map.includes("onEnterVehicle={onEnterVehicle}"));
+check("interior map is active inside buildings", map.includes("mode === \"interior\" && insideBuilding") && map.includes("<BuildingInteriorMap") && topBar.includes("Здание"));
+check("interior map uses physical hierarchy", interiorMap.includes("session.buildingAccess.floors") && interiorMap.includes("session.buildingAccess.units") && interiorMap.includes("session.buildingAccess.rooms") && interiorMap.includes("position.roomId"));
+check("venue service points use physical domain actions only", servicePanel.includes("LocalLifeAction") && servicePanel.includes("buy-venue-offer") && servicePanel.includes("join-venue-queue") && !servicePanel.includes("accept-courier") && !servicePanel.includes("VenueWorkPanel"));
+check("favorites and share are implemented", map.includes("map-favorites/v2") && map.includes("localStorage.setItem") && map.includes("navigator.share") && map.includes("navigator.clipboard"));
+check("map uses its own immersive shell", shell.includes('screen === "map" ? null : <GameHeader') && css.includes(".map-screen--immersive") && css.includes(".map-profile-overlay"));
+check("map code is split into bounded components", [map, globalMap, localMap, topBar, sheet, profile, interiorMap, servicePanel, ui].every((source) => source.split(/\r?\n/).length <= 600));
+check("all map styles are balanced", (css.match(/\{/g) ?? []).length === (css.match(/\}/g) ?? []).length);
+check("vehicle domain commands remain wired in App", app.includes("enterPhysicalVehicle") && app.includes("leavePhysicalVehicle"));
+
+const failed = checks.filter((item) => !item.ok);
+for (const item of checks) console.log(`${item.ok ? "PASS" : "FAIL"} ${item.name}`);
+console.log(`\n${checks.length - failed.length}/${checks.length} city-map rebuild checks passed.`);
+if (failed.length) process.exit(1);

@@ -1,0 +1,1186 @@
+import { createStableEntityId } from "../../core/ids/entityId";
+import { getProduct } from "../../data/products/productCatalog";
+import type { PlayerState } from "../../gameplay/player/demoPlayer";
+import type { FoodState } from "../../gameplay/food/foodSystem";
+import type { BusinessState, LocalEconomyState, SupplyClass } from "../../gameplay/economy/types";
+import type { BackgroundResident, EmploymentRecord, HouseholdState, HousingMarketState, PopulationState } from "../population/types";
+import type { CityState, DistrictState, LocationState, OrganizationState } from "../../world/state/types";
+import type { InfrastructureKind, InfrastructureState } from "../infrastructure/types";
+import type { ProductionResource, ProductionState, ProductionSupplyContract } from "../production/types";
+import type { OrganizationAgreementState, OrganizationEcosystemState } from "../organizations/types";
+import type { GovernmentCrimeState } from "../government/types";
+import type { HealthCyberwareState } from "../health/types";
+import type { DataSurveillanceState } from "../data/types";
+import type { PhysicalVehiclesState } from "../vehicles/types";
+import type { WorldCoreBusinessState, WorldCoreEmploymentState, WorldCoreState } from "../worldCore/types";
+import type { BusinessEconomyState, BusinessLeaseState, UnifiedBusinessState } from "../business/types";
+import type { ProductInventoryState } from "../inventory/types";
+import type {
+  KernelAccountState,
+  KernelAssetState,
+  KernelAssetStatus,
+  KernelContractState,
+  KernelEntityKind,
+  KernelIntegrityState,
+  KernelResource,
+  KernelResourceBalance,
+  KernelTotalsState,
+  KernelTransactionDraft,
+  KernelTransactionState,
+  KernelOwnershipState,
+  SimulationKernelState
+} from "./types";
+
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+const WEEK_MS = 7 * DAY_MS;
+const MAX_TRANSACTIONS = 2_000;
+
+export const KERNEL_SYSTEM_ACCOUNTS = [
+  "clearing",
+  "wholesale",
+  "maintenance",
+  "credit-bureau",
+  "housing-authority",
+  "city-services",
+  "consumption",
+  "labor-market",
+  "power-grid",
+  "water-grid",
+  "data-grid",
+  "transport-grid",
+  "waste-grid",
+  "logistics-clearing",
+  "external-trade",
+  "production-consumption",
+  "production-output",
+  "unregistered-market",
+  "illegal-consumption",
+  "corrupt-officials"
+] as const;
+
+export type KernelSystemAccount = typeof KERNEL_SYSTEM_ACCOUNTS[number];
+
+export interface KernelSyncInput {
+  timestamp: number;
+  seed: string;
+  city: CityState;
+  districts: DistrictState[];
+  locations: LocationState[];
+  organizations: OrganizationState[];
+  player: PlayerState;
+  population: PopulationState;
+  economy: LocalEconomyState;
+  infrastructure: InfrastructureState;
+  production: ProductionState;
+  organizationEcosystem?: OrganizationEcosystemState;
+  government?: GovernmentCrimeState;
+  health?: HealthCyberwareState;
+  data?: DataSurveillanceState;
+  vehicles?: PhysicalVehiclesState;
+  worldCore?: WorldCoreState;
+  businessEconomy?: BusinessEconomyState;
+  productInventory?: ProductInventoryState;
+  food: FoodState;
+  drafts?: KernelTransactionDraft[];
+}
+
+export function kernelSystemEntityId(seed: string, kind: KernelSystemAccount): string {
+  return createStableEntityId("kernel-system", `${seed}:${kind}`);
+}
+
+export function employmentContractId(employmentId: string): string {
+  return createStableEntityId("contract", `employment:${employmentId}`);
+}
+
+export function leaseContractId(householdId: string): string {
+  return createStableEntityId("contract", `lease:${householdId}`);
+}
+
+export function supplyContractId(businessId: string): string {
+  return createStableEntityId("contract", `supply:${businessId}`);
+}
+
+export function utilityContractId(networkId: string, districtId: string): string {
+  return createStableEntityId("contract", `utility:${networkId}:${districtId}`);
+}
+
+export function productionContractId(contractId: string): string {
+  return createStableEntityId("contract", `production:${contractId}`);
+}
+
+function accountId(entityId: string): string {
+  return createStableEntityId("kernel-account", entityId);
+}
+
+function assetId(kind: string, sourceId: string): string {
+  return createStableEntityId("asset", `${kind}:${sourceId}`);
+}
+
+function balance(resource: KernelResource, amount: number): KernelResourceBalance {
+  return { resource, amount: Math.round(amount * 100) / 100 };
+}
+
+function resourceForSupply(supplyClass: SupplyClass): KernelResource {
+  if (supplyClass === "food") return "food-units";
+  if (supplyClass === "medical") return "medical-units";
+  if (supplyClass === "parts") return "parts-units";
+  if (supplyClass === "documents") return "document-units";
+  return "mixed-units";
+}
+
+function resourceForProduction(resource: ProductionResource): KernelResource {
+  if (resource === "food-units") return "food-units";
+  if (resource === "medical-units") return "medical-units";
+  if (resource === "parts-units") return "parts-units";
+  if (resource === "document-units") return "document-units";
+  if (resource === "mixed-units") return "mixed-units";
+  if (resource === "biomass-feedstock") return "biomass-units";
+  if (resource === "chemical-feedstock") return "chemical-units";
+  if (resource === "alloy-feedstock") return "alloy-units";
+  if (resource === "electronic-components") return "electronic-units";
+  if (resource === "data-substrate") return "data-substrate-units";
+  return "packaging-units";
+}
+
+function inventoryBalancesFor(input: KernelSyncInput, ownerEntityId: string): KernelResourceBalance[] {
+  if (!input.productInventory) return [];
+  const totals = new Map<KernelResource, number>();
+  for (const inventory of input.productInventory.inventories) {
+    if (inventory.ownerEntityId !== ownerEntityId) continue;
+    for (const stack of inventory.stacks) {
+      if (stack.status !== "available" || (stack.expiresAt !== undefined && stack.expiresAt <= input.timestamp)) continue;
+      const quantity = Math.max(0, stack.quantity - stack.reservedQuantity);
+      if (quantity <= 0) continue;
+      const legacyResource = getProduct(stack.productId).legacyResource ?? "mixed-units";
+      const resource = resourceForProduction(legacyResource);
+      totals.set(resource, (totals.get(resource) ?? 0) + quantity);
+    }
+  }
+  return [...totals.entries()].map(([resource, amount]) => balance(resource, amount));
+}
+
+function getBalance(account: KernelAccountState, resource: KernelResource): number {
+  return account.balances.find((entry) => entry.resource === resource)?.amount ?? 0;
+}
+
+function setBalance(account: KernelAccountState, resource: KernelResource, amount: number, timestamp: number): KernelAccountState {
+  const balances = account.balances.filter((entry) => entry.resource !== resource);
+  balances.push(balance(resource, amount));
+  return { ...account, balances, updatedAt: timestamp };
+}
+
+function entityKindFor(id: string, input: KernelSyncInput): KernelEntityKind {
+  if (id === input.player.id) return "player";
+  if (id === input.city.id) return "city";
+  if (input.organizations.some((item) => item.id === id) || input.businessEconomy?.companies.some((item) => item.id === id)) return "organization";
+  if (input.population.households.some((item) => item.id === id)) return "household";
+  if (input.population.residents.some((item) => item.id === id)) return "resident";
+  if (input.worldCore?.businesses.some((item) => item.id === id) || input.economy.businesses.some((item) => item.id === id)) return "business";
+  if (input.production.facilities.some((item) => item.id === id)) return "production-facility";
+  if (input.health?.facilities.some((item) => item.id === id)) return "health-facility";
+  if (input.locations.some((item) => item.id === id)) return "location";
+  if (input.districts.some((item) => item.id === id)) return "district";
+  return "system";
+}
+
+function account(entityId: string, entityKind: KernelEntityKind, balances: KernelResourceBalance[], timestamp: number): KernelAccountState {
+  return { id: accountId(entityId), entityId, entityKind, balances, updatedAt: timestamp };
+}
+
+function snapshotAccounts(input: KernelSyncInput): KernelAccountState[] {
+  const accounts: KernelAccountState[] = [
+    account(input.player.id, "player", [balance("credits", input.player.balance), ...inventoryBalancesFor(input, input.player.id)], input.timestamp),
+    account(input.city.id, "city", [], input.timestamp)
+  ];
+
+  for (const organization of input.organizations) {
+    accounts.push(account(organization.id, "organization", [balance("credits", organization.budget)], input.timestamp));
+  }
+  const organizationIds = new Set(input.organizations.map((organization) => organization.id));
+  for (const company of input.businessEconomy?.companies ?? []) {
+    if (organizationIds.has(company.id)) continue;
+    accounts.push(account(company.id, "organization", [balance("credits", company.treasury)], input.timestamp));
+  }
+  for (const district of input.districts) accounts.push(account(district.id, "district", [], input.timestamp));
+  for (const location of input.locations) accounts.push(account(location.id, "location", [], input.timestamp));
+  for (const business of input.economy.businesses) {
+    const physicalBalances = inventoryBalancesFor(input, business.id);
+    const balances = [balance("credits", business.cash), ...physicalBalances];
+    if (!physicalBalances.length && business.supplyClass === "food") {
+      const shopStock = input.food.shopStocks[business.locationId];
+      const physicalFoodUnits = shopStock ? Object.values(shopStock).reduce((sum, units) => sum + units, 0) : 0;
+      balances.push(balance("food-units", physicalFoodUnits));
+    }
+    accounts.push(account(business.id, "business", balances, input.timestamp));
+  }
+  for (const business of input.worldCore?.businesses ?? []) {
+    const physicalBalances = inventoryBalancesFor(input, business.id);
+    const balances = [balance("credits", business.cash), ...physicalBalances];
+    if (!physicalBalances.length && business.stockUnits > 0) balances.push(balance(resourceForSupply(business.supplyClass), business.stockUnits));
+    accounts.push(account(business.id, "business", balances, input.timestamp));
+  }
+  for (const facility of input.production.facilities) {
+    accounts.push(account(facility.id, "production-facility", [
+      balance("credits", facility.cash),
+      ...facility.inventory.map((item) => balance(resourceForProduction(item.resource), item.amount))
+    ], input.timestamp));
+  }
+  for (const facility of input.health?.facilities ?? []) {
+    accounts.push(account(facility.id, "health-facility", [
+      balance("medical-units", facility.medicalStock),
+      balance("parts-units", facility.implantParts + facility.maintenanceKits)
+    ], input.timestamp));
+  }
+  for (const household of input.population.households) {
+    const physicalBalances = inventoryBalancesFor(input, household.id);
+    accounts.push(account(household.id, "household", [
+      balance("credits", household.balance),
+      ...(physicalBalances.length ? physicalBalances : [balance("food-units", household.pantry.reduce((sum, item) => sum + item.units, 0))])
+    ], input.timestamp));
+  }
+  for (const resident of input.population.residents) {
+    accounts.push(account(resident.id, "resident", [balance("credits", resident.savings)], input.timestamp));
+  }
+  for (const housing of input.population.housing) {
+    accounts.push(account(housing.id, "location", [
+      balance("credits", housing.maintenanceFund)
+    ], input.timestamp));
+  }
+  for (const kind of KERNEL_SYSTEM_ACCOUNTS) {
+    accounts.push(account(kernelSystemEntityId(input.seed, kind), "system", [], input.timestamp));
+  }
+  return dedupeAccounts(accounts);
+}
+
+function dedupeAccounts(accounts: KernelAccountState[]): KernelAccountState[] {
+  const map = new Map<string, KernelAccountState>();
+  for (const item of accounts) map.set(item.entityId, item);
+  return [...map.values()];
+}
+
+function assetStatusFromBusiness(business: BusinessState): KernelAssetStatus {
+  if (business.status === "closed") return "offline";
+  if (business.status === "restricted") return "restricted";
+  if (business.status === "strained") return "strained";
+  return "active";
+}
+
+function assetStatusFromWorldCoreBusiness(business: WorldCoreBusinessState): KernelAssetStatus {
+  if (["closed", "vacant", "renovation", "insolvent", "seized"].includes(business.status)) return "offline";
+  if (business.status === "restricted") return "restricted";
+  if (business.status === "strained") return "strained";
+  return "active";
+}
+
+function assetStatusFromHousing(housing: HousingMarketState): KernelAssetStatus {
+  if (housing.status === "critical") return "restricted";
+  if (housing.status === "degraded") return "strained";
+  return "active";
+}
+
+function buildAssets(input: KernelSyncInput): KernelAssetState[] {
+  const assets: KernelAssetState[] = [];
+  const businessLocations = new Set(input.economy.businesses.map((item) => item.locationId));
+  const housingLocations = new Set(input.population.housing.map((item) => item.locationId));
+
+  for (const business of input.economy.businesses) {
+    const location = input.locations.find((item) => item.id === business.locationId);
+    const owner = business.organizationId ?? business.id;
+    assets.push({
+      id: assetId("business", business.id),
+      kind: "business-operation",
+      name: location?.name ?? `BUSINESS ${business.id}`,
+      ownerEntityId: owner,
+      controllerEntityId: business.id,
+      locationId: business.locationId,
+      districtId: location?.districtId,
+      status: assetStatusFromBusiness(business),
+      condition: Math.max(0, Math.min(100, Math.round((business.stock + business.staffing) / 2))),
+      capacity: business.capacityLevel,
+      valuation: Math.max(0, Math.round(business.cash + business.stock * 18 + business.capacityLevel * 800)),
+      resources: [
+        balance(resourceForSupply(business.supplyClass), business.stock),
+        balance("labor-hours", Math.max(0, business.staffing) * 8)
+      ],
+      updatedAt: input.timestamp
+    });
+  }
+
+  const legacyBusinessIds = new Set(input.economy.businesses.map((item) => item.id));
+  for (const business of input.worldCore?.businesses ?? []) {
+    if (legacyBusinessIds.has(business.id)) continue;
+    assets.push({
+      id: assetId("business", business.id),
+      kind: "business-operation",
+      name: business.name,
+      ownerEntityId: business.ownerEntityId,
+      controllerEntityId: business.operatorEntityId,
+      locationId: business.locationId,
+      districtId: business.districtId,
+      status: assetStatusFromWorldCoreBusiness(business),
+      condition: Math.max(0, Math.min(100, Math.round((business.stockPercent + Math.min(100, business.activeWorkers / Math.max(1, business.targetStaff) * 100)) / 2))),
+      capacity: Math.max(1, business.targetStaff),
+      valuation: Math.max(0, Math.round(business.cash + business.stockUnits * 18 + business.targetStaff * 800)),
+      resources: [
+        balance(resourceForSupply(business.supplyClass), business.stockUnits),
+        balance("labor-hours", Math.max(0, business.activeWorkers) * 8)
+      ],
+      updatedAt: input.timestamp
+    });
+  }
+
+  for (const housing of input.population.housing) {
+    const location = input.locations.find((item) => item.id === housing.locationId);
+    const owner = housing.ownerOrganizationId ?? kernelSystemEntityId(input.seed, "housing-authority");
+    assets.push({
+      id: assetId("housing", housing.id),
+      kind: "housing-block",
+      name: location?.name ?? `HOUSING ${housing.id}`,
+      ownerEntityId: owner,
+      controllerEntityId: housing.id,
+      locationId: housing.locationId,
+      districtId: housing.districtId,
+      status: assetStatusFromHousing(housing),
+      condition: housing.condition,
+      capacity: housing.capacity,
+      valuation: Math.round(housing.capacity * housing.baseRentPerBedWeek * Math.max(1, housing.condition) * 0.6),
+      resources: [balance("housing-beds", Math.max(0, housing.capacity - housing.occupied))],
+      updatedAt: input.timestamp
+    });
+  }
+
+  for (const location of input.locations) {
+    if (businessLocations.has(location.id) || housingLocations.has(location.id)) continue;
+    const owner = location.organizationId ?? input.city.id;
+    assets.push({
+      id: assetId("facility", location.id),
+      kind: "facility",
+      name: location.name,
+      ownerEntityId: owner,
+      controllerEntityId: owner,
+      locationId: location.id,
+      districtId: location.districtId,
+      status: location.open ? "active" : "offline",
+      condition: Math.max(20, location.security),
+      capacity: 1,
+      valuation: Math.round(20_000 + location.security * 1_200),
+      resources: [],
+      updatedAt: input.timestamp
+    });
+  }
+
+  for (const node of input.infrastructure.nodes) {
+    assets.push({
+      id: assetId("infrastructure-node", node.id),
+      kind: "infrastructure-node",
+      name: node.name,
+      ownerEntityId: node.providerEntityId,
+      controllerEntityId: node.providerEntityId,
+      districtId: node.districtId,
+      status: node.status === "offline" ? "offline" : node.status === "restricted" ? "restricted" : node.status === "strained" ? "strained" : "active",
+      condition: node.condition,
+      capacity: node.capacity,
+      valuation: Math.round(node.capacity * Math.max(1, node.condition) * 1_200),
+      resources: [balance(node.kind === "power" ? "energy-units" : node.kind === "water" ? "water-units" : node.kind === "data" ? "data-capacity" : node.kind === "transport" ? "transport-capacity" : "waste-capacity", node.throughput)],
+      updatedAt: input.timestamp
+    });
+  }
+
+  for (const link of input.infrastructure.links) {
+    const provider = input.infrastructure.networks.find((item) => item.id === link.networkId)?.providerEntityId ?? input.city.id;
+    assets.push({
+      id: assetId("infrastructure-link", link.id),
+      kind: "infrastructure-link",
+      name: `${link.kind.toUpperCase()} LINK ${link.districtId}`,
+      ownerEntityId: provider,
+      controllerEntityId: provider,
+      districtId: link.districtId,
+      status: link.status === "offline" ? "offline" : link.status === "restricted" ? "restricted" : link.status === "strained" ? "strained" : "active",
+      condition: link.condition,
+      capacity: link.capacity,
+      valuation: Math.round(link.capacity * Math.max(1, link.condition) * 420),
+      resources: [],
+      updatedAt: input.timestamp
+    });
+  }
+
+  for (const facility of input.production.facilities) {
+    assets.push({
+      id: assetId("production-facility", facility.id),
+      kind: facility.kind === "warehouse" || facility.kind === "distribution-hub" ? "warehouse" : "production-facility",
+      name: facility.name,
+      ownerEntityId: facility.ownerEntityId,
+      controllerEntityId: facility.id,
+      locationId: facility.locationId,
+      districtId: facility.districtId,
+      status: facility.status === "offline" ? "offline" : facility.status === "restricted" ? "restricted" : facility.status === "strained" ? "strained" : "active",
+      condition: facility.condition,
+      capacity: facility.capacityLevel,
+      valuation: Math.max(0, Math.round(facility.cash + facility.inventory.reduce((sum, item) => sum + item.amount * 8, 0) + facility.capacityLevel * 4_000)),
+      resources: facility.inventory.map((item) => balance(resourceForProduction(item.resource), item.amount)),
+      updatedAt: input.timestamp
+    });
+  }
+
+  for (const facility of input.health?.facilities ?? []) {
+    const location = input.locations.find((item) => item.id === facility.locationId);
+    assets.push({
+      id: assetId("medical-facility", facility.id),
+      kind: "medical-facility",
+      name: location?.name ?? `MEDICAL FACILITY ${facility.id}`,
+      ownerEntityId: facility.ownerOrganizationId,
+      controllerEntityId: facility.id,
+      locationId: facility.locationId,
+      districtId: facility.districtId,
+      status: facility.status === "closed" ? "offline" : facility.status === "restricted" ? "restricted" : facility.status === "strained" ? "strained" : "active",
+      condition: Math.round((facility.staffing + facility.serviceLevel) / 2),
+      capacity: facility.bedCapacity + facility.treatmentRooms,
+      valuation: Math.round(facility.cash + facility.bedCapacity * 3_500 + facility.surgicalRooms * 18_000),
+      resources: [balance("medical-units", facility.medicalStock), balance("parts-units", facility.implantParts + facility.maintenanceKits)],
+      updatedAt: input.timestamp
+    });
+  }
+  for (const installation of input.health?.installations ?? []) {
+    const model = input.health?.cyberwareModels.find((item) => item.id === installation.modelId);
+    assets.push({
+      id: assetId("cyberware-installation", installation.id),
+      kind: "cyberware-installation",
+      name: model?.name ?? `CYBERWARE ${installation.id}`,
+      ownerEntityId: installation.residentId,
+      controllerEntityId: installation.residentId,
+      status: installation.status === "failed" || installation.status === "removed" ? "offline" : installation.status === "degraded" ? "strained" : "active",
+      condition: installation.condition,
+      capacity: model?.workSkillBonus ?? 0,
+      valuation: Math.round((model?.basePrice ?? 0) * Math.max(0.1, installation.condition / 100)),
+      resources: [],
+      updatedAt: input.timestamp
+    });
+  }
+
+  for (const node of input.data?.nodes ?? []) {
+    assets.push({
+      id: assetId("surveillance-node", node.id),
+      kind: "surveillance-node",
+      name: `${node.kind.replace(/-/g, " ").toUpperCase()} ${node.locationId}`,
+      ownerEntityId: node.ownerEntityId,
+      controllerEntityId: node.id,
+      locationId: node.locationId,
+      districtId: node.districtId,
+      status: node.status === "offline" ? "offline" : node.status === "degraded" || node.status === "compromised" ? "strained" : "active",
+      condition: Math.round(Math.max(0, Math.min(100, node.quality - node.vulnerability * 0.25))),
+      capacity: node.coverage,
+      valuation: Math.round(1_500 + node.quality * 95 + node.retentionDays * 8),
+      resources: [],
+      updatedAt: input.timestamp
+    });
+  }
+
+  for (const district of input.districts) {
+    assets.push({
+      id: assetId("district-land", district.id),
+      kind: "district-land",
+      name: `${district.name} LAND REGISTER`,
+      ownerEntityId: input.city.id,
+      controllerEntityId: input.city.id,
+      districtId: district.id,
+      status: "active",
+      condition: district.infrastructure,
+      capacity: district.population,
+      valuation: Math.round(district.population * Math.max(1, district.costOfLiving) * 34),
+      resources: [],
+      updatedAt: input.timestamp
+    });
+  }
+  for (const vehicle of input.vehicles?.vehicles.filter((item) => item.persistent) ?? []) {
+    const location = vehicle.position.locationId ? input.locations.find((item) => item.id === vehicle.position.locationId) : undefined;
+    assets.push({
+      id: assetId("vehicle", vehicle.id),
+      kind: "vehicle",
+      name: `${vehicle.modelName} ${vehicle.plate}`,
+      ownerEntityId: vehicle.ownerEntityId ?? input.player.id,
+      controllerEntityId: vehicle.driverEntityId ?? vehicle.ownerEntityId ?? input.player.id,
+      locationId: vehicle.position.locationId,
+      districtId: location?.districtId,
+      status: vehicle.condition < 18 ? "offline" : vehicle.condition < 35 ? "strained" : "active",
+      condition: vehicle.condition,
+      capacity: vehicle.seats,
+      valuation: Math.max(500, Math.round((vehicle.vehicleClass === "truck" || vehicle.vehicleClass === "bus" ? 48_000 : vehicle.vehicleClass === "van" ? 18_000 : 12_000) * vehicle.condition / 100)),
+      resources: [],
+      updatedAt: input.timestamp
+    });
+  }
+
+  return assets;
+}
+
+function buildOwnership(assets: KernelAssetState[], timestamp: number): KernelOwnershipState[] {
+  return assets.map((asset) => ({
+    id: createStableEntityId("ownership", `${asset.id}:${asset.ownerEntityId}`),
+    assetId: asset.id,
+    ownerEntityId: asset.ownerEntityId,
+    shareBasisPoints: 10_000,
+    acquiredAt: timestamp
+  }));
+}
+
+function activeEmploymentContract(input: KernelSyncInput, employment: EmploymentRecord): KernelContractState | null {
+  const resident = input.population.residents.find((item) => item.id === employment.residentId);
+  if (!resident) return null;
+  const business = input.economy.businesses.find((item) => item.locationId === employment.locationId);
+  const source = employment.organizationId ?? business?.id ?? kernelSystemEntityId(input.seed, "clearing");
+  const status = employment.status === "unemployed" ? "ended" : employment.unpaidDays > 0 ? "breached" : employment.status === "absent" ? "suspended" : "active";
+  return {
+    id: employmentContractId(employment.id),
+    kind: "employment",
+    sourceEntityId: source,
+    targetEntityId: resident.id,
+    beneficiaryEntityId: resident.householdId,
+    assetId: business ? assetId("business", business.id) : undefined,
+    locationId: employment.locationId,
+    status,
+    startedAt: (employment.startedDay ?? input.population.dayIndex) * DAY_MS,
+    endedAt: employment.endedDay ? employment.endedDay * DAY_MS : undefined,
+    nextSettlementAt: (input.population.dayIndex + 1) * DAY_MS,
+    breachCount: employment.unpaidDays,
+    terms: [{ resource: "credits", amount: employment.wagePerDay, unitValue: 1, intervalMinutes: 24 * 60 }],
+    metadata: {
+      title: employment.title,
+      shift: employment.shift,
+      minimumSkill: employment.minimumSkill ?? 0,
+      status: employment.status
+    }
+  };
+}
+
+function activeWorldCoreEmploymentContract(input: KernelSyncInput, employment: WorldCoreEmploymentState): KernelContractState | null {
+  const business = input.worldCore?.businesses.find((item) => item.id === employment.businessId);
+  const resident = input.population.residents.find((item) => item.id === employment.residentId);
+  if (!business || !resident) return null;
+  const status = employment.status === "ended" ? "ended" : employment.status === "breached" ? "breached" : employment.status === "suspended" ? "suspended" : "active";
+  return {
+    id: employmentContractId(employment.sourceEmploymentId ?? employment.id),
+    kind: "employment",
+    sourceEntityId: business.operatorEntityId || business.id,
+    targetEntityId: employment.residentId,
+    assetId: assetId("business", business.id),
+    locationId: business.locationId,
+    status,
+    startedAt: employment.startedAt,
+    endedAt: status === "ended" ? input.timestamp : undefined,
+    nextSettlementAt: (input.population.dayIndex + 1) * DAY_MS,
+    breachCount: status === "breached" ? 1 : 0,
+    terms: [{ resource: "credits", amount: employment.wagePerDay, unitValue: 1, intervalMinutes: 24 * 60 }],
+    metadata: {
+      title: employment.role,
+      shift: employment.shift,
+      playerControlled: employment.playerControlled,
+      canonicalBusinessId: business.id
+    }
+  };
+}
+
+function leaseContract(input: KernelSyncInput, household: HouseholdState): KernelContractState | null {
+  if (!household.homeLocationId || household.kind === "unhoused") return null;
+  const housing = input.population.housing.find((item) => item.locationId === household.homeLocationId);
+  if (!housing) return null;
+  const owner = housing.ownerOrganizationId ?? kernelSystemEntityId(input.seed, "housing-authority");
+  return {
+    id: leaseContractId(household.id),
+    kind: "lease",
+    sourceEntityId: household.id,
+    targetEntityId: owner,
+    assetId: assetId("housing", housing.id),
+    locationId: housing.locationId,
+    status: household.status === "displaced" ? "ended" : household.consecutiveRentMisses > 0 ? "breached" : "active",
+    startedAt: input.timestamp - Math.max(1, household.moveCount + 1) * WEEK_MS,
+    nextSettlementAt: (input.population.dayIndex + 1) * DAY_MS,
+    breachCount: household.consecutiveRentMisses,
+    terms: [{ resource: "credits", amount: Math.round(household.rentPerWeek / 7), unitValue: 1, intervalMinutes: 24 * 60 }],
+    metadata: {
+      members: household.memberIds.length,
+      status: household.status,
+      rentPerWeek: household.rentPerWeek
+    }
+  };
+}
+
+function supplyContract(input: KernelSyncInput, business: BusinessState): KernelContractState {
+  const resource = resourceForSupply(business.supplyClass);
+  return {
+    id: supplyContractId(business.id),
+    kind: "supply",
+    sourceEntityId: kernelSystemEntityId(input.seed, "wholesale"),
+    targetEntityId: business.id,
+    assetId: assetId("business", business.id),
+    locationId: business.locationId,
+    status: business.status === "closed" ? "suspended" : "active",
+    startedAt: input.timestamp - DAY_MS,
+    nextSettlementAt: (input.population.dayIndex + 1) * DAY_MS,
+    breachCount: business.shortage ? 1 : 0,
+    terms: [{ resource, amount: Math.max(4, business.capacityLevel * 6), unitValue: Math.max(1, business.priceIndex / 100), intervalMinutes: 24 * 60 }],
+    metadata: { supplyClass: business.supplyClass, targetStock: 72 + business.capacityLevel * 12, shortage: business.shortage }
+  };
+}
+
+function utilityResource(kind: InfrastructureKind): KernelResource {
+  if (kind === "power") return "energy-units";
+  if (kind === "water") return "water-units";
+  if (kind === "data") return "data-capacity";
+  if (kind === "transport") return "transport-capacity";
+  return "waste-capacity";
+}
+
+function utilityContracts(input: KernelSyncInput): KernelContractState[] {
+  const result: KernelContractState[] = [];
+  for (const network of input.infrastructure.networks) {
+    for (const district of input.districts) {
+      const services = input.infrastructure.services.filter((item) => item.networkId === network.id && item.districtId === district.id);
+      const amount = services.reduce((sum, item) => sum + item.currentDemand, 0);
+      const sourceNode = input.infrastructure.nodes.find((item) => item.networkId === network.id && item.role === "source");
+      result.push({
+        id: utilityContractId(network.id, district.id),
+        kind: "utility",
+        sourceEntityId: network.providerEntityId,
+        targetEntityId: district.id,
+        beneficiaryEntityId: district.id,
+        assetId: sourceNode ? assetId("infrastructure-node", sourceNode.id) : undefined,
+        status: network.status === "offline" ? "breached" : network.status === "restricted" ? "suspended" : "active",
+        startedAt: input.timestamp,
+        nextSettlementAt: input.timestamp + 24 * 60 * 60_000,
+        breachCount: network.outageHours,
+        terms: [{ resource: utilityResource(network.kind), amount, unitValue: network.tariffPerUnit, intervalMinutes: 24 * 60 }],
+        metadata: { kind: network.kind, serviceLevel: network.averageServiceLevel, district: district.name }
+      });
+    }
+  }
+  return result;
+}
+
+function productionContract(input: KernelSyncInput, contractState: ProductionSupplyContract): KernelContractState {
+  const source = input.production.facilities.find((item) => item.id === contractState.sourceFacilityId);
+  const targetEntityId = contractState.targetFacilityId ?? contractState.targetBusinessId ?? kernelSystemEntityId(input.seed, "wholesale");
+  return {
+    id: productionContractId(contractState.id),
+    kind: contractState.targetKind === "business" ? "logistics" : "procurement",
+    sourceEntityId: contractState.sourceFacilityId,
+    targetEntityId,
+    beneficiaryEntityId: targetEntityId,
+    assetId: source ? assetId("production-facility", source.id) : undefined,
+    locationId: source?.locationId,
+    status: contractState.status === "suspended" ? "suspended" : contractState.status === "breached" ? "breached" : "active",
+    startedAt: input.timestamp - DAY_MS,
+    nextSettlementAt: contractState.nextReviewAt,
+    breachCount: contractState.breachCount,
+    terms: [{ resource: resourceForProduction(contractState.resource), amount: contractState.batchSize, unitValue: contractState.unitPrice, intervalMinutes: 6 * 60 }],
+    metadata: {
+      resource: contractState.resource,
+      reorderPoint: contractState.reorderPoint,
+      targetStock: contractState.targetStock,
+      legality: contractState.legality,
+      targetKind: contractState.targetKind
+    }
+  };
+}
+
+
+function organizationAgreementContract(input: KernelSyncInput, agreement: OrganizationAgreementState): KernelContractState {
+  const kind = agreement.kind === "supply-framework" ? "procurement"
+    : agreement.kind === "service-concession" ? "service"
+      : agreement.kind === "labor-compact" ? "employment"
+        : agreement.kind === "joint-operation" ? "service"
+          : "service";
+  return {
+    id: createStableEntityId("contract", `organization:${agreement.id}`),
+    kind,
+    sourceEntityId: agreement.sourceOrganizationId,
+    targetEntityId: agreement.targetOrganizationId,
+    beneficiaryEntityId: agreement.targetOrganizationId,
+    status: agreement.status === "ended" ? "ended" : agreement.status === "breached" ? "breached" : agreement.status === "strained" ? "suspended" : "active",
+    startedAt: agreement.startedAt,
+    endedAt: agreement.endedAt,
+    nextSettlementAt: agreement.reviewAt,
+    breachCount: agreement.breachCount,
+    terms: agreement.weeklyValue > 0 ? [{ resource: "credits", amount: agreement.weeklyValue, unitValue: 1, intervalMinutes: 7 * 24 * 60 }] : [],
+    metadata: { kind: agreement.kind, linkedContracts: agreement.linkedContractIds.length, ...agreement.metadata }
+  };
+}
+
+function unifiedBusinessLeaseContract(input: KernelSyncInput, lease: BusinessLeaseState): KernelContractState | null {
+  const business = input.businessEconomy?.businesses.find((item) => item.id === lease.businessId);
+  if (!business) return null;
+  return {
+    id: createStableEntityId("contract", `business-lease:${lease.id}`),
+    kind: "lease",
+    sourceEntityId: lease.tenantCompanyId,
+    targetEntityId: lease.landlordEntityId,
+    beneficiaryEntityId: business.id,
+    assetId: assetId("business", business.id),
+    locationId: business.locationId,
+    status: lease.status === "terminated" ? "ended" : lease.status === "arrears" ? "breached" : "active",
+    startedAt: lease.startedDay * DAY_MS,
+    endedAt: lease.terminatedDay ? lease.terminatedDay * DAY_MS : undefined,
+    nextSettlementAt: lease.nextPaymentDay * DAY_MS,
+    breachCount: lease.arrearsDays,
+    terms: lease.monthlyRent > 0 ? [{ resource: "credits", amount: lease.monthlyRent, unitValue: 1, intervalMinutes: 30 * 24 * 60 }] : [],
+    metadata: { premisesId: lease.premisesId, status: lease.status, deposit: lease.deposit }
+  };
+}
+
+function unifiedBusinessLicenseContract(input: KernelSyncInput, business: UnifiedBusinessState): KernelContractState {
+  const authority = input.government?.budget.authorityOrganizationId ?? input.city.id;
+  const status = business.licenseStatus === "revoked" ? "ended" : business.licenseStatus === "suspended" ? "suspended" : business.licenseStatus === "probation" || business.licenseStatus === "unlicensed" ? "breached" : "active";
+  return {
+    id: createStableEntityId("contract", `business-license:${business.id}`),
+    kind: "license",
+    sourceEntityId: business.id,
+    targetEntityId: authority,
+    beneficiaryEntityId: input.city.id,
+    assetId: assetId("business", business.id),
+    locationId: business.locationId,
+    status,
+    startedAt: business.foundedDay * DAY_MS,
+    endedAt: business.licenseStatus === "revoked" ? input.timestamp : undefined,
+    nextSettlementAt: (input.population.dayIndex + 7) * DAY_MS,
+    breachCount: business.licenseStatus === "active" ? 0 : 1,
+    terms: business.licenseStatus === "unlicensed" ? [] : [{ resource: "credits", amount: Math.max(4, Math.round(6 + business.quality * .18)), unitValue: 1, intervalMinutes: 7 * 24 * 60 }],
+    metadata: { category: business.category, status: business.licenseStatus, canonicalBusinessId: business.id }
+  };
+}
+
+function governmentLicenseContracts(input: KernelSyncInput): KernelContractState[] {
+  if (!input.government) return [];
+  return input.government.licenses.map((license) => {
+    const business = input.economy.businesses.find((item) => item.id === license.businessId);
+    return {
+      id: createStableEntityId("contract", `license:${license.id}`),
+      kind: "license" as const,
+      sourceEntityId: license.businessId,
+      targetEntityId: input.government!.budget.authorityOrganizationId,
+      beneficiaryEntityId: input.city.id,
+      assetId: business ? assetId("business", business.id) : undefined,
+      locationId: business?.locationId,
+      status: license.status === "revoked" ? "ended" as const : license.status === "suspended" ? "suspended" as const : license.status === "probation" ? "breached" as const : "active" as const,
+      startedAt: license.issuedAt,
+      endedAt: license.status === "revoked" ? input.timestamp : undefined,
+      nextSettlementAt: license.nextReviewAt,
+      breachCount: license.violations,
+      terms: [{ resource: "credits" as const, amount: license.feePerWeek, unitValue: 1, intervalMinutes: 7 * 24 * 60 }],
+      metadata: { kind: license.kind, status: license.status, expiresAt: license.expiresAt }
+    };
+  });
+}
+
+function healthContracts(input: KernelSyncInput): KernelContractState[] {
+  if (!input.health) return [];
+  const policies = input.health.policies.map((policy): KernelContractState => ({
+    id: createStableEntityId("contract", `insurance:${policy.id}`),
+    kind: "insurance",
+    sourceEntityId: policy.sponsorOrganizationId ?? policy.householdId,
+    targetEntityId: policy.insurerEntityId,
+    beneficiaryEntityId: policy.householdId,
+    status: policy.status === "active" ? "active" : policy.status === "exhausted" ? "breached" : "suspended",
+    startedAt: input.timestamp - 7 * DAY_MS,
+    nextSettlementAt: (input.health!.dayIndex + 7) * DAY_MS,
+    breachCount: policy.status === "active" ? 0 : 1,
+    terms: [{ resource: "credits", amount: policy.premiumPerWeek, unitValue: 1, intervalMinutes: 7 * 24 * 60 }],
+    metadata: { plan: policy.kind, coveragePercent: policy.coveragePercent, deductible: policy.deductible, annualLimit: policy.annualLimit }
+  }));
+  const debts = input.health.debts.filter((debt) => debt.status !== "paid" && debt.status !== "written-off").map((debt): KernelContractState => ({
+    id: createStableEntityId("contract", `medical-debt:${debt.id}`),
+    kind: "medical-care",
+    sourceEntityId: debt.householdId,
+    targetEntityId: debt.providerEntityId,
+    beneficiaryEntityId: debt.householdId,
+    status: debt.status === "delinquent" ? "breached" : "active",
+    startedAt: debt.createdDay * DAY_MS,
+    nextSettlementAt: (input.health!.dayIndex + 7) * DAY_MS,
+    breachCount: debt.status === "delinquent" ? 1 : 0,
+    terms: [{ resource: "credits", amount: debt.principal, unitValue: 1, intervalMinutes: 7 * 24 * 60 }],
+    metadata: { weeklyInterestRate: debt.weeklyInterestRate, status: debt.status }
+  }));
+  return [...policies, ...debts];
+}
+
+function dataAccessContracts(input: KernelSyncInput): KernelContractState[] {
+  if (!input.data) return [];
+  return input.data.grants.filter((grant) => grant.active).map((grant) => ({
+    id: createStableEntityId("contract", `data-access:${grant.id}`),
+    kind: "data-access" as const,
+    sourceEntityId: grant.authorityEntityId,
+    targetEntityId: grant.granteeEntityId,
+    beneficiaryEntityId: grant.granteeEntityId,
+    status: "active" as const,
+    startedAt: grant.validFromDay * DAY_MS,
+    endedAt: grant.validUntilDay ? grant.validUntilDay * DAY_MS : undefined,
+    nextSettlementAt: (input.population.dayIndex + 30) * DAY_MS,
+    breachCount: 0,
+    terms: [],
+    metadata: {
+      purpose: grant.purpose,
+      scope: grant.scope,
+      recordKinds: grant.recordKinds.join(",")
+    }
+  }));
+}
+
+function pruneOrphanedHistoricalContracts(
+  contracts: KernelContractState[],
+  accounts: KernelAccountState[],
+  assets: KernelAssetState[]
+): KernelContractState[] {
+  const entityIds = new Set(accounts.map((item) => item.entityId));
+  const assetIds = new Set(assets.map((item) => item.id));
+  return contracts.filter((item) => item.status !== "ended"
+    || (entityIds.has(item.sourceEntityId)
+      && entityIds.has(item.targetEntityId)
+      && (!item.assetId || assetIds.has(item.assetId))));
+}
+
+function buildContracts(input: KernelSyncInput, previous: KernelContractState[]): KernelContractState[] {
+  const generated = [
+    ...(input.worldCore
+      ? input.worldCore.employments.map((item) => activeWorldCoreEmploymentContract(input, item)).filter((item): item is KernelContractState => Boolean(item))
+      : input.population.employments.map((item) => activeEmploymentContract(input, item)).filter((item): item is KernelContractState => Boolean(item))),
+    ...input.population.households.map((item) => leaseContract(input, item)).filter((item): item is KernelContractState => Boolean(item)),
+    ...(input.businessEconomy?.leases ?? []).map((item) => unifiedBusinessLeaseContract(input, item)).filter((item): item is KernelContractState => Boolean(item)),
+    ...input.production.contracts.map((item) => productionContract(input, item)),
+    ...utilityContracts(input),
+    ...(input.organizationEcosystem?.agreements ?? []).map((item) => organizationAgreementContract(input, item)),
+    ...(input.businessEconomy ? input.businessEconomy.businesses.map((item) => unifiedBusinessLicenseContract(input, item)) : governmentLicenseContracts(input)),
+    ...healthContracts(input),
+    ...dataAccessContracts(input)
+  ];
+  const generatedIds = new Set(generated.map((item) => item.id));
+  const ended = previous
+    .filter((item) => !generatedIds.has(item.id) && item.status !== "ended")
+    .map((item) => ({ ...item, status: "ended" as const, endedAt: input.timestamp }));
+  return [...generated, ...ended].slice(-10_000);
+}
+
+function canonicalKernelCounterparty(seed: string, entityId: string): string {
+  if (entityId.startsWith("consumer-pool:")) return kernelSystemEntityId(seed, "consumption");
+  if (entityId.startsWith("workforce-pool:")) return kernelSystemEntityId(seed, "labor-market");
+  return entityId;
+}
+
+function canonicalizeDraft(input: KernelSyncInput, draft: KernelTransactionDraft): KernelTransactionDraft {
+  return {
+    ...draft,
+    debitEntityId: canonicalKernelCounterparty(input.seed, draft.debitEntityId),
+    creditEntityId: canonicalKernelCounterparty(input.seed, draft.creditEntityId)
+  };
+}
+
+function compactLegacySyntheticAccounts(accounts: KernelAccountState[], input: KernelSyncInput): KernelAccountState[] {
+  const merged = new Map<string, KernelAccountState>();
+  for (const source of accounts) {
+    const entityId = canonicalKernelCounterparty(input.seed, source.entityId);
+    const existing = merged.get(entityId);
+    if (!existing) {
+      merged.set(entityId, {
+        ...source,
+        id: accountId(entityId),
+        entityId,
+        entityKind: entityId === source.entityId ? source.entityKind : "system",
+        balances: source.balances.map((entry) => ({ ...entry }))
+      });
+      continue;
+    }
+    const balances = new Map(existing.balances.map((entry) => [entry.resource, entry.amount]));
+    for (const entry of source.balances) balances.set(entry.resource, (balances.get(entry.resource) ?? 0) + entry.amount);
+    merged.set(entityId, {
+      ...existing,
+      balances: [...balances.entries()].map(([resource, amount]) => balance(resource, amount)),
+      updatedAt: Math.max(existing.updatedAt, source.updatedAt)
+    });
+  }
+  return [...merged.values()];
+}
+
+function applyTransactionsBatch(accounts: KernelAccountState[], transactions: KernelTransactionState[], timestamp: number): KernelAccountState[] {
+  if (!transactions.length) return accounts;
+  const next = accounts.map((item) => ({ ...item, balances: item.balances.map((entry) => ({ ...entry })) }));
+  const indexByEntity = new Map(next.map((item, index) => [item.entityId, index]));
+  const ensure = (entityId: string): number => {
+    const found = indexByEntity.get(entityId);
+    if (found !== undefined) return found;
+    const index = next.length;
+    next.push(account(entityId, "system", [], timestamp));
+    indexByEntity.set(entityId, index);
+    return index;
+  };
+  for (const transaction of transactions) {
+    const debitIndex = ensure(transaction.debitEntityId);
+    const creditIndex = ensure(transaction.creditEntityId);
+    next[debitIndex] = setBalance(next[debitIndex], transaction.resource, getBalance(next[debitIndex], transaction.resource) - transaction.amount, timestamp);
+    next[creditIndex] = setBalance(next[creditIndex], transaction.resource, getBalance(next[creditIndex], transaction.resource) + transaction.amount, timestamp);
+  }
+  return next;
+}
+
+function transactionFromDraft(draft: KernelTransactionDraft): KernelTransactionState {
+  return {
+    ...draft,
+    id: createStableEntityId("transaction", draft.idempotencyKey),
+    amount: Math.max(0, Math.round(draft.amount * 100) / 100),
+    balanceValue: Math.max(0, Math.round(draft.amount * (draft.unitValue ?? 1) * 100) / 100)
+  };
+}
+
+function sanitizeAccountToSnapshot(current: KernelAccountState, target: KernelAccountState, timestamp: number): KernelAccountState {
+  return { ...current, entityKind: target.entityKind, balances: current.balances.map((entry) => ({ ...entry })), updatedAt: timestamp };
+}
+
+function reconcileAccounts(
+  accounts: KernelAccountState[],
+  snapshot: KernelAccountState[],
+  input: KernelSyncInput,
+  existingIds: Set<string>,
+  trackedBeforeDrafts: Map<string, Set<KernelResource>>,
+  draftTouchedResources: Map<string, Set<KernelResource>>
+): { accounts: KernelAccountState[]; transactions: KernelTransactionState[] } {
+  let nextAccounts = [...accounts];
+  const transactions: KernelTransactionState[] = [];
+  const clearing = kernelSystemEntityId(input.seed, "clearing");
+  const protectedSystems = new Set(KERNEL_SYSTEM_ACCOUNTS.map((kind) => kernelSystemEntityId(input.seed, kind)));
+  const accountIndex = new Map(nextAccounts.map((item, index) => [item.entityId, index]));
+  const snapshotEntityIds = new Set(snapshot.map((item) => item.entityId));
+
+  // Reconciliation used to perform a full Array.find + Array.map + transaction
+  // application for every account. Opening a city-sized batch of business/company
+  // accounts at a day boundary therefore became quadratic and could stall the game.
+  // Build all adjustments against an indexed snapshot, then apply them in one pass.
+  for (const target of snapshot) {
+    if (protectedSystems.has(target.entityId)) continue;
+    let index = accountIndex.get(target.entityId);
+    if (index === undefined) {
+      index = nextAccounts.length;
+      nextAccounts.push(account(target.entityId, target.entityKind, [], input.timestamp));
+      accountIndex.set(target.entityId, index);
+    }
+
+    const current = sanitizeAccountToSnapshot(nextAccounts[index], target, input.timestamp);
+    nextAccounts[index] = current;
+    const tracked = trackedBeforeDrafts.get(target.entityId);
+    const targetByResource = new Map(target.balances.map((entry) => [entry.resource, entry.amount]));
+    const candidates = new Set<KernelResource>(targetByResource.keys());
+    for (const resource of draftTouchedResources.get(target.entityId) ?? []) candidates.add(resource);
+
+    for (const resource of candidates) {
+      if (tracked?.has(resource)) continue;
+      const targetAmount = targetByResource.get(resource) ?? 0;
+      const currentAmount = getBalance(current, resource);
+      // The snapshot is the authoritative end-of-tick state, while drafts were
+      // already applied above. Infer the opening balance from their difference.
+      // This also handles a newly introduced resource that was fully consumed in
+      // its first tick and therefore no longer appears in the final snapshot.
+      const openingAmount = Math.round((targetAmount - currentAmount) * 100) / 100;
+      if (Math.abs(openingAmount) < 0.02) continue;
+      const transaction = transactionFromDraft({
+        idempotencyKey: `${input.seed}:account-opening:${input.timestamp}:${target.entityId}:${resource}:${openingAmount}`,
+        timestamp: input.timestamp,
+        debitEntityId: openingAmount > 0 ? clearing : target.entityId,
+        creditEntityId: openingAmount > 0 ? target.entityId : clearing,
+        resource,
+        amount: Math.abs(openingAmount),
+        reason: "account-opening",
+        description: `Opened ${target.entityKind} account resource from authoritative domain state.`
+      });
+      if (existingIds.has(transaction.id)) continue;
+      existingIds.add(transaction.id);
+      transactions.push(transaction);
+    }
+  }
+  nextAccounts = applyTransactionsBatch(nextAccounts, transactions, input.timestamp);
+
+  // Residents and households can leave the detailed simulation through death, migration,
+  // household merging or separation. Their historical ledger account remains addressable,
+  // but any live balances must be settled back to clearing once the entity disappears
+  // from the authoritative domain snapshot.
+  const staleTransactions: KernelTransactionState[] = [];
+  for (const stale of nextAccounts) {
+    if (stale.entityKind === "system" || snapshotEntityIds.has(stale.entityId)) continue;
+    for (const balance of stale.balances) {
+      if (Math.abs(balance.amount) < 0.01) continue;
+      const transaction = transactionFromDraft({
+        idempotencyKey: `${input.seed}:reconcile-stale:${input.timestamp}:${stale.entityId}:${balance.resource}:${balance.amount}`,
+        timestamp: input.timestamp,
+        debitEntityId: balance.amount > 0 ? stale.entityId : clearing,
+        creditEntityId: balance.amount > 0 ? clearing : stale.entityId,
+        resource: balance.resource,
+        amount: Math.abs(balance.amount),
+        reason: "migration-settlement",
+        description: `Settled archived ${stale.entityKind} account after entity left active simulation.`
+      });
+      if (existingIds.has(transaction.id)) continue;
+      existingIds.add(transaction.id);
+      staleTransactions.push(transaction);
+    }
+  }
+  if (staleTransactions.length) {
+    nextAccounts = applyTransactionsBatch(nextAccounts, staleTransactions, input.timestamp);
+    transactions.push(...staleTransactions);
+  }
+  return { accounts: nextAccounts, transactions };
+}
+
+function advanceClock(previous: SimulationKernelState["clock"] | undefined, timestamp: number): SimulationKernelState["clock"] {
+  const last = previous?.lastAdvancedAt ?? timestamp;
+  return {
+    lastAdvancedAt: timestamp,
+    minuteIndex: Math.floor(timestamp / MINUTE_MS),
+    hourIndex: Math.floor(timestamp / HOUR_MS),
+    dayIndex: Math.floor(timestamp / DAY_MS),
+    weekIndex: Math.floor(timestamp / WEEK_MS),
+    minutesAdvanced: Math.max(0, Math.floor(timestamp / MINUTE_MS) - Math.floor(last / MINUTE_MS)),
+    hoursAdvanced: Math.max(0, Math.floor(timestamp / HOUR_MS) - Math.floor(last / HOUR_MS)),
+    daysAdvanced: Math.max(0, Math.floor(timestamp / DAY_MS) - Math.floor(last / DAY_MS)),
+    weeksAdvanced: Math.max(0, Math.floor(timestamp / WEEK_MS) - Math.floor(last / WEEK_MS))
+  };
+}
+
+function integrityFor(
+  input: KernelSyncInput,
+  accounts: KernelAccountState[],
+  assets: KernelAssetState[],
+  ownership: KernelOwnershipState[],
+  contracts: KernelContractState[],
+  transactions: KernelTransactionState[]
+): KernelIntegrityState {
+  const allIds = [...accounts.map((item) => item.id), ...assets.map((item) => item.id), ...ownership.map((item) => item.id), ...contracts.map((item) => item.id), ...transactions.map((item) => item.id)];
+  const duplicateIds = allIds.length - new Set(allIds).size;
+  const assetIds = new Set(assets.map((item) => item.id));
+  const entityIds = new Set(accounts.map((item) => item.entityId));
+  const ownershipErrors = assets.filter((asset) => ownership.filter((item) => item.assetId === asset.id).reduce((sum, item) => sum + item.shareBasisPoints, 0) !== 10_000).length;
+  const orphanReferences = ownership.filter((item) => !assetIds.has(item.assetId) || !entityIds.has(item.ownerEntityId)).length
+    + contracts.filter((item) => !entityIds.has(item.sourceEntityId) || !entityIds.has(item.targetEntityId) || (item.assetId ? !assetIds.has(item.assetId) : false)).length;
+  const negativePhysicalBalances = accounts.reduce((sum, item) => sum + (item.entityKind === "system" ? 0 : item.balances.filter((entry) => entry.resource !== "credits" && entry.amount < -0.01).length), 0);
+  const reconciliation = transactions.filter((item) => item.reason === "domain-reconciliation");
+  const reconciliationCreditVolume = reconciliation.filter((item) => item.resource === "credits").reduce((sum, item) => sum + item.amount, 0);
+  const warnings: string[] = [];
+  if (duplicateIds) warnings.push(`${duplicateIds} duplicate kernel identifiers.`);
+  if (ownershipErrors) warnings.push(`${ownershipErrors} assets do not have exactly 100% registered ownership.`);
+  if (orphanReferences) warnings.push(`${orphanReferences} contracts or ownership records reference missing entities.`);
+  if (negativePhysicalBalances) warnings.push(`${negativePhysicalBalances} physical resource balances are negative.`);
+  if (reconciliation.length > Math.max(40, input.population.households.length * 0.6)) warnings.push(`High reconciliation volume: ${reconciliation.length} domain adjustments.`);
+  return {
+    healthy: duplicateIds === 0 && ownershipErrors === 0 && orphanReferences === 0 && negativePhysicalBalances === 0,
+    checkedAt: input.timestamp,
+    duplicateIds,
+    ownershipErrors,
+    orphanReferences,
+    negativePhysicalBalances,
+    reconciliationTransactions: reconciliation.length,
+    reconciliationCreditVolume,
+    warnings
+  };
+}
+
+function emptyTotals(): KernelTotalsState {
+  return { transactions: 0, creditsTransferred: 0, physicalUnitsTransferred: 0, reconciliationTransactions: 0, reconciliationCreditVolume: 0, contractsCreated: 0, assetsTracked: 0 };
+}
+
+function addTransactionsToTotals(totals: KernelTotalsState, transactions: KernelTransactionState[]): KernelTotalsState {
+  return {
+    ...totals,
+    transactions: totals.transactions + transactions.length,
+    creditsTransferred: totals.creditsTransferred + transactions.filter((item) => item.resource === "credits").reduce((sum, item) => sum + item.amount, 0),
+    physicalUnitsTransferred: totals.physicalUnitsTransferred + transactions.filter((item) => item.resource !== "credits").reduce((sum, item) => sum + item.amount, 0),
+    reconciliationTransactions: totals.reconciliationTransactions + transactions.filter((item) => item.reason === "domain-reconciliation").length,
+    reconciliationCreditVolume: totals.reconciliationCreditVolume + transactions.filter((item) => item.reason === "domain-reconciliation" && item.resource === "credits").reduce((sum, item) => sum + item.amount, 0)
+  };
+}
+
+export function createSimulationKernel(input: KernelSyncInput): SimulationKernelState {
+  const accounts = snapshotAccounts(input);
+  const assets = buildAssets(input);
+  const ownership = buildOwnership(assets, input.timestamp);
+  const contracts = buildContracts(input, []);
+  const integrity = integrityFor(input, accounts, assets, ownership, contracts, []);
+  return {
+    version: 1,
+    clock: advanceClock(undefined, input.timestamp),
+    accounts,
+    assets,
+    ownership,
+    contracts,
+    transactions: [],
+    totals: { ...emptyTotals(), contractsCreated: contracts.length, assetsTracked: assets.length },
+    integrity,
+    lastUpdatedAt: input.timestamp
+  };
+}
+
+export function normalizeSimulationKernel(value: unknown, input: KernelSyncInput): SimulationKernelState {
+  if (!value || typeof value !== "object") return createSimulationKernel(input);
+  const raw = value as Partial<SimulationKernelState>;
+  if (raw.version !== 1 || !Array.isArray(raw.accounts) || !Array.isArray(raw.transactions)) return createSimulationKernel(input);
+  return advanceSimulationKernel({
+    version: 1,
+    clock: raw.clock ?? advanceClock(undefined, input.timestamp),
+    accounts: raw.accounts,
+    assets: Array.isArray(raw.assets) ? raw.assets : [],
+    ownership: Array.isArray(raw.ownership) ? raw.ownership : [],
+    contracts: Array.isArray(raw.contracts) ? raw.contracts : [],
+    transactions: raw.transactions,
+    totals: raw.totals ?? emptyTotals(),
+    integrity: raw.integrity ?? integrityFor(input, raw.accounts, [], [], [], raw.transactions),
+    lastUpdatedAt: raw.lastUpdatedAt ?? input.timestamp
+  }, input);
+}
+
+export function advanceSimulationKernel(state: SimulationKernelState, input: KernelSyncInput): SimulationKernelState {
+  const existingIds = new Set(state.transactions.map((item) => item.id));
+  let accounts = compactLegacySyntheticAccounts(state.accounts, input);
+  const trackedBeforeDrafts = new Map(accounts.map((item) => [item.entityId, new Set(item.balances.map((entry) => entry.resource))]));
+  const draftTouchedResources = new Map<string, Set<KernelResource>>();
+  const newTransactions: KernelTransactionState[] = [];
+
+  const markDraftResource = (entityId: string, resource: KernelResource): void => {
+    const resources = draftTouchedResources.get(entityId);
+    if (resources) resources.add(resource);
+    else draftTouchedResources.set(entityId, new Set([resource]));
+  };
+
+  for (const rawDraft of input.drafts ?? []) {
+    if (rawDraft.amount <= 0) continue;
+    const transaction = transactionFromDraft(canonicalizeDraft(input, rawDraft));
+    if (existingIds.has(transaction.id)) continue;
+    existingIds.add(transaction.id);
+    newTransactions.push(transaction);
+    markDraftResource(transaction.debitEntityId, transaction.resource);
+    markDraftResource(transaction.creditEntityId, transaction.resource);
+  }
+  if (newTransactions.length) accounts = applyTransactionsBatch(accounts, newTransactions, input.timestamp);
+
+  const snapshot = snapshotAccounts(input);
+  const reconciled = reconcileAccounts(accounts, snapshot, input, existingIds, trackedBeforeDrafts, draftTouchedResources);
+  accounts = reconciled.accounts;
+  newTransactions.push(...reconciled.transactions);
+
+  const assets = buildAssets(input);
+  const ownership = buildOwnership(assets, input.timestamp);
+  const contracts = pruneOrphanedHistoricalContracts(buildContracts(input, state.contracts), accounts, assets);
+  const transactions = [...state.transactions, ...newTransactions].slice(-MAX_TRANSACTIONS);
+  const previousContractIds = new Set(state.contracts.map((item) => item.id));
+  const totals = {
+    ...addTransactionsToTotals(state.totals, newTransactions),
+    contractsCreated: state.totals.contractsCreated + contracts.filter((item) => !previousContractIds.has(item.id)).length,
+    assetsTracked: assets.length
+  };
+  const integrity = integrityFor(input, accounts, assets, ownership, contracts, newTransactions);
+  return {
+    version: 1,
+    clock: advanceClock(state.clock, input.timestamp),
+    accounts,
+    assets,
+    ownership,
+    contracts,
+    transactions,
+    totals,
+    integrity,
+    lastUpdatedAt: input.timestamp
+  };
+}

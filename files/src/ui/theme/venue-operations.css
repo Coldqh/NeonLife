@@ -161,3 +161,21 @@
   .venue-training-actions button,
   .venue-boxing-actions button { width: 100%; }
 }
+
+/* v0.52 — vacancies and shifts belong to a physical employer. */
+.venue-employment-actions { display: grid; gap: 8px; padding: 12px; background: rgba(30, 24, 13, .78); border: 1px solid rgba(226, 164, 78, .28); border-radius: 11px; }
+.venue-employment-actions > header { display: flex; justify-content: space-between; gap: 12px; color: #8c98aa; font-size: 9px; letter-spacing: .08em; }
+.venue-employment-actions > header strong { color: #e8edf5; }
+.venue-employment-actions article { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px; background: rgba(8, 17, 29, .88); border: 1px solid rgba(112, 139, 174, .16); border-radius: 9px; }
+.venue-employment-actions article strong,
+.venue-employment-actions article span,
+.venue-employment-actions article small { display: block; }
+.venue-employment-actions article span { margin-top: 3px; color: #97a4b6; font-size: 10px; }
+.venue-employment-actions article small { margin-top: 5px; color: #d9a854; font-size: 9px; }
+.venue-employment-actions article button { padding: 9px 12px; color: #fff; background: rgba(168, 94, 23, .26); border: 1px solid rgba(226, 164, 78, .55); border-radius: 8px; }
+.venue-employment-people { margin: 2px 0 0; color: #8795a8; font-size: 9px; line-height: 1.45; }
+
+@media (max-width: 720px) {
+  .venue-employment-actions article { grid-template-columns: 1fr; }
+  .venue-employment-actions article button { width: 100%; }
+}

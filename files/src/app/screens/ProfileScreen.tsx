@@ -65,13 +65,14 @@ function priorityFor(session: GameSession): ProfilePriority {
   const condition = session.player.condition;
   const obligation = activeObligations(session.pressure)[0];
   const job = getPlayerJob(session.playerLoop);
+  const employment = session.playerLoop.employment;
 
   if (condition.health <= 35) return { tone: "danger", eyebrow: "Здоровье", title: "Нужна медицинская помощь", detail: `Состояние ${percent(condition.health)}%. Найди открытую клинику.`, actionLabel: "Места рядом", route: "nearby" };
   if (condition.hunger >= 78) return { tone: "danger", eyebrow: "Голод", title: "Нужно поесть", detail: `Голод ${percent(condition.hunger)}%. Проверь еду в сумке или торговые точки.`, actionLabel: "Открыть действия", route: "nearby" };
   if (condition.fatigue >= 82) return { tone: "warn", eyebrow: "Усталость", title: "Нужно добраться до сна", detail: `Усталость ${percent(condition.fatigue)}%. Ошибки и риски уже растут.`, actionLabel: "Маршрут домой", route: "map", targetLocationId: session.life.housing.locationId };
   if (obligation && minutesUntil(session.timestamp, obligation.dueAt) <= 24 * 60) return { tone: obligation.status === "overdue" || obligation.status === "defaulted" ? "danger" : "warn", eyebrow: "Платёж", title: `${obligation.creditorName}: ₵ ${credits(obligation.amount)}`, detail: `${obligation.code} · ${timeLeftLabel(session.timestamp, obligation.dueAt)} · ${obligation.consequence}`, actionLabel: "Домашний терминал", route: "map", targetLocationId: session.life.housing.locationId };
-  if (!job) return { tone: "neutral", eyebrow: "Доход", title: "Постоянной работы нет", detail: "Выбери профессию и выполняй смену одной кнопкой.", actionLabel: "Открыть развитие", route: "work" };
-  return { tone: "good", eyebrow: "Работа", title: job.title, detail: "Смена доступна в отдельном разделе работы. Тренировки и покупки требуют физического заведения.", actionLabel: "Открыть работу", route: "work" };
+  if (!job || !employment) return { tone: "neutral", eyebrow: "Доход", title: "Постоянной работы нет", detail: "Вакансии находятся внутри конкретных заведений города.", actionLabel: "Открыть работу", route: "work" };
+  return { tone: "good", eyebrow: "Работа", title: job.title, detail: `Работодатель: ${employment.employerName}. Смена доступна только на месте.`, actionLabel: "Открыть работу", route: "work" };
 }
 
 export function ProfileScreen({ session, onOpen, onRouteTo, onAction }: { session: GameSession; onOpen: (screen: GameScreen) => void; onRouteTo: (locationId: string) => void; onAction: (action: LocalLifeAction) => void }) {
@@ -88,6 +89,7 @@ export function ProfileScreen({ session, onOpen, onRouteTo, onAction }: { sessio
   const homeUnit = session.urban.units.find((item) => item.id === homeAddress?.unitId);
   const vehicle = session.vehicles.vehicles.find((item) => session.vehicles.player.ownedVehicleIds.includes(item.id));
   const job = getPlayerJob(session.playerLoop);
+  const employment = session.playerLoop.employment;
   const warrants = session.playerCrime.warrants.filter((item) => item.status !== "closed" && item.status !== "arrested");
   const priority = priorityFor(session);
   const obligations = activeObligations(session.pressure);
@@ -159,7 +161,7 @@ export function ProfileScreen({ session, onOpen, onRouteTo, onAction }: { sessio
 
         <div className="profile-grid">
           <section className="profile-section"><header><div><span>ТЕКУЩАЯ ЖИЗНЬ</span><h2>Статус</h2></div><button type="button" className="profile-section__link" onClick={() => onOpen("work")}>Работа</button></header><div className="profile-facts">
-            <article><span>Профессия</span><strong>{job?.title ?? "Безработный"}</strong><p>{job ? `~₵ ${credits(job.basePay)} за смену · смен ${session.playerLoop.shiftsWorked}` : "Работа выбирается одной кнопкой"}</p></article>
+            <article><span>Профессия</span><strong>{job?.title ?? "Безработный"}</strong><p>{job && employment ? `${employment.employerName} · ~₵ ${credits(job.basePay)} · смен ${employment.shiftsWorked}` : "Вакансии находятся в заведениях города"}</p></article>
             <article><span>Бокс</span><strong>{boxingRankLabel(session.playerLoop.boxingRank)}</strong><p>Рейтинг {session.playerLoop.boxingRating} · {session.playerLoop.boxingWins}-{session.playerLoop.boxingLosses}</p></article>
             <article><span>Правовой риск</span><strong>{warrants.length ? `${warrants.length} активн.` : "Розыска нет"}</strong><p>Розыск {percent(session.playerCrime.heat)}% · преступлений {session.playerCrime.totals.crimesCommitted}</p></article>
             <article><span>Основной контакт</span><strong>{session.primaryContact?.name ?? "Не установлен"}</strong><p>{session.primaryContact?.role ?? "Связь не сформирована"}</p></article>
@@ -177,6 +179,8 @@ export function ProfileScreen({ session, onOpen, onRouteTo, onAction }: { sessio
         </div>
 
         <section className="profile-section profile-events"><header><div><span>ПОСЛЕДСТВИЯ</span><h2>Что изменилось</h2></div></header><div className="life-list">{latestEvents.map((event) => <article key={event.id}><div><strong>{event.title}</strong><span>{formatGameShortDateTime(event.timestamp)} · {event.detail}</span></div></article>)}{!latestEvents.length ? <p>Значимых событий пока нет.</p> : null}</div></section>
+
+        <section className="profile-section profile-biography"><header><div><span>БИОГРАФИЯ</span><h2>Личная история</h2></div><strong>{session.playerLoop.biography.length}</strong></header><div className="life-list">{[...session.playerLoop.biography].reverse().slice(0, 12).map((entry) => <article key={entry.id}><div><strong>{entry.title}</strong><span>{formatGameShortDateTime(entry.timestamp)}{entry.locationName ? ` · ${entry.locationName}` : ""} · {entry.detail}</span></div></article>)}{!session.playerLoop.biography.length ? <p>Значимых личных событий пока нет.</p> : null}</div></section>
 
         <section className="profile-section"><header><div><span>ИСТОРИЯ МИРА</span><h2>След</h2></div></header><div className="profile-history">{historyStats.map((metric) => <article key={metric.label}><strong>{metric.value}</strong><span>{metric.label}</span></article>)}</div><p className="profile-created">Мир создан {formatGameDateLong(new Date(session.world.meta.createdAt).getTime())}</p></section>
       </div>

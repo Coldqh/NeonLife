@@ -92,7 +92,7 @@ import {
 } from "../../simulation/access/buildingAccessSystem";
 import { canPrepare, getCarriedMassGrams } from "../food/foodSystem";
 import { calculateSleepRecovery, getHousingDaysLeft } from "../housing/housingSystem";
-import { getEquipment, getPlayerJob, registerEquipmentPurchase, resolvePlayerLoopAction, resolveStreetFightAgainstActor, TRAINING_ACTIONS } from "../playerLoop/playerLoopSystem";
+import { getEquipment, getPlayerJob, jobAvailableAtVenue, registerEquipmentPurchase, resolvePlayerLoopAction, resolveStreetFightAgainstActor, TRAINING_ACTIONS } from "../playerLoop/playerLoopSystem";
 import type { PlayerLoopAction } from "../playerLoop/types";
 import { getTravelOptions, isLocationOpen } from "../travel/travelSystem";
 import { advanceDistrictPulse } from "../../world/city/districtPulse";
@@ -2828,14 +2828,17 @@ export function assaultLocalActor(session: GameSession, actorId: string): GameSe
   const rolePower = /охран|банд|воен|полиц|вышиб/i.test(actor.roleLabel) ? 18 : /рабоч|курьер|механ/i.test(actor.roleLabel) ? 8 : 0;
   const healthPower = actor.health === "healthy" ? 12 : actor.health === "strained" ? 5 : -4;
   const opponentPower = Math.max(18, 24 + rolePower + healthPower + Math.round(actor.age / 5));
+  const fightLocation = currentPhysicalLocation(session);
   const combat = resolveStreetFightAgainstActor(session.playerLoop, {
     seed: session.world.meta.seed,
     timestamp: session.timestamp,
     balance: session.player.balance,
     health: session.player.condition.health,
     fatigue: session.player.condition.fatigue,
-    stress: session.player.condition.stress
-  }, { id: actor.id, name: actor.name, power: opponentPower });
+    stress: session.player.condition.stress,
+    locationId: fightLocation?.id,
+    locationName: fightLocation?.name
+  }, { id: actor.activePersonId ?? actor.id, name: actor.name, power: opponentPower });
   if (!combat.ok) return session;
 
   const won = combat.state.streetFightWins > session.playerLoop.streetFightWins;
@@ -2950,31 +2953,42 @@ export function resolvePlayerCustody(session: GameSession, method: "submit-searc
 
 
 export function performPlayerLoopAction(session: GameSession, action: PlayerLoopAction): GameSession {
-  if (action.kind === "train" || action.kind === "boxing-fight") {
-    const venue = venueAtPlayer(session, action.venueId);
+  const venueId = "venueId" in action ? action.venueId : undefined;
+  const venue = venueId ? venueAtPlayer(session, venueId) : undefined;
+  if (venueId) {
     if (!venue || !venueIsOpenAt(venue, session.timestamp)) return session;
-    if (action.kind === "boxing-fight" && venue.category !== "boxing-gym") return session;
-    if (action.kind === "train") {
-      const training = TRAINING_ACTIONS.find((item) => item.id === action.trainingId);
-      if (!training || !training.venueCategories.includes(venue.category as "gym" | "boxing-gym" | "shooting-range")) return session;
-    }
   }
+  if (action.kind === "select-job") {
+    if (!venue || !jobAvailableAtVenue(action.jobId, venue.category)) return session;
+  }
+  if (action.kind === "work-shift") {
+    if (!session.playerLoop.employment || session.playerLoop.employment.venueId !== action.venueId) return session;
+  }
+  if (action.kind === "boxing-fight" && venue?.category !== "boxing-gym") return session;
+  if (action.kind === "train") {
+    const training = TRAINING_ACTIONS.find((item) => item.id === action.trainingId);
+    if (!venue || !training || !training.venueCategories.includes(venue.category as "gym" | "boxing-gym" | "shooting-range")) return session;
+  }
+
+  const location = currentPhysicalLocation(session);
   const resolved = resolvePlayerLoopAction(session.playerLoop, action, {
     seed: session.world.meta.seed,
     timestamp: session.timestamp,
     balance: session.player.balance,
     health: session.player.condition.health,
     fatigue: session.player.condition.fatigue,
-    stress: session.player.condition.stress
+    stress: session.player.condition.stress,
+    locationId: location?.id,
+    locationName: venue?.name ?? location?.name
   });
   if (!resolved.ok) return session;
   const activeJob = getPlayerJob(resolved.state);
-  const progressed = progressLife({
+  let progressed = progressLife({
     ...session,
     playerLoop: resolved.state,
     player: { ...session.player, occupation: activeJob?.title.toUpperCase() ?? "UNEMPLOYED" }
   }, resolved.elapsedMinutes, {
-    category: resolved.balanceDelta !== 0 ? "finance" : action.kind === "boxing-fight" ? "local" : "personal",
+    category: resolved.balanceDelta !== 0 ? "finance" : action.kind === "boxing-fight" ? "local" : action.kind === "work-shift" || action.kind === "select-job" || action.kind === "leave-job" ? "work" : "personal",
     title: resolved.title,
     detail: resolved.detail,
     importance: resolved.importance,
@@ -2992,6 +3006,29 @@ export function performPlayerLoopAction(session: GameSession, action: PlayerLoop
     activity: resolved.title,
     suppressTimeEvent: true
   });
+
+  const managerPersonId = action.kind === "select-job"
+    ? action.managerPersonId
+    : session.playerLoop.employment?.managerPersonId;
+  if (managerPersonId && ["select-job", "work-shift", "leave-job"].includes(action.kind)) {
+    const relationshipEffects = action.kind === "select-job"
+      ? { trust: 2, respect: 1, importance: 55, emotionalValue: 8 }
+      : action.kind === "work-shift"
+        ? { trust: 1, respect: resolved.importance >= 2 ? 0 : 2, irritation: resolved.importance >= 2 ? 2 : 0, importance: 45, emotionalValue: resolved.importance >= 2 ? -4 : 5 }
+        : { trust: -2, irritation: 3, importance: 55, emotionalValue: -6 };
+    progressed = {
+      ...progressed,
+      people: recordPlayerAction(
+        progressed.people,
+        progressed.world.meta.seed,
+        managerPersonId,
+        progressed.timestamp,
+        resolved.title,
+        relationshipEffects
+      )
+    };
+  }
+
   return {
     ...progressed,
     playerLoop: resolved.state,

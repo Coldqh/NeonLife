@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.52.0 — One City Daily Life
+
+- made every player job belong to a concrete physical venue and removed global vacancy selection from the Work screen;
+- made one-click shifts available only while the player is inside the employer venue;
+- replaced the loose job id with one compound employment record containing the job, workplace, employer, manager, hire date and local shift count;
+- connected hiring, shifts and resignation to persistent NPC memory and relationship changes;
+- turned the Work screen into a contract record with workplace routing instead of a global action hub;
+- added a permanent player biography with exact game time, place and involved person for employment, boxing and street fights;
+- kept characteristics and equipment in Profile and purchases, training and boxing inside physical world venues;
+- bumped saves to schema 44 and player-loop state to version 2;
+- added regressions preventing remote hiring, remote shifts and abstract employment.
+
 ## 0.51.0 — World-Bound Player Systems
 
 - reduced the Work screen to employment only: current job, one-click shift, vacancies and work history;

@@ -1,18 +1,31 @@
-Neon Life 0.51.0 — verification report
+Neon Life 0.52.0 — verified results
 
-PASS  npm run typecheck
-PASS  npm run test:ui
-PASS  npm run test:work
-PASS  29/29 domain suites, run individually to avoid the old aggregate runner timeout
-PASS  generated gym, boxing-gym, shooting-range and weapon-shop venues
-PASS  training rejected outside the correct physical venue
-PASS  boxing rejected outside a boxing gym
-PASS  equipment purchased from real venue stock and price
-PASS  street fight started only against an actual nearby NPC
-PASS  WorkScreen contains employment only
-PASS  characteristics and equipment are presented in ProfileScreen
+PASS npm run typecheck
+PASS npm run test:ui
+  - architecture 28/28
+  - recovery 63/63
+  - map/profile 30/30
+  - movement 46/46
+  - city map 26/26
+  - buildings 14/14
+  - street 20/20
+  - social 20/20
+  - city fabric 21/21
+  - functional venues 16/16
+  - one-city daily life 17/17
+  - crime UI 26/26
+PASS npm run test:work
+PASS npm run test:life
+PASS npm run test:world-core
+PASS npm run test:domain — 29/29 suites, 745 seconds
+PASS schema migration to 44
+PASS physical employer binding
+PASS remote hiring and remote shifts rejected
+PASS manager memory persists
+PASS characteristics, equipment and biography live in Profile
+PASS equipment/training/boxing/street fights remain bound to physical world context
 
 Production build note:
-- TypeScript phase passed.
-- Vite bundling could not run in the Linux verification container because the supplied node_modules came from Windows and lacked @rollup/rollup-linux-x64-gnu.
-- APPLY_PATCH.ps1 runs npm ci and npm run build on the user's Windows repository before commit.
+- TypeScript phase passes.
+- Vite bundling could not be executed in this Linux container because the supplied node_modules directory contains Windows Rollup binaries and the container has no network access to install the Linux optional binary.
+- APPLY_PATCH.ps1 performs npm ci and npm run build on Windows before reporting success.

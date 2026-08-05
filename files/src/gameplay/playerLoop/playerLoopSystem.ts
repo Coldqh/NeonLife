@@ -1,8 +1,11 @@
 import { createStableEntityId } from "../../core/ids/entityId";
 import { SeededRandom } from "../../core/random/seededRandom";
 import type {
+  EmploymentVenueCategory,
   EquipmentDefinition,
   EquipmentSlot,
+  PlayerBiographyEntry,
+  PlayerEmploymentState,
   PlayerLoopAction,
   PlayerLoopActionInput,
   PlayerLoopActionResult,
@@ -13,15 +16,18 @@ import type {
   TrainingDefinition
 } from "./types";
 
-const MAX_HISTORY = 80;
+const MAX_HISTORY = 100;
+const MAX_BIOGRAPHY = 80;
 const FIGHT_COOLDOWN_MS = 45 * 60_000;
 
 export const PLAYER_JOBS: readonly SimpleJobDefinition[] = [
-  { id: "store-clerk", title: "Продавец ночного магазина", description: "Одна восьмичасовая смена за кассой.", skill: "service", minimumSkill: 0, basePay: 145, durationMinutes: 480, fatigue: 18, stress: 6, risk: 3 },
-  { id: "warehouse-loader", title: "Грузчик логистического узла", description: "Разгрузка контейнеров и сортировка ящиков.", skill: "strength", minimumSkill: 12, basePay: 175, durationMinutes: 480, fatigue: 24, stress: 5, risk: 7 },
-  { id: "clinic-orderly", title: "Санитар клиники", description: "Грязная работа в перегруженном медблоке.", skill: "medical", minimumSkill: 18, basePay: 205, durationMinutes: 480, fatigue: 19, stress: 11, risk: 5 },
-  { id: "workshop-helper", title: "Помощник механика", description: "Диагностика, детали и простой ремонт.", skill: "technical", minimumSkill: 20, basePay: 225, durationMinutes: 480, fatigue: 20, stress: 7, risk: 6 },
-  { id: "meshline-runner", title: "Курьер MESHLINE", description: "Все доставки свёрнуты в одну смену с дорожным риском.", skill: "streetwise", minimumSkill: 22, basePay: 250, durationMinutes: 420, fatigue: 22, stress: 12, risk: 14 }
+  { id: "store-clerk", title: "Продавец", description: "Одна восьмичасовая смена за кассой и на выкладке.", skill: "service", minimumSkill: 0, basePay: 145, durationMinutes: 480, fatigue: 18, stress: 6, risk: 4, venueCategories: ["convenience", "clothing", "market", "weapon-shop"] },
+  { id: "kitchen-worker", title: "Работник кухни", description: "Подготовка еды, уборка и обслуживание потока посетителей.", skill: "service", minimumSkill: 8, basePay: 155, durationMinutes: 480, fatigue: 20, stress: 8, risk: 5, venueCategories: ["food", "bar", "hotel"] },
+  { id: "clinic-orderly", title: "Санитар", description: "Грязная работа в перегруженном медицинском блоке.", skill: "medical", minimumSkill: 18, basePay: 205, durationMinutes: 480, fatigue: 19, stress: 11, risk: 6, venueCategories: ["clinic", "pharmacy"] },
+  { id: "workshop-helper", title: "Помощник механика", description: "Диагностика, детали и простой ремонт.", skill: "technical", minimumSkill: 20, basePay: 225, durationMinutes: 480, fatigue: 20, stress: 7, risk: 7, venueCategories: ["repair", "cyberware"] },
+  { id: "floor-attendant", title: "Администратор зала", description: "Стойка, уборка, инвентарь и контроль посетителей.", skill: "service", minimumSkill: 12, basePay: 165, durationMinutes: 480, fatigue: 16, stress: 7, risk: 4, venueCategories: ["gym", "boxing-gym", "shooting-range"] },
+  { id: "office-clerk", title: "Офисный клерк", description: "Документы, терминалы и поток городских заявок.", skill: "technical", minimumSkill: 16, basePay: 195, durationMinutes: 480, fatigue: 13, stress: 10, risk: 3, venueCategories: ["office-service"] },
+  { id: "venue-security", title: "Охранник", description: "Контроль входа, конфликты и ночные проверки.", skill: "streetwise", minimumSkill: 22, basePay: 235, durationMinutes: 480, fatigue: 19, stress: 13, risk: 13, venueCategories: ["bar", "entertainment", "weapon-shop", "hotel"] }
 ] as const;
 
 export const TRAINING_ACTIONS: readonly TrainingDefinition[] = [
@@ -54,7 +60,7 @@ function initialSkill(rng: SeededRandom, min: number, max: number): number {
 export function createPlayerLoopState(seed: string, timestamp: number): PlayerLoopState {
   const rng = new SeededRandom(`${seed}:player-loop`);
   return {
-    version: 1,
+    version: 2,
     skills: {
       service: initialSkill(rng, 12, 20),
       technical: initialSkill(rng, 8, 16),
@@ -65,7 +71,7 @@ export function createPlayerLoopState(seed: string, timestamp: number): PlayerLo
       shooting: initialSkill(rng, 5, 12),
       streetwise: initialSkill(rng, 11, 19)
     },
-    activeJobId: null,
+    employment: null,
     shiftsWorked: 0,
     totalEarned: 0,
     ownedEquipmentIds: ["street-clothes"],
@@ -82,8 +88,15 @@ export function createPlayerLoopState(seed: string, timestamp: number): PlayerLo
       timestamp,
       category: "work",
       title: "Новая жизнь",
-      detail: "Работы нет. Базовые навыки определены.",
+      detail: "Постоянной работы нет. Базовые навыки определены.",
       moneyDelta: 0
+    }],
+    biography: [{
+      id: createStableEntityId("player-biography", `${seed}:${timestamp}:start`),
+      timestamp,
+      category: "milestone",
+      title: "Начало городской жизни",
+      detail: "Персонаж начал самостоятельную жизнь в городе."
     }]
   };
 }
@@ -92,10 +105,25 @@ function legacyNumber(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function normalizeEmployment(value: unknown): PlayerEmploymentState | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Partial<PlayerEmploymentState>;
+  if (typeof raw.jobId !== "string" || !PLAYER_JOBS.some((job) => job.id === raw.jobId)) return null;
+  if (typeof raw.venueId !== "string" || !raw.venueId || raw.venueId === "legacy-unassigned") return null;
+  return {
+    jobId: raw.jobId,
+    venueId: raw.venueId,
+    employerName: typeof raw.employerName === "string" && raw.employerName ? raw.employerName : "Работодатель",
+    managerPersonId: typeof raw.managerPersonId === "string" ? raw.managerPersonId : undefined,
+    hiredAt: typeof raw.hiredAt === "number" && Number.isFinite(raw.hiredAt) ? raw.hiredAt : 0,
+    shiftsWorked: Math.max(0, Math.round(legacyNumber(raw.shiftsWorked)))
+  };
+}
+
 export function normalizePlayerLoopState(value: unknown, seed: string, timestamp: number, legacyJobs?: unknown): PlayerLoopState {
   const base = createPlayerLoopState(seed, timestamp);
   if (value && typeof value === "object") {
-    const raw = value as Partial<PlayerLoopState>;
+    const raw = value as Partial<PlayerLoopState> & { activeJobId?: unknown };
     const rawSkills = raw.skills && typeof raw.skills === "object" ? raw.skills : {};
     const normalizedSkill = (skill: PlayerSkill): number => {
       const candidate = (rawSkills as Partial<Record<PlayerSkill, unknown>>)[skill];
@@ -129,11 +157,16 @@ export function normalizePlayerLoopState(value: unknown, seed: string, timestamp
     const historyEntries = Array.isArray(raw.history)
       ? raw.history.filter((entry): entry is PlayerLoopHistoryEntry => Boolean(entry && typeof entry === "object" && typeof (entry as PlayerLoopHistoryEntry).id === "string")).slice(-MAX_HISTORY)
       : base.history;
+    const biographyEntries = Array.isArray(raw.biography)
+      ? raw.biography.filter((entry): entry is PlayerBiographyEntry => Boolean(entry && typeof entry === "object" && typeof (entry as PlayerBiographyEntry).id === "string")).slice(-MAX_BIOGRAPHY)
+      : base.biography;
+    const employment = normalizeEmployment(raw.employment);
+    const droppedLegacyJob = !employment && typeof raw.activeJobId === "string";
     return {
       ...base,
-      version: 1,
+      version: 2,
       skills,
-      activeJobId: typeof raw.activeJobId === "string" && PLAYER_JOBS.some((job) => job.id === raw.activeJobId) ? raw.activeJobId : null,
+      employment,
       shiftsWorked: Math.max(0, Math.round(legacyNumber(raw.shiftsWorked))),
       totalEarned: Math.max(0, Math.round(legacyNumber(raw.totalEarned))),
       ownedEquipmentIds,
@@ -145,7 +178,17 @@ export function normalizePlayerLoopState(value: unknown, seed: string, timestamp
       boxingRating: Math.max(0, Math.round(legacyNumber(raw.boxingRating))),
       boxingRank: Math.max(0, Math.min(BOXING_RANKS.length - 1, Math.round(legacyNumber(raw.boxingRank)))),
       lastFightAt: typeof raw.lastFightAt === "number" && Number.isFinite(raw.lastFightAt) ? raw.lastFightAt : null,
-      history: historyEntries.length ? historyEntries : base.history
+      history: droppedLegacyJob
+        ? [...historyEntries, {
+            id: createStableEntityId("player-loop-history", `${seed}:${timestamp}:employment-migration`),
+            timestamp,
+            category: "work" as const,
+            title: "Старый контракт закрыт",
+            detail: "Работа теперь привязана к физическому работодателю. Нужно устроиться в конкретном заведении.",
+            moneyDelta: 0
+          }].slice(-MAX_HISTORY)
+        : (historyEntries.length ? historyEntries : base.history),
+      biography: biographyEntries.length ? biographyEntries : base.biography
     };
   }
 
@@ -153,16 +196,6 @@ export function normalizePlayerLoopState(value: unknown, seed: string, timestamp
   const work = jobs?.work && typeof jobs.work === "object" ? jobs.work as Record<string, unknown> : undefined;
   const skills = work?.skills && typeof work.skills === "object" ? work.skills as Record<string, unknown> : undefined;
   const contracts = Array.isArray(work?.contracts) ? work.contracts as Array<Record<string, unknown>> : [];
-  const activeContractId = typeof work?.activeContractId === "string" ? work.activeContractId : null;
-  const contract = contracts.find((item) => item.id === activeContractId);
-  const role = typeof contract?.role === "string" ? contract.role : "";
-  const jobMap: Record<string, string> = {
-    cashier: "store-clerk",
-    "cafe-crew": "store-clerk",
-    "clinic-aide": "clinic-orderly",
-    mechanic: "workshop-helper",
-    courier: "meshline-runner"
-  };
   const courier = jobs?.courier && typeof jobs.courier === "object" ? jobs.courier as Record<string, unknown> : undefined;
   return {
     ...base,
@@ -173,7 +206,6 @@ export function normalizePlayerLoopState(value: unknown, seed: string, timestamp
       medical: clamp(legacyNumber(skills?.medical) || base.skills.medical),
       streetwise: clamp(Math.max(base.skills.streetwise, Math.round(legacyNumber(courier?.rating) / 4)))
     },
-    activeJobId: jobMap[role] ?? null,
     shiftsWorked: contracts.reduce((sum, item) => sum + legacyNumber(item.completedShifts), 0) + legacyNumber(courier?.completedDeliveries),
     totalEarned: legacyNumber(work?.totalEarned) + legacyNumber(courier?.totalEarnings),
     history: [{
@@ -181,14 +213,26 @@ export function normalizePlayerLoopState(value: unknown, seed: string, timestamp
       timestamp,
       category: "work",
       title: "Старые рабочие системы удалены",
-      detail: "Доход и базовые навыки перенесены в однокнопочный цикл.",
+      detail: "Доход и навыки сохранены. Для новой работы нужно прийти к конкретному работодателю.",
       moneyDelta: 0
     }]
   };
 }
 
 export function getPlayerJob(state: PlayerLoopState): SimpleJobDefinition | undefined {
-  return PLAYER_JOBS.find((job) => job.id === state.activeJobId);
+  return PLAYER_JOBS.find((job) => job.id === state.employment?.jobId);
+}
+
+export function getPlayerEmployment(state: PlayerLoopState): PlayerEmploymentState | null {
+  return state.employment;
+}
+
+export function jobsForVenueCategory(category: EmploymentVenueCategory): SimpleJobDefinition[] {
+  return PLAYER_JOBS.filter((job) => job.venueCategories.includes(category));
+}
+
+export function jobAvailableAtVenue(jobId: string, category: EmploymentVenueCategory): boolean {
+  return Boolean(PLAYER_JOBS.find((job) => job.id === jobId)?.venueCategories.includes(category));
 }
 
 export function getEquipment(itemId: string | undefined): EquipmentDefinition | undefined {
@@ -217,16 +261,33 @@ export function boxingRankLabel(rank: number): string {
   return BOXING_RANKS[Math.max(0, Math.min(BOXING_RANKS.length - 1, rank))];
 }
 
-function history(state: PlayerLoopState, input: PlayerLoopActionInput, category: PlayerLoopHistoryEntry["category"], title: string, detail: string, moneyDelta: number): PlayerLoopState {
+function history(state: PlayerLoopState, input: PlayerLoopActionInput, category: PlayerLoopHistoryEntry["category"], title: string, detail: string, moneyDelta: number, personId?: string): PlayerLoopState {
   const entry: PlayerLoopHistoryEntry = {
     id: createStableEntityId("player-loop-history", `${input.seed}:${input.timestamp}:${category}:${title}:${state.history.length}`),
     timestamp: input.timestamp,
     category,
     title,
     detail,
-    moneyDelta
+    moneyDelta,
+    locationId: input.locationId,
+    locationName: input.locationName,
+    personId
   };
   return { ...state, history: [...state.history, entry].slice(-MAX_HISTORY) };
+}
+
+function biography(state: PlayerLoopState, input: PlayerLoopActionInput, category: PlayerBiographyEntry["category"], title: string, detail: string, personId?: string): PlayerLoopState {
+  const entry: PlayerBiographyEntry = {
+    id: createStableEntityId("player-biography", `${input.seed}:${input.timestamp}:${category}:${title}:${state.biography.length}`),
+    timestamp: input.timestamp,
+    category,
+    title,
+    detail,
+    locationId: input.locationId,
+    locationName: input.locationName,
+    personId
+  };
+  return { ...state, biography: [...state.biography, entry].slice(-MAX_BIOGRAPHY) };
 }
 
 function reject(state: PlayerLoopState, message: string): PlayerLoopActionResult {
@@ -281,7 +342,8 @@ export function resolveStreetFightAgainstActor(state: PlayerLoopState, input: Pl
     lastFightAt: input.timestamp + 6 * 60_000
   }, "streetwise", streetGain);
   const detail = `${won ? "Победа" : "Поражение"}. Улица +${streetGain}. Здоровье −${damage}.`;
-  next = history(next, input, "fight", `Драка: ${opponent.name}`, detail, 0);
+  next = history(next, input, "fight", `Драка: ${opponent.name}`, detail, 0, opponent.id);
+  next = biography(next, input, "combat", `${won ? "Победил" : "Проиграл"} в уличной драке`, `${opponent.name}. ${detail}`, opponent.id);
   return result(next, `${won ? "Победа" : "Поражение"}: ${opponent.name}`, `Драка: ${opponent.name}`, detail, 6, 0, -damage, won ? 8 : 14, won ? 5 : 11, won ? 2 : 3);
 }
 
@@ -295,21 +357,36 @@ export function resolvePlayerLoopAction(state: PlayerLoopState, action: PlayerLo
   if (action.kind === "select-job") {
     const job = PLAYER_JOBS.find((item) => item.id === action.jobId);
     if (!job) return reject(state, "Работа не существует");
+    if (!action.venueId || !action.employerName) return reject(state, "Работа должна принадлежать конкретному работодателю");
+    if (state.employment) return reject(state, `Сначала уволься из «${state.employment.employerName}»`);
     if (state.skills[job.skill] < job.minimumSkill) return reject(state, `Нужен навык «${skillLabel(job.skill)}» ${job.minimumSkill}`);
-    const next = history({ ...state, activeJobId: job.id }, input, "work", `Устройство: ${job.title}`, "Работа выбрана. Смена выполняется одной кнопкой.", 0);
-    return result(next, `Работа выбрана: ${job.title}`, `Новая работа: ${job.title}`, job.description, 30, 0, 0, 1, 1);
+    const employment: PlayerEmploymentState = {
+      jobId: job.id,
+      venueId: action.venueId,
+      employerName: action.employerName,
+      managerPersonId: action.managerPersonId,
+      hiredAt: input.timestamp,
+      shiftsWorked: 0
+    };
+    let next = history({ ...state, employment }, input, "work", `Устройство: ${job.title}`, `${action.employerName}. Смена доступна только на рабочем месте.`, 0, action.managerPersonId);
+    next = biography(next, input, "employment", `Устроился: ${job.title}`, action.employerName, action.managerPersonId);
+    return result(next, `Работа выбрана: ${job.title}`, `Новая работа: ${job.title}`, `${action.employerName}. ${job.description}`, 30, 0, 0, 1, 1);
   }
 
   if (action.kind === "leave-job") {
     const job = getPlayerJob(state);
-    if (!job) return reject(state, "Активной работы нет");
-    const next = history({ ...state, activeJobId: null }, input, "work", `Увольнение: ${job.title}`, "Рабочий цикл закрыт.", 0);
-    return result(next, `Ты уволился: ${job.title}`, `Увольнение: ${job.title}`, "Активной работы больше нет.", 10, 0, 0, 0, -1);
+    const employment = state.employment;
+    if (!job || !employment) return reject(state, "Активной работы нет");
+    let next = history({ ...state, employment: null }, input, "work", `Увольнение: ${job.title}`, employment.employerName, 0, employment.managerPersonId);
+    next = biography(next, input, "employment", `Уволился: ${job.title}`, `${employment.employerName}. Отработано смен: ${employment.shiftsWorked}.`, employment.managerPersonId);
+    return result(next, `Ты уволился: ${job.title}`, `Увольнение: ${job.title}`, `Работа в «${employment.employerName}» закончена.`, 10, 0, 0, 0, 2);
   }
 
   if (action.kind === "work-shift") {
     const job = getPlayerJob(state);
-    if (!job) return reject(state, "Сначала выбери работу");
+    const employment = state.employment;
+    if (!job || !employment) return reject(state, "Сначала устройся на работу у конкретного работодателя");
+    if (action.venueId !== employment.venueId) return reject(state, `Смена доступна только в «${employment.employerName}»`);
     if (input.health < 20) return reject(state, "Состояние слишком тяжёлое для смены");
     if (input.fatigue > 92) return reject(state, "Ты слишком устал для смены");
     const skill = state.skills[job.skill];
@@ -318,11 +395,22 @@ export function resolvePlayerLoopAction(state: PlayerLoopState, action: PlayerLo
     const incident = rng.integer(1, 100) <= job.risk;
     const incidentHealth = incident ? -rng.integer(2, 8) : 0;
     const incidentStress = incident ? rng.integer(4, 9) : 0;
-    const detail = incident
-      ? `Получено ₵ ${pay}. ${skillLabel(job.skill)} +${gain}. На смене произошёл неприятный инцидент.`
-      : `Получено ₵ ${pay}. ${skillLabel(job.skill)} +${gain}.`;
-    let next = addSkill({ ...state, shiftsWorked: state.shiftsWorked + 1, totalEarned: state.totalEarned + pay }, job.skill, gain);
-    next = history(next, input, "work", `Смена: ${job.title}`, detail, pay);
+    const incidentText = incident ? rng.pick([
+      "Клиент устроил конфликт, и смена закончилась разбором с начальством.",
+      "Оборудование сорвало работу, часть смены ушла на аварийную уборку.",
+      "Один из работников не вышел, пришлось закрывать его участок.",
+      "Проверка безопасности нашла нарушение прямо во время смены."
+    ]) : "Смена прошла без серьёзных происшествий.";
+    const detail = `Получено ₵ ${pay}. ${skillLabel(job.skill)} +${gain}. ${incidentText}`;
+    let next = addSkill({
+      ...state,
+      employment: { ...employment, shiftsWorked: employment.shiftsWorked + 1 },
+      shiftsWorked: state.shiftsWorked + 1,
+      totalEarned: state.totalEarned + pay
+    }, job.skill, gain);
+    next = history(next, input, "work", `Смена: ${job.title}`, detail, pay, employment.managerPersonId);
+    if (employment.shiftsWorked === 0) next = biography(next, input, "employment", `Первая смена: ${job.title}`, employment.employerName, employment.managerPersonId);
+    if (incident) next = biography(next, input, "employment", `Инцидент на работе`, `${employment.employerName}: ${incidentText}`, employment.managerPersonId);
     return result(next, `Смена завершена · +₵ ${pay} · ${skillLabel(job.skill)} +${gain}`, `Смена: ${job.title}`, detail, job.durationMinutes, pay, incidentHealth, job.fatigue, job.stress + incidentStress, incident ? 2 : 1);
   }
 
@@ -381,6 +469,7 @@ export function resolvePlayerLoopAction(state: PlayerLoopState, action: PlayerLo
     const promoted = nextRank > rank;
     const detail = `${won ? "Победа" : "Поражение"}. Бокс +${boxingGain}. Рейтинг ${ratingDelta >= 0 ? "+" : ""}${ratingDelta}. Здоровье −${damage}.${purse ? ` Гонорар ₵ ${purse}.` : ""}${promoted ? ` Новый ранг: ${boxingRankLabel(nextRank)}.` : ""}`;
     next = history(next, input, "boxing", `Боксёрский бой: ${boxingRankLabel(rank)}`, detail, purse);
+    next = biography(next, input, "boxing", `${won ? "Победил" : "Проиграл"} на ринге`, `${boxingRankLabel(rank)}. ${detail}`);
     return result(next, `${won ? "Победа" : "Поражение"} в ринге`, `Боксёрский бой: ${boxingRankLabel(rank)}`, detail, 60, purse, -damage, 18, won ? 5 : 10, won ? 2 : 3);
   }
 

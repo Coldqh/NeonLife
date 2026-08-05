@@ -1,0 +1,52 @@
+.work-screen { display: grid; gap: 18px; padding-bottom: 36px; }
+.work-heading { display: flex; justify-content: space-between; gap: 16px; align-items: flex-end; }
+.work-heading__income { min-width: 150px; padding: 14px; border: 1px solid var(--nl-line); background: var(--nl-surface); }
+.work-heading__income span, .simple-section > header > span, .simple-current-job > div > span { color: var(--nl-muted); font-size: 10px; letter-spacing: .12em; }
+.work-heading__income strong { display: block; margin: 5px 0; font-size: 24px; }
+.work-heading__income small { color: var(--nl-muted); }
+.simple-current-job { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; padding: 18px; border: 1px solid var(--nl-line); background: var(--nl-surface); }
+.simple-current-job h2, .simple-section h2 { margin: 5px 0 7px; }
+.simple-current-job p, .simple-section header p { margin: 0; color: var(--nl-muted); line-height: 1.45; }
+.simple-current-job__actions { display: grid; gap: 8px; min-width: 230px; align-content: center; }
+.work-primary, .work-secondary, .simple-section button, .equipment-slots button { min-height: 42px; border: 1px solid var(--nl-line); background: var(--nl-surface-2); color: var(--nl-text); font: inherit; font-weight: 700; cursor: pointer; }
+.work-primary { background: var(--nl-accent); color: var(--nl-bg); border-color: var(--nl-accent); }
+button:disabled { opacity: .42; cursor: not-allowed; }
+.work-skills { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.work-skills article { padding: 12px; border: 1px solid var(--nl-line); background: var(--nl-surface); }
+.work-skills span { display: block; color: var(--nl-muted); font-size: 10px; text-transform: uppercase; }
+.work-skills strong { display: block; margin: 4px 0 8px; font-size: 21px; }
+.work-skills i { display: block; height: 3px; background: var(--nl-line); overflow: hidden; }
+.work-skills i b { display: block; height: 100%; background: var(--nl-accent); }
+.simple-section { display: grid; gap: 12px; }
+.simple-section > header { padding: 2px 2px 4px; }
+.simple-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.simple-card-grid > article { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--nl-line); background: var(--nl-surface); }
+.simple-card-grid > article.is-active { border-color: var(--nl-accent); box-shadow: inset 3px 0 0 var(--nl-accent); }
+.simple-card-grid h3 { margin: 4px 0 6px; }
+.simple-card-grid p { margin: 0; color: var(--nl-muted); line-height: 1.4; }
+.simple-card-grid article > div > span { color: var(--nl-accent); font-size: 11px; text-transform: uppercase; }
+.simple-card-grid dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; gap: 6px; }
+.simple-card-grid dl div { padding: 8px; background: var(--nl-surface-2); }
+.simple-card-grid dt { color: var(--nl-muted); font-size: 10px; }
+.simple-card-grid dd { margin: 3px 0 0; font-weight: 700; }
+.equipment-slots { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.equipment-slots article { display: grid; gap: 5px; padding: 12px; border: 1px solid var(--nl-line); background: var(--nl-surface); }
+.equipment-slots span, .equipment-slots small { color: var(--nl-muted); }
+.simple-summary { margin: 0; color: var(--nl-muted); }
+.boxing-card { padding: 18px; border: 1px solid var(--nl-line); background: var(--nl-surface); grid-template-columns: minmax(0, 1fr) minmax(220px, 320px); align-items: center; }
+.simple-history { display: grid; border-top: 1px solid var(--nl-line); }
+.simple-history article { display: flex; justify-content: space-between; gap: 16px; padding: 12px 2px; border-bottom: 1px solid var(--nl-line); }
+.simple-history strong, .simple-history span { display: block; }
+.simple-history span, .simple-history small { color: var(--nl-muted); margin-top: 3px; }
+@media (max-width: 760px) {
+  .work-heading, .simple-current-job, .boxing-card { grid-template-columns: 1fr; display: grid; align-items: stretch; }
+  .simple-current-job__actions { min-width: 0; }
+  .work-skills, .equipment-slots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .simple-card-grid { grid-template-columns: 1fr; }
+  .simple-history article { display: grid; gap: 5px; }
+}
+
+/* v0.52 — the work screen is a contract record, not a global action hub. */
+.simple-current-job small { display: block; margin-top: 6px; color: var(--nl-muted); }
+.work-rules > article { min-height: 145px; }
+.work-rules > article > div > span { font-size: 18px; }

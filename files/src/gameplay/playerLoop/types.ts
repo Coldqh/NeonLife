@@ -1,6 +1,7 @@
 export type PlayerSkill = "service" | "technical" | "medical" | "strength" | "endurance" | "boxing" | "shooting" | "streetwise";
 export type EquipmentSlot = "outfit" | "armor" | "weapon" | "implant";
 export type WeaponClass = "unarmed" | "melee" | "firearm";
+export type EmploymentVenueCategory = "convenience" | "food" | "bar" | "pharmacy" | "clinic" | "repair" | "cyberware" | "clothing" | "entertainment" | "hotel" | "office-service" | "market" | "gym" | "boxing-gym" | "shooting-range" | "weapon-shop";
 
 export interface PlayerSkillsState {
   service: number;
@@ -24,6 +25,16 @@ export interface SimpleJobDefinition {
   fatigue: number;
   stress: number;
   risk: number;
+  venueCategories: EmploymentVenueCategory[];
+}
+
+export interface PlayerEmploymentState {
+  jobId: string;
+  venueId: string;
+  employerName: string;
+  managerPersonId?: string;
+  hiredAt: number;
+  shiftsWorked: number;
 }
 
 export interface TrainingDefinition {
@@ -62,12 +73,26 @@ export interface PlayerLoopHistoryEntry {
   title: string;
   detail: string;
   moneyDelta: number;
+  locationId?: string;
+  locationName?: string;
+  personId?: string;
+}
+
+export interface PlayerBiographyEntry {
+  id: string;
+  timestamp: number;
+  category: "employment" | "combat" | "boxing" | "milestone";
+  title: string;
+  detail: string;
+  locationId?: string;
+  locationName?: string;
+  personId?: string;
 }
 
 export interface PlayerLoopState {
-  version: 1;
+  version: 2;
   skills: PlayerSkillsState;
-  activeJobId: string | null;
+  employment: PlayerEmploymentState | null;
   shiftsWorked: number;
   totalEarned: number;
   ownedEquipmentIds: string[];
@@ -80,12 +105,13 @@ export interface PlayerLoopState {
   boxingRank: number;
   lastFightAt: number | null;
   history: PlayerLoopHistoryEntry[];
+  biography: PlayerBiographyEntry[];
 }
 
 export type PlayerLoopAction =
-  | { kind: "select-job"; jobId: string }
+  | { kind: "select-job"; jobId: string; venueId: string; employerName: string; managerPersonId?: string }
   | { kind: "leave-job" }
-  | { kind: "work-shift" }
+  | { kind: "work-shift"; venueId: string }
   | { kind: "train"; trainingId: string; venueId: string }
   | { kind: "equip-item"; itemId: string }
   | { kind: "unequip-item"; slot: EquipmentSlot }
@@ -98,6 +124,8 @@ export interface PlayerLoopActionInput {
   health: number;
   fatigue: number;
   stress: number;
+  locationId?: string;
+  locationName?: string;
 }
 
 export interface PlayerLoopActionResult {

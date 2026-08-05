@@ -1,7 +1,7 @@
 {
   "name": "neon-life",
   "private": true,
-  "version": "0.51.0",
+  "version": "0.52.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -40,7 +40,8 @@
     "test:domain": "node scripts/run-all-domain-tests.mjs",
     "test:runtime": "node scripts/run-runtime-performance-test.mjs",
     "test:save": "node scripts/run-save-codec-test.mjs",
-    "test:legacy-work": "node scripts/verify-no-legacy-player-work.mjs"
+    "test:legacy-work": "node scripts/verify-no-legacy-player-work.mjs",
+    "test:city-life": "npm run test:work-ui && npm run test:work"
   },
   "dependencies": {
     "react": "18.3.1",

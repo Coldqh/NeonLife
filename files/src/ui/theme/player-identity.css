@@ -60,3 +60,6 @@
   .profile-owned-equipment article { grid-template-columns: 1fr; }
   .profile-owned-equipment button { width: 100%; }
 }
+
+/* v0.52 — permanent personal biography with exact time and place. */
+.profile-biography .life-list article span { white-space: normal; line-height: 1.45; }

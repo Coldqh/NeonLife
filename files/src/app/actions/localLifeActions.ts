@@ -2,7 +2,8 @@ import type { GameSession } from "../../world/state/types";
 import { getFoodProduct } from "../../data/products/foodCatalog";
 import { getBusinessAtLocation, localPrice } from "../../gameplay/economy/localEconomy";
 import { isLocationOpen } from "../../gameplay/travel/travelSystem";
-import { resolvePlayerLoopAction, TRAINING_ACTIONS } from "../../gameplay/playerLoop/playerLoopSystem";
+import { jobAvailableAtVenue, resolvePlayerLoopAction, TRAINING_ACTIONS } from "../../gameplay/playerLoop/playerLoopSystem";
+import { venueIsOpenAt } from "../../simulation/venues/venueOperationsSystem";
 import type { PlayerLoopAction } from "../../gameplay/playerLoop/types";
 import { currentPhysicalLocation, isPlayerInsideHome, isPlayerInsideLocation } from "../../gameplay/life/playerPresence";
 import {
@@ -102,22 +103,33 @@ function execute(session: GameSession, action: LocalLifeAction): GameSession {
 }
 
 function playerLoopRejection(session: GameSession, action: PlayerLoopAction): string {
-  if (action.kind === "train" || action.kind === "boxing-fight") {
-    const venue = session.urban.venues.find((item) => item.id === action.venueId && item.unitId === session.localScene.playerPosition.unitId);
+  const venueId = "venueId" in action ? action.venueId : undefined;
+  const venue = venueId ? session.urban.venues.find((item) => item.id === venueId && item.unitId === session.localScene.playerPosition.unitId) : undefined;
+  if (venueId) {
     if (!venue) return "Нужно находиться внутри нужного заведения";
-    if (action.kind === "boxing-fight" && venue.category !== "boxing-gym") return "Боксёрский бой проводится только в боксёрском зале";
-    if (action.kind === "train") {
-      const training = TRAINING_ACTIONS.find((item) => item.id === action.trainingId);
-      if (!training || !training.venueCategories.includes(venue.category as "gym" | "boxing-gym" | "shooting-range")) return "Эта тренировка здесь недоступна";
-    }
+    if (!venueIsOpenAt(venue, session.timestamp)) return "Заведение сейчас закрыто";
   }
+  if (action.kind === "select-job") {
+    if (!venue || !jobAvailableAtVenue(action.jobId, venue.category)) return "У этого работодателя нет такой вакансии";
+  }
+  if (action.kind === "work-shift") {
+    if (!session.playerLoop.employment || session.playerLoop.employment.venueId !== action.venueId) return "Смена доступна только у твоего работодателя";
+  }
+  if (action.kind === "boxing-fight" && venue?.category !== "boxing-gym") return "Боксёрский бой проводится только в боксёрском зале";
+  if (action.kind === "train") {
+    const training = TRAINING_ACTIONS.find((item) => item.id === action.trainingId);
+    if (!venue || !training || !training.venueCategories.includes(venue.category as "gym" | "boxing-gym" | "shooting-range")) return "Эта тренировка здесь недоступна";
+  }
+  const location = currentPhysicalLocation(session);
   return resolvePlayerLoopAction(session.playerLoop, action, {
     seed: session.world.meta.seed,
     timestamp: session.timestamp,
     balance: session.player.balance,
     health: session.player.condition.health,
     fatigue: session.player.condition.fatigue,
-    stress: session.player.condition.stress
+    stress: session.player.condition.stress,
+    locationId: location?.id,
+    locationName: venue?.name ?? location?.name
   }).message;
 }
 

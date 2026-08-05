@@ -1,7 +1,7 @@
 import { getProduct } from "../../data/products/productCatalog";
 import { getCarriedMassGrams } from "../../gameplay/food/foodSystem";
 import { currentPhysicalLocation, isPlayerInsideHome, isPlayerInsideLocation } from "../../gameplay/life/playerPresence";
-import { boxingRankLabel, getEquipment, skillLabel, TRAINING_ACTIONS } from "../../gameplay/playerLoop/playerLoopSystem";
+import { boxingRankLabel, getEquipment, getPlayerJob, jobsForVenueCategory, skillLabel, TRAINING_ACTIONS } from "../../gameplay/playerLoop/playerLoopSystem";
 import type { GameSession } from "../../world/state/types";
 import { venueCategoryLabel, venueIsOpen } from "./mapUi";
 import type { LocalLifeAction } from "../actions/localLifeActions";
@@ -43,6 +43,13 @@ export function BuildingServicePanel({
   })?.id : undefined;
   const pendingSupplies = venue ? session.urban.venueOperations.supplyOrders.filter((order) => order.venueId === venue.id && (order.status === "ordered" || order.status === "in-transit")) : [];
   const trainingActions = venue ? TRAINING_ACTIONS.filter((training) => training.venueCategories.includes(venue.category as "gym" | "boxing-gym" | "shooting-range")) : [];
+  const employment = session.playerLoop.employment;
+  const activeJob = getPlayerJob(session.playerLoop);
+  const isWorkplace = Boolean(venue && employment?.venueId === venue.id);
+  const vacancyJobs = venue ? jobsForVenueCategory(venue.category) : [];
+  const venueLocationId = venue?.anchorLocationId ?? location?.id;
+  const venueWorkers = venueLocationId ? session.people.people.filter((person) => person.workLocationId === venueLocationId && (person.lifeStatus ?? "alive") === "alive") : [];
+  const manager = venueWorkers.find((person) => ["vendor", "clinic-assistant", "technician", "cook", "office-clerk", "housing-manager", "transit-guard"].includes(person.role)) ?? venueWorkers[0];
 
   return (
     <aside className="building-service-panel" data-no-swipe>
@@ -61,6 +68,26 @@ export function BuildingServicePanel({
             <div><span>КАССА</span><strong>₵ {Math.round(venueOperation.cash)}</strong></div>
             <div><span>ПОСТАВКИ</span><strong>{pendingSupplies.length ? `${pendingSupplies.length} в пути` : "нет заказов"}</strong></div>
           </header>
+          {vacancyJobs.length ? (
+            <section className="venue-employment-actions">
+              <header><span>РАБОТА</span><strong>{manager ? `Управляющий: ${manager.name}` : venue.name}</strong></header>
+              {isWorkplace && activeJob && employment ? (
+                <article className="venue-current-employment">
+                  <div><strong>{activeJob.title}</strong><span>{employment.employerName}</span><small>Смен здесь: {employment.shiftsWorked} · база ₵ {activeJob.basePay} · {activeJob.durationMinutes / 60} ч.</small></div>
+                  <button type="button" disabled={!venueOpen || session.player.condition.health < 20 || session.player.condition.fatigue > 92} onClick={() => onAction({ kind: "work-shift", venueId: venue.id })}>Отработать смену</button>
+                </article>
+              ) : employment ? (
+                <p className="building-service-empty">Ты уже работаешь в «{employment.employerName}». Смену можно начать только там.</p>
+              ) : (
+                vacancyJobs.map((job) => {
+                  const skill = session.playerLoop.skills[job.skill];
+                  const ready = skill >= job.minimumSkill;
+                  return <article key={job.id}><div><strong>{job.title}</strong><span>{job.description}</span><small>{skillLabel(job.skill)} {skill}/{job.minimumSkill} · ₵ {job.basePay} · {job.durationMinutes / 60} ч.</small></div><button type="button" disabled={!venueOpen || !ready} onClick={() => onAction({ kind: "select-job", jobId: job.id, venueId: venue.id, employerName: venue.name, managerPersonId: manager?.id })}>{ready ? "Устроиться" : `Нужен ${skillLabel(job.skill)} ${job.minimumSkill}`}</button></article>;
+                })
+              )}
+              {venueWorkers.length ? <p className="venue-employment-people">Постоянные работники: {venueWorkers.slice(0, 3).map((person) => person.name).join(", ")}.</p> : null}
+            </section>
+          ) : null}
           {venueOperation.status === "insolvent" ? <p className="building-service-empty">Бизнес неплатёжеспособен. Касса закрыта, новые заказы и обслуживание остановлены.</p> : !venueOpen ? <p className="building-service-empty">Заведение сейчас не обслуживает посетителей.</p> : !venueQueueReady ? (
             <div className="venue-queue-card">
               <p>Перед заказом нужно дождаться кассы. Текущее ожидание: около {venueOperation.queue.estimatedWaitMinutes} мин.</p>
